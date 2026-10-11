@@ -351,14 +351,14 @@ struct BrowserWindow: View {
                     }
                 }.disabled(tab.pinned)
             }
-            Divider(); Button(chrome ? "Close browsing pane" : "Close tab") { model.closeTab(tab.id) }
+            Divider(); Button("Close tab") { model.closeTab(tab.id) }
         }
         .draggable(tab.id.uuidString)
         .dropDestination(for: String.self) { items, _ in
             guard let value = items.first, let id = UUID(uuidString: value) else { return false }
             return model.moveTab(id, before: tab.id)
         }
-        .accessibilityElement(children: .contain).accessibilityValue("\(tab.id == model.session.selectedTabID ? "Selected " : "")\(chrome ? "browsing pane" : "tab")")
+        .accessibilityElement(children: .contain).accessibilityValue("\(tab.id == model.session.selectedTabID ? "Selected " : "")tab")
         .padding(.leading, vertical && treeTabs ? CGFloat(model.session.ancestors(of: tab.id).count * 10) : 0)
     }
     private var newTabButton: some View { IconButton(title: hasChromePanes ? "New browsing pane" : "New tab", icon: "plus") { model.newTab(); focusAddress() } }
@@ -676,7 +676,7 @@ private struct BrowserSheetTerminationPolicy: NSViewRepresentable {
 
 /// Native window notifications provide the actual content width even when
 /// SwiftUI preference propagation is interrupted by presentation modifiers.
-private struct BrowserLayoutRegion: NSViewRepresentable {
+struct BrowserLayoutRegion: NSViewRepresentable {
     let identifier: String
     var onWindowWidth: (@MainActor (CGFloat) -> Void)? = nil
     func makeNSView(context: Context) -> RegionView {
