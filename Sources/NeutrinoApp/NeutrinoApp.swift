@@ -52,7 +52,7 @@ struct BrowserCommands: Commands {
         CommandGroup(after: .appInfo) {
             Button("Check for updates…") {
                 DistributionManager.shared.checkForUpdates(dataDirectory: app.dataDirectory)
-                browser?.sheet = .settings
+                browser?.sheet = .engines
             }.disabled(!app.ready || app.finalQuitDataFrozen)
         }
         CommandGroup(replacing: .saveItem) {
