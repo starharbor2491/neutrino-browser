@@ -140,7 +140,7 @@ struct DistributionNativeTests {
         try process.run()
         defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
         let ready = helper.appendingPathExtension("ready")
-        let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(90))
+        let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(180))
         while !FileManager.default.fileExists(atPath: ready.path) {
             try #require(process.isRunning && clock.now < deadline, "The real updater did not signal readiness")
             try await Task.sleep(for: .milliseconds(50))

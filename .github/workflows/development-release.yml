@@ -56,6 +56,12 @@ jobs:
         run: python3 scripts/native-tests.py -c release --filter DistributionNativeTests
       - name: Package compiled application ZIP and offline installer
         run: python3 scripts/package-release.py --development
+      - name: Require installed shell launch, saved data, and ordinary quit
+        timeout-minutes: 4
+        run: |
+          python3 scripts/installed-smoke.py
+          cp dist/installed-smoke.json dist/shell-acceptance.json
+          mv dist/smoke-data dist/shell-smoke-data
       # Full parity remains mandatory for consumer releases. Preview notes and
       # the attached failed/passed receipt expose this independent result.
       - name: Record full Blink and extension acceptance
@@ -65,20 +71,13 @@ jobs:
         env:
           NEUTRINO_CHROMIUM_WEBSTORE_TEST: '1'
           NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-runtime/Chromium-arm64.neutrinoengine
-        run: |
-          python3 scripts/installed-smoke.py --chromium-restart
-      - name: Preserve full Blink acceptance result
+        run: python3 scripts/installed-smoke.py --chromium-restart
+      - name: Preserve independent acceptance results
         if: always()
         run: |
           if [[ -f dist/installed-smoke.json ]]; then cp dist/installed-smoke.json dist/blink-acceptance.json; fi
           if [[ -f dist/smoke-app.log ]]; then cp dist/smoke-app.log dist/blink-acceptance.log; fi
-      - name: Require installed shell launch, saved data, and ordinary quit
-        timeout-minutes: 4
-        run: |
-          # Keep the failed/passed parity fixture as evidence and give the
-          # independent shell launch its own clean browsing data directory.
-          if [[ -d dist/smoke-data ]]; then mv dist/smoke-data dist/blink-smoke-data; fi
-          python3 scripts/installed-smoke.py
+          if [[ -f dist/shell-acceptance.json ]]; then cp dist/shell-acceptance.json dist/installed-smoke.json; fi
       - name: Assemble update catalog and preview notes
         env:
           BLINK_ACCEPTANCE: ${{ steps.blink.outcome }}
