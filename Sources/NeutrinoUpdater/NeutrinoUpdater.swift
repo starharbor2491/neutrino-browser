@@ -67,7 +67,7 @@ struct NeutrinoUpdater {
             let ready = helper.appendingPathExtension("ready")
             guard helper.deletingLastPathComponent() == journal.deletingLastPathComponent(),
                   helper.lastPathComponent.hasPrefix("NeutrinoUpdater-"),
-                  UUID(uuidString: String(helper.lastPathComponent.dropFirst(14))) != nil else {
+                  UUID(uuidString: String(helper.lastPathComponent.dropFirst("NeutrinoUpdater-".count))) != nil else {
                 throw ValidationError("The updater must be launched from its private staging directory.")
             }
             try Data("READY".utf8).write(to: ready, options: [.atomic])
