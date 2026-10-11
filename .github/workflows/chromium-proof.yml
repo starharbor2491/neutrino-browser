@@ -35,29 +35,29 @@ jobs:
       - name: Build pinned upstream sample with sandbox support
         id: build
         run: |
-          mkdir -p "$RUNNER_TEMP/radius-cef-proof"
+          mkdir -p "$RUNNER_TEMP/neutrino-cef-proof"
           python3 -u scripts/chromium-proof.py build --arch '${{ matrix.architecture }}' \
-            --work-dir "$RUNNER_TEMP/radius-cef-proof" 2>&1 | tee "$RUNNER_TEMP/radius-cef-proof/build.log"
+            --work-dir "$RUNNER_TEMP/neutrino-cef-proof" 2>&1 | tee "$RUNNER_TEMP/neutrino-cef-proof/build.log"
       - name: Probe Chrome-style sample on matching host architecture
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 3
         run: |
           python3 -u scripts/chromium-proof.py probe --arch '${{ matrix.architecture }}' --style chrome \
-            --work-dir "$RUNNER_TEMP/radius-cef-proof" 2>&1 | tee "$RUNNER_TEMP/radius-cef-proof/probe-chrome.log"
+            --work-dir "$RUNNER_TEMP/neutrino-cef-proof" 2>&1 | tee "$RUNNER_TEMP/neutrino-cef-proof/probe-chrome.log"
       - name: Probe native Alloy sample on matching host architecture
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 3
         run: |
           python3 -u scripts/chromium-proof.py probe --arch '${{ matrix.architecture }}' --style native-alloy \
-            --work-dir "$RUNNER_TEMP/radius-cef-proof" 2>&1 | tee "$RUNNER_TEMP/radius-cef-proof/probe-native-alloy.log"
+            --work-dir "$RUNNER_TEMP/neutrino-cef-proof" 2>&1 | tee "$RUNNER_TEMP/neutrino-cef-proof/probe-native-alloy.log"
       - name: Preserve provenance and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: CEF-proof-${{ matrix.architecture }}
           path: |
-            ${{ runner.temp }}/radius-cef-proof/*.json
-            ${{ runner.temp }}/radius-cef-proof/*.log
-            ${{ runner.temp }}/radius-cef-proof/profiles/**/cef.log
+            ${{ runner.temp }}/neutrino-cef-proof/*.json
+            ${{ runner.temp }}/neutrino-cef-proof/*.log
+            ${{ runner.temp }}/neutrino-cef-proof/profiles/**/cef.log
           if-no-files-found: warn
           retention-days: 14

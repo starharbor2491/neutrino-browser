@@ -10,7 +10,7 @@ function ping(tabId) {
     const results = await chrome.scripting.executeScript({
       target: {tabId},
       func: () => {
-        document.documentElement.dataset.radiusFixtureScripting = "ready";
+        document.documentElement.dataset.neutrinoFixtureScripting = "ready";
         return location.href;
       }
     });
@@ -33,7 +33,7 @@ function ping(tabId) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id || message?.source !== "radius-fixture") {
+  if (sender.id !== chrome.runtime.id || message?.source !== "neutrino-fixture") {
     return false;
   }
   const tabId = sender.tab?.id;

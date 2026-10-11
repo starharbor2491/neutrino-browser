@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.layout-compact",
+  "name": "Compact Workspace",
+  "version": 1,
+  "summary": "Tabs and Neutrino controls below the page, with the sidebar hidden.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "layout",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "declarative"
+}

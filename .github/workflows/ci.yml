@@ -1,4 +1,4 @@
-name: Build and test Radius
+name: Build and test Neutrino
 on:
   push:
     branches: [main]
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: radius-${{ github.ref }}
+  group: neutrino-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   macos:
@@ -19,24 +19,26 @@ jobs:
         run: swift --version
       - name: Test core and validate packages
         run: ./scripts/test.sh
-      - name: Build native app
+      - name: Build WebKit shell development app
+        env:
+          NEUTRINO_WEBKIT_DEVELOPMENT_ONLY: "1"
         run: ./scripts/build-app.sh
       - name: Verify native integration in release configuration
         env:
-          RADIUS_DISTRIBUTION_TEST_APP: ${{ github.workspace }}/dist/Radius.app
-        run: python3 scripts/native-tests.py -c release --filter 'BrowserIntegrationTests|ResourceModuleTests|ReaderModuleTests|BehaviorModuleTests|DistributionNativeTests|DownloadsTests|ProfilesIntegrationTests|ChromiumProfileDataTests'
+          NEUTRINO_DISTRIBUTION_TEST_APP: ${{ github.workspace }}/dist/Neutrino.app
+        run: python3 scripts/native-tests.py -c release --filter 'BrowserIntegrationTests|WorkspaceIntegrationTests|ResourceModuleTests|ReaderModuleTests|BehaviorModuleTests|DistributionNativeTests|DownloadsTests|ProfilesIntegrationTests|ChromiumProfileDataTests'
       - name: Package graphical development installer
-        run: python3 scripts/package-release.py --development
+        run: python3 scripts/package-release.py --development --allow-webkit-development
       - name: Launch packaged app and capture native screens
         timeout-minutes: 3
         run: python3 scripts/installed-smoke.py
       - name: Archive application
-        run: ditto -c -k --sequesterRsrc --keepParent dist/Radius.app dist/Radius-macOS.zip
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Neutrino.app dist/Neutrino-macOS.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: Radius-macOS-local-build
+          name: Neutrino-macOS-local-build
           path: |
-            dist/Radius-macOS.zip
+            dist/Neutrino-macOS.zip
             dist/*.dmg
             dist/*-package.json
             dist/installed-smoke.json
@@ -45,13 +47,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Radius-native-screenshots
+          name: Neutrino-native-screenshots
           path: dist/screenshots/*.png
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Radius-launch-diagnostics
+          name: Neutrino-launch-diagnostics
           path: |
             dist/smoke-*.log
             dist/smoke-sample.txt

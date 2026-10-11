@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.theme-material",
+  "name": "Material Theme",
+  "version": 1,
+  "summary": "Lightly tinted surfaces and rounded controls that follow your Mac’s appearance.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "theme",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "declarative"
+}

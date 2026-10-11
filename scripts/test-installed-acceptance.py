@@ -16,37 +16,37 @@ spec.loader.exec_module(installed)
 
 
 class InstalledAcceptanceTests(unittest.TestCase):
-    def check_log(self, content, acceptance='Radius packaged-app smoke test passed.'):
+    def check_log(self, content, acceptance='Neutrino packaged-app smoke test passed.'):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'app.log'
             log.write_text(content)
             installed.verify_normal_quit(log, acceptance)
 
     def test_acceptance_then_termination_reply_is_required(self):
-        self.check_log('Radius packaged-app smoke test passed.\n'
-                       'Radius app delegate: applicationShouldTerminate entered\n'
-                       'Radius app delegate: Sending termination reply: true\n')
+        self.check_log('Neutrino packaged-app smoke test passed.\n'
+                       'Neutrino app delegate: applicationShouldTerminate entered\n'
+                       'Neutrino app delegate: Sending termination reply: true\n')
 
     def test_success_message_without_normal_quit_is_rejected(self):
         with self.assertRaises(ValueError):
-            self.check_log('Radius packaged-app smoke test passed.\n')
+            self.check_log('Neutrino packaged-app smoke test passed.\n')
 
     def test_termination_before_acceptance_is_rejected(self):
         with self.assertRaises(ValueError):
-            self.check_log('Radius app delegate: applicationShouldTerminate entered\n'
-                           'Radius app delegate: Sending termination reply: true\n'
-                           'Radius packaged-app smoke test passed.\n')
+            self.check_log('Neutrino app delegate: applicationShouldTerminate entered\n'
+                           'Neutrino app delegate: Sending termination reply: true\n'
+                           'Neutrino packaged-app smoke test passed.\n')
 
     def test_refused_termination_is_rejected(self):
         with self.assertRaises(ValueError):
-            self.check_log('Radius packaged-app smoke test passed.\n'
-                           'Radius app delegate: applicationShouldTerminate entered\n'
-                           'Radius app delegate: Sending termination reply: false\n')
+            self.check_log('Neutrino packaged-app smoke test passed.\n'
+                           'Neutrino app delegate: applicationShouldTerminate entered\n'
+                           'Neutrino app delegate: Sending termination reply: false\n')
 
     def test_restart_requires_its_own_normal_quit(self):
         self.check_log('Chromium real-process restart acceptance passed\n'
-                       'Radius app delegate: applicationShouldTerminate entered\n'
-                       'Radius app delegate: Sending termination reply: true\n',
+                       'Neutrino app delegate: applicationShouldTerminate entered\n'
+                       'Neutrino app delegate: Sending termination reply: true\n',
                        'Chromium real-process restart acceptance passed')
 
     def test_watchdog_rejects_term_even_when_app_exits_zero(self):
@@ -56,7 +56,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
             root = Path(directory)
             scripts = root / 'scripts'
             commands = root / 'commands'
-            executable = root / 'Radius.app/Contents/MacOS/Radius'
+            executable = root / 'Neutrino.app/Contents/MacOS/Neutrino'
             scripts.mkdir()
             commands.mkdir()
             executable.parent.mkdir(parents=True)
@@ -72,19 +72,19 @@ class InstalledAcceptanceTests(unittest.TestCase):
             curl.write_text('#!/bin/sh\nexit 0\n')
             executable.write_text('#!' + sys.executable + '\nimport signal, sys, time\n'
                                   'signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n'
-                                  'print("Radius packaged-app smoke test passed.", flush=True)\n'
+                                  'print("Neutrino packaged-app smoke test passed.", flush=True)\n'
                                   'while True: time.sleep(1)\n')
             for path in (sleeper, curl, executable):
                 path.chmod(0o755)
             environment = installed.os.environ.copy()
-            for name in ('RADIUS_CHROMIUM_PACKAGE', 'RADIUS_SMOKE_LAUNCH_RECORD', 'RADIUS_SMOKE_PID_RECORD'):
+            for name in ('NEUTRINO_CHROMIUM_PACKAGE', 'NEUTRINO_SMOKE_LAUNCH_RECORD', 'NEUTRINO_SMOKE_PID_RECORD'):
                 environment.pop(name, None)
             environment.update(PATH=str(commands) + installed.os.pathsep + environment['PATH'],
-                               RADIUS_SMOKE_APP_PATH=str(root / 'Radius.app'))
+                               NEUTRINO_SMOKE_APP_PATH=str(root / 'Neutrino.app'))
             result = subprocess.run(['bash', str(scripts / 'smoke-app.sh')], env=environment,
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
-            self.assertIn('Radius packaged-app smoke test passed.', result.stdout)
+            self.assertIn('Neutrino packaged-app smoke test passed.', result.stdout)
             self.assertTrue((root / 'dist/smoke-timeout.txt').is_file())
 
 

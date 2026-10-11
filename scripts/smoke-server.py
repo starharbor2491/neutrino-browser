@@ -10,7 +10,7 @@ from threading import Event
 
 retry_enabled = Event()
 
-PAGE = b'''<!doctype html><html><head><title>Radius HTTP fixture</title></head>
+PAGE = b'''<!doctype html><html><head><title>Neutrino HTTP fixture</title></head>
 <body><main><h1>Local browser check</h1><p>This page is served from loopback, without internet access.</p>
 <a href="/next">Navigate</a><a href="/popup" target="_blank">Open a tab</a>
 <form action="/submitted" method="post" target="_blank"><input name="test" value="preserved"><button>Submit</button></form>
@@ -21,7 +21,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/slow-download":
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Disposition", 'attachment; filename="radius-download-fixture.bin"')
+            self.send_header("Content-Disposition", 'attachment; filename="neutrino-download-fixture.bin"')
             self.send_header("Content-Length", str(1024 * 1024))
             self.end_headers()
             try:
@@ -62,10 +62,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = escape(submitted.decode("utf-8", errors="replace"))
         page = (
-            "<!doctype html><html><head><title>Radius POST fixture</title></head>"
+            "<!doctype html><html><head><title>Neutrino POST fixture</title></head>"
             '<body><output id="request-method">POST</output>'
             f'<pre id="submitted-body">{body}</pre>'
-            "<script>if (window.opener) window.opener.radiusPostPopup = window;</script>"
+            "<script>if (window.opener) window.opener.neutrinoPostPopup = window;</script>"
             "</body></html>"
         ).encode("utf-8")
         self.send_response(200)

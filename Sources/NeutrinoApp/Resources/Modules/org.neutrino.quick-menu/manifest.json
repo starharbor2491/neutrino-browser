@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.quick-menu",
+  "name": "Quick Menu",
+  "version": 1,
+  "summary": "Quick access to new tabs, bookmarks, customization, and modules.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "menu",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "declarative"
+}

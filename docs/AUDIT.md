@@ -1,3 +1,5 @@
+> Historical predecessor audit. These receipts do not validate the Neutrino rebuild, renamed binaries, custom Blink host, or new product features.
+
 # Radius v1 review and acceptance
 
 Radius v1 includes WebKit and optional normal Chrome windows with native grouped tabs, 18 removable module packages, graphical theme/layout editing, isolated profiles, private browsing, recovery, and verified whole-application installation. See [release status](RELEASE_STATUS.md), [Chrome integration](CHROMIUM.md), and [design decisions](DESIGN.md).

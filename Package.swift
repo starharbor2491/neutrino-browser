@@ -2,32 +2,32 @@
 // SPDX-License-Identifier: MPL-2.0
 import PackageDescription
 
-var products: [Product] = [.library(name: "RadiusCore", targets: ["RadiusCore"]),
-    .executable(name: "RadiusReaderWorker", targets: ["RadiusReaderWorker"])]
+var products: [Product] = [.library(name: "NeutrinoCore", targets: ["NeutrinoCore"]),
+    .executable(name: "NeutrinoReaderWorker", targets: ["NeutrinoReaderWorker"])]
 var targets: [Target] = [
     .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
-    .target(name: "RadiusCore", dependencies: ["CSQLite"]),
-    .testTarget(name: "RadiusCoreTests", dependencies: ["RadiusCore"]),
-    .target(name: "RadiusReaderLogic", dependencies: ["RadiusCore"]),
-    .executableTarget(name: "RadiusReaderWorker", dependencies: ["RadiusCore", "RadiusReaderLogic"]),
-    .testTarget(name: "RadiusReaderTests", dependencies: ["RadiusCore", "RadiusReaderLogic"])
+    .target(name: "NeutrinoCore", dependencies: ["CSQLite"]),
+    .testTarget(name: "NeutrinoCoreTests", dependencies: ["NeutrinoCore"]),
+    .target(name: "NeutrinoReaderLogic", dependencies: ["NeutrinoCore"]),
+    .executableTarget(name: "NeutrinoReaderWorker", dependencies: ["NeutrinoCore", "NeutrinoReaderLogic"]),
+    .testTarget(name: "NeutrinoReaderTests", dependencies: ["NeutrinoCore", "NeutrinoReaderLogic"])
 ]
 #if os(macOS)
-products.append(.executable(name: "Radius", targets: ["RadiusApp"]))
-products.append(.executable(name: "RadiusResourceMonitor", targets: ["RadiusResourceMonitor"]))
-products.append(.executable(name: "RadiusMemoryMonitor", targets: ["RadiusMemoryMonitor"]))
-products.append(.executable(name: "RadiusUpdater", targets: ["RadiusUpdater"]))
-targets.append(.target(name: "RadiusDistribution", dependencies: ["RadiusCore"]))
-targets.append(.executableTarget(name: "RadiusUpdater", dependencies: ["RadiusCore", "RadiusDistribution"]))
-targets.append(.target(name: "RadiusResourcePlatform", dependencies: ["RadiusCore"]))
-targets.append(.executableTarget(name: "RadiusResourceMonitor", dependencies: ["RadiusCore", "RadiusResourcePlatform"]))
-targets.append(.executableTarget(name: "RadiusMemoryMonitor", dependencies: ["RadiusCore", "RadiusResourcePlatform"]))
-targets.append(.target(name: "RadiusEngineABI", publicHeadersPath: "include",
+products.append(.executable(name: "Neutrino", targets: ["NeutrinoApp"]))
+products.append(.executable(name: "NeutrinoResourceMonitor", targets: ["NeutrinoResourceMonitor"]))
+products.append(.executable(name: "NeutrinoMemoryMonitor", targets: ["NeutrinoMemoryMonitor"]))
+products.append(.executable(name: "NeutrinoUpdater", targets: ["NeutrinoUpdater"]))
+targets.append(.target(name: "NeutrinoDistribution", dependencies: ["NeutrinoCore"]))
+targets.append(.executableTarget(name: "NeutrinoUpdater", dependencies: ["NeutrinoCore", "NeutrinoDistribution"]))
+targets.append(.target(name: "NeutrinoResourcePlatform", dependencies: ["NeutrinoCore"]))
+targets.append(.executableTarget(name: "NeutrinoResourceMonitor", dependencies: ["NeutrinoCore", "NeutrinoResourcePlatform"]))
+targets.append(.executableTarget(name: "NeutrinoMemoryMonitor", dependencies: ["NeutrinoCore", "NeutrinoResourcePlatform"]))
+targets.append(.target(name: "NeutrinoEngineABI", publicHeadersPath: "include",
     linkerSettings: [.linkedFramework("AppKit")]))
-targets.append(.executableTarget(name: "RadiusApp", dependencies: ["RadiusCore", "RadiusEngineABI", "RadiusDistribution"],
+targets.append(.executableTarget(name: "NeutrinoApp", dependencies: ["NeutrinoCore", "NeutrinoEngineABI", "NeutrinoDistribution"],
     resources: [.copy("Resources")]))
-targets.append(.testTarget(name: "RadiusAppTests", dependencies: ["RadiusApp"]))
+targets.append(.testTarget(name: "NeutrinoAppTests", dependencies: ["NeutrinoApp"]))
 #endif
 
-let package = Package(name: "Radius", platforms: [.macOS(.v14)],
+let package = Package(name: "Neutrino", platforms: [.macOS(.v14)],
     products: products, targets: targets, swiftLanguageModes: [.v6])

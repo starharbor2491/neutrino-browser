@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.layout-sidebar",
+  "name": "Sidebar Workspace",
+  "version": 1,
+  "summary": "Vertical tabs and a sidebar on the left, with bookmarks above the page.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "layout",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "declarative"
+}

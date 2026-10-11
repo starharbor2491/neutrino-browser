@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.icons-outline",
+  "name": "Outline Icons",
+  "version": 1,
+  "summary": "Simple outline icons for navigation, bookmarks, history, and modules.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "icons",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "declarative"
+}

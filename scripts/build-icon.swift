@@ -13,16 +13,16 @@ for size in [16, 32, 128, 256, 512] {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         let bounds = NSRect(x: 0, y: 0, width: pixels, height: pixels)
-        NSColor(calibratedRed: 0.08, green: 0.19, blue: 0.33, alpha: 1).setFill()
+        NSColor(calibratedRed: 0.35, green: 0.25, blue: 0.64, alpha: 1).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: CGFloat(pixels) * 0.045, dy: CGFloat(pixels) * 0.045), xRadius: CGFloat(pixels) * 0.21, yRadius: CGFloat(pixels) * 0.21).fill()
-        let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: CGFloat(pixels) * 0.245, dy: CGFloat(pixels) * 0.245))
-        ring.lineWidth = CGFloat(pixels) * 0.075
-        NSColor.white.setStroke(); ring.stroke()
-        let ray = NSBezierPath()
-        ray.move(to: NSPoint(x: CGFloat(pixels) * 0.5, y: CGFloat(pixels) * 0.5))
-        ray.line(to: NSPoint(x: CGFloat(pixels) * 0.785, y: CGFloat(pixels) * 0.215))
-        ray.lineWidth = CGFloat(pixels) * 0.075; ray.lineCapStyle = .round
-        NSColor(calibratedRed: 0.28, green: 0.88, blue: 0.78, alpha: 1).setStroke(); ray.stroke()
+        let star = NSBezierPath()
+        let c = CGFloat(pixels) * 0.5, reach = CGFloat(pixels) * 0.30, inner = CGFloat(pixels) * 0.075
+        star.move(to: NSPoint(x: c, y: c + reach))
+        star.curve(to: NSPoint(x: c + reach, y: c), controlPoint1: NSPoint(x: c + inner, y: c + inner), controlPoint2: NSPoint(x: c + inner, y: c + inner))
+        star.curve(to: NSPoint(x: c, y: c - reach), controlPoint1: NSPoint(x: c + inner, y: c - inner), controlPoint2: NSPoint(x: c + inner, y: c - inner))
+        star.curve(to: NSPoint(x: c - reach, y: c), controlPoint1: NSPoint(x: c - inner, y: c - inner), controlPoint2: NSPoint(x: c - inner, y: c - inner))
+        star.curve(to: NSPoint(x: c, y: c + reach), controlPoint1: NSPoint(x: c - inner, y: c + inner), controlPoint2: NSPoint(x: c - inner, y: c + inner))
+        star.close(); NSColor.white.setFill(); star.fill()
         NSGraphicsContext.restoreGraphicsState()
         guard let png = bitmap.representation(using: .png, properties: [:]) else { fatalError("Cannot render icon") }
         let suffix = scale == 2 ? "@2x" : ""

@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.standard-tabs",
+  "name": "Standard Tabs",
+  "version": 1,
+  "summary": "A flat tab list without nested branches.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "tabSystem",
+  "dependencies": [],
+  "defaultInstalled": true,
+  "runtime": "declarative"
+}

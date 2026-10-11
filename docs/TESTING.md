@@ -1,33 +1,47 @@
-# Validation
+# Neutrino verification
 
-Run `./scripts/test.sh` on macOS or Linux with Swift 6 and SQLite development headers. Native debug and release CI reject an exit without a completed Swift Testing suite. On macOS, `./scripts/build-app.sh` builds the universal app and `python3 scripts/package-release.py --development` creates its graphical installer. CI runs `python3 scripts/installed-smoke.py` against the actual DMG: it verifies all-architecture signatures and package receipts, mounts the DMG read-only, copies Radius to a disposable Applications directory, detaches the image, and launches that installed copy with isolated data. Acceptance requires ordinary quit, no surviving owned helpers, safe app removal, and unchanged user data. A watchdog intervention fails even if TERM produces exit status zero; first launch and Chromium restart each require an application-delegate termination request and affirmative reply after their own acceptance completes. Six portable regressions exercise the driver, including a real TERM-handling process that exits zero. Failed diagnostics are retained separately from accepted installers.
+Run `./scripts/test.sh` with Swift 6 and SQLite development headers. macOS additionally builds and tests the native app targets. Linux runs portable core/reader tests only.
 
-The native suites use real WebKit stores, worker processes and SQLite failures. They exercise Home/Back/Forward, failed-address Retry, final-save refusal without losing a live form, resumed autosaving, startup recovery, profile cleanup and module removal. Chromium acceptance separately checks real Chrome input, the local MV3 fixture, a genuine Web Store permission prompt and installation, and persistence across a full app restart. Normal startup opens no diagnostic port. Grouped Chrome checks preserve native tab/window identity through inner close, native File-menu commands, Home/Back/Forward, safe session restoration, popup POST/opener behavior and ownership loss during a slow download. An unconfirmed writer remains pending until a genuine terminal callback or successful Chromium shutdown; Radius retains ownership of its cleanup path even if the engine already removed the file. Any surviving staging file must disappear after shutdown.
+## Verified in this workspace
 
-`installed-smoke.json` records the tested checkout, workflow source, installer hash and installation gates. `smoke-performance.json` records startup/navigation upper bounds and five-second CPU/RSS samples with their process scope. These measurements are diagnostic observations on CI Macs with warmed files; they do not establish energy use, physical footprint, graphics speed, input latency or a comparison with other browsers.
+On Linux with Swift 6.2.1:
+- 70 portable Swift tests passed.
+- Six installed-acceptance and six core-publication Python regressions passed.
+- All 18 bundled module packages validated.
 
-## Clean-Mac checklist
+The portable suite covers database round trips/recovery, modules and transactional rollback, distribution trust policy, reader bounds, Profiles/Spaces, live-tab ownership, archiving, blocker host boundaries, AI endpoint restrictions, and foreign/duplicate organization proposals.
 
-- Install/open the app from the artifact with ordinary macOS behavior. Never disable Gatekeeper to make the test pass; a distributable release needs signing and notarization.
-- Navigate to an HTTPS page, use back/forward, redirect, reload/stop, search, find, zoom, and standard text editing shortcuts. Validate main-frame errors without replacing a working page for a subframe failure.
-- Open two regular windows and two private windows. Confirm navigation and command shortcuts act in the focused window. Close/reopen tabs, pin/unpin and reorder tabs. Quit/relaunch and check session recovery.
-- Create profiles A and B. Sign in to a test site in A. Reopen it in B and in a private window; confirm it is signed out. Close private windows and check history/session/database contain no private URLs.
-- Export/import Safari, Chrome, and Firefox bookmarks HTML. Verify Unicode, entities, duplicates, invalid schemes and malformed files.
-- Download a new file, cancel a download, replace an existing file through the destination picker, reject an invalid destination, and close a window with an active download. Do not auto-open downloaded files.
-- Trigger a JavaScript alert/confirm/prompt and a user-clicked new window. Check site origin labeling, permission denial and allowed camera/microphone behavior.
-- Enable/disable/uninstall each package. Open Resources and replace Resource Monitor with Memory Breakdown; verify the old process exits and only the chosen provider runs. Close the panel, disable the provider, and uninstall it; confirm processes exit and installed worker files are removed from Application Support. Factory reinstall copies remain in the sealed app bundle. Retain notes on removal. Relaunch and update the app; intentionally disabled/removed modules must stay so.
-- Preview and apply each design system, light/dark/system mode, accent, transparency, density, and corners. Test system Reduce Transparency, Increase Contrast, Reduce Motion, and keyboard-only/VoiceOver operation.
-- Place tabs at every edge, move navigation to the bottom, open each sidebar on both sides, resize sidebar through Customize, hide it, and restore defaults through Recovery.
-- Enable tree tabs; create children, collapse/expand, reparent, pin, drag, and move siblings. The selected tab must remain visible and pinned roots must remain first. Open side-by-side and stacked panes; navigate each independently, switch with mouse and keyboard, close either pane's tab, and restore sessions. Address/find/zoom/reader actions must follow the active pane.
-- Preview a split layout from a one-tab window, cancel, and verify the original tab/session is unchanged. Return a window to one pane, apply appearance changes, and confirm it stays in one pane; explicitly select Split view to reopen it.
-- Save/export/import setups and verify no private data enters the exported file. Cancel previews and use Undo.
-- Simulate an invalid module manifest and an unreadable library database in a disposable test account. Native recovery must still open; backups must survive repair. Simulate a denied disk write; failed saving must be visible and quit must offer keeping the app open.
-- Simulate web-content process termination. Native browser controls, settings, Modules, Customize, and Recovery must remain usable.
+Swift syntax parsing checks grammar, not macOS type checking or execution. No macOS native tests or screenshots have run for the rebuilt Neutrino in this environment. Update this record if the source changes or more checks run.
 
-For the optional Chromium build, reopen an HTTP/HTTPS tab explicitly in each engine, confirm the reload notice and separate sign-ins, and change the default for new tabs. Closing the last tab and opening the second split pane must honor that default; Duplicate must retain the source engine. Check normal Chrome inner-tab creation/closure, active/background session restoration, native toolbar actions and extension-created auxiliary windows. A background extension tab in a blank browsing pane must become visible and remain in the saved group. Check per-profile and separate-private-window cookies/local storage, popup openers, reader, capture, errors, reload/back/forward, downloads, native media prompts, and close/quit while both engines are mounted. Verify real Chrome toolbar shortcuts and extension-sheet visibility. Leave Modules, Customize, Settings, Recovery, Reader and the extension manager open when choosing Quit: saving/download confirmation and normal engine shutdown must still run; cancelling Quit must retain usable pages. A missing runtime must show native recovery even on a blank tab. Review the scope before clearing website data: resetting Chromium removes its native bookmarks, history, extensions and settings, while Radius-owned library data remains. Restart closes Chromium before erasing its profile. Consumer engine and extension acceptance is in CHROMIUM.md.
+## Native and installed gates
 
-## Reader package
+On an Apple Silicon Mac:
 
-Reader captures at most 1 MB of serialized page HTML. The trusted one-shot worker parses text without executing scripts, rejects DTD/entity declarations, bounds traversal/output, and exits. This is best-effort article/main/body extraction; it does not promise Mozilla Readability compatibility.
+```sh
+./scripts/test.sh
+./scripts/build-app.sh
+python3 scripts/package-release.py --development
+python3 scripts/installed-smoke.py --chromium-restart
+```
 
-Verify that disabling or uninstalling Reader cancels an extraction and removes its installed worker, and that reinstalling restores operation. Dismiss the sheet or close/change its source tab during extraction; no worker should remain running and no old result should appear under a new page title. Private extraction should leave no saved reader document, history entry, session, or notes. Test complex, malformed, multilingual, and dynamically generated pages. Oversized pages should show a usable explanation while browsing remains available.
+The packaged smoke runner also captures all eight guided setup screens without completing the wizard or accessing a real account; those captures still require macOS execution and visual review.
+
+Native workspace tests use a real WebKit document to check live-tab identity, unsaved form/JavaScript preservation, callback rewiring, shared descriptors, per-Space setups, and inactive Profile cleanup. Existing services retain real store/worker/download/write-failure tests.
+
+Blink acceptance must check Neutrino-owned Command-T/W/L behavior, child geometry/focus, retained documents, navigation/retry, popup POST/opener behavior, private/Profile separation, Reader/capture, download terminal ownership, and ordinary shutdown. Full MV3 and genuine Web Store installation/restart checks remain mandatory. Old inner-tab/group checks describe extension API compatibility, not the default browser UI.
+
+The installed driver verifies receipt bytes, sealed code, read-only mounting, payload closure, copy/detach/launch, actual application-delegate termination acceptance, helper exit, safe app removal, and preserved external user data. Watchdog TERM/forced cleanup fails acceptance even with exit code zero.
+
+## Manual core acceptance
+
+- Complete setup before browsing; optional import/AI can remain unused; persist setup failures visibly.
+- Review default shell, start, settings, editor, and setup on actual macOS in multiple sizes/light/dark. Test VoiceOver, keyboard navigation, contrast, reduced motion/transparency, and recovery.
+- Share a Space across two windows. Transfer a form/media tab without reload. Switch Spaces and Profiles, duplicate, pin/file/reorder, archive/restore, split, close/reopen, quit/relaunch.
+- Verify safe address/search/history/bookmarks, find/zoom, errors/retry, downloads/cancel/replace, private isolation, permission origins, and Profile cleanup.
+- Verify complete local password/save/update/autofill and ad/tracker filtering workflows before marking those core rows complete; current manual filling/starter rules are partial.
+- Install/update/disable/remove extensions; verify actions, panels, settings, permissions, workers, and tab/window APIs in the custom host.
+- Verify licensed CDM/codecs and representative protected streaming, including playback after install/restart.
+- Test BYOK and local endpoints, explicit page/tab sharing, rejected organization proposals, stale proposal rejection, and reviewed application. Test OpenAI account sign-in/refresh/model discovery/inference/revocation; xAI requires its own supported registration.
+- Verify a complete offline signed/notarized DMG on a clean Mac with normal Gatekeeper behavior, engine/helper payloads, first-run setup, trusted update/restart, and rollback.
+
+Record tested source/binary and actual outcomes. A skipped gate, parser pass, or historical receipt cannot certify the core release. See [PARITY.md](PARITY.md).

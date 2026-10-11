@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Build an optional Radius normal Chrome window adapter from the pinned upstream CEF SDK.
+"""Build Neutrino's Chrome-style Views adapter from the pinned upstream CEF SDK.
 
 This is a development package. Ad-hoc signatures verify local integrity; they do
 not provide Developer ID publisher trust or notarized consumer distribution.
@@ -27,7 +27,7 @@ def build(work, arch):
     proof.require_mac()
     archive, stem = proof.fetch_archive(work, arch)
     source = work / stem
-    marker = source / ".radius-extracted-sha256"
+    marker = source / ".neutrino-extracted-sha256"
     expected_digest = proof.ARCHIVES[arch][1]
     if not marker.is_file() or marker.read_text().strip() != expected_digest:
         # An interrupted extraction must never be mistaken for a complete SDK.
@@ -42,15 +42,15 @@ def build(work, arch):
     output = work / ("adapter-build-" + arch)
     proof.checked(["cmake", "-S", ROOT / "ChromiumRuntime", "-B", output, "-G", "Xcode",
                    "-DCEF_ROOT=" + str(source), "-DPROJECT_ARCH=" + arch, "-DUSE_SANDBOX=ON"])
-    proof.checked(["cmake", "--build", output, "--config", "Release", "--target", "RadiusChromiumBridge", "--", "-quiet"])
-    package = work / ("Chromium-" + arch + ".radiusengine")
+    proof.checked(["cmake", "--build", output, "--config", "Release", "--target", "NeutrinoChromiumBridge", "--", "-quiet"])
+    package = work / ("Chromium-" + arch + ".neutrinoengine")
     if package.exists():
         shutil.rmtree(package)
     binaries = package / "Contents/MacOS"
     frameworks = package / "Contents/Frameworks"
     binaries.mkdir(parents=True)
     frameworks.mkdir(parents=True)
-    shutil.copy2(output / "Release/RadiusChromiumBridge.dylib", binaries)
+    shutil.copy2(output / "Release/NeutrinoChromiumBridge.dylib", binaries)
     framework = source / "Release/Chromium Embedded Framework.framework"
     # Match CEF's COPY_MAC_FRAMEWORK macro: the SDK is flat; applications use
     # a versioned macOS framework with these standard relative symlinks.
@@ -60,7 +60,7 @@ def build(work, arch):
     for name in ("Chromium Embedded Framework", "Libraries", "Resources"):
         (packaged_framework / name).symlink_to("Versions/A/" + name)
     (packaged_framework / "Versions/Current").symlink_to("A")
-    helpers = list((output / "Release").glob("RadiusChromium Helper*.app"))
+    helpers = list((output / "Release").glob("NeutrinoChromium Helper*.app"))
     if len(helpers) != 5:
         raise RuntimeError(f"Expected five sandbox helper variants, found {len(helpers)}")
     for helper in helpers:
@@ -72,38 +72,38 @@ def build(work, arch):
         if notice.is_file():
             shutil.copy2(notice, legal / notice.name)
     for name in ("LICENSE", "COPYING.MPL"):
-        shutil.copy2(ROOT / name, legal / ("Radius-" + name))
-    # A proper nested code bundle can be sealed by the containing Radius app.
+        shutil.copy2(ROOT / name, legal / ("Neutrino-" + name))
+    # A proper nested code bundle can be sealed by the containing Neutrino app.
     (package / "Contents/Info.plist").write_bytes(plistlib.dumps({
-        "CFBundleIdentifier": "org.radius.chromium", "CFBundlePackageType": "BNDL",
-        "CFBundleExecutable": "RadiusChromiumBridge.dylib", "CFBundleName": "Radius Chromium",
+        "CFBundleIdentifier": "org.neutrino.chromium", "CFBundlePackageType": "BNDL",
+        "CFBundleExecutable": "NeutrinoChromiumBridge.dylib", "CFBundleName": "Neutrino Chromium",
         "CFBundleVersion": "1", "CFBundleShortVersionString": proof.VERSION,
     }))
     # Sign nested code before its containers, using local ad-hoc identities.
-    for helper in frameworks.glob("RadiusChromium Helper*.app"):
+    for helper in frameworks.glob("NeutrinoChromium Helper*.app"):
         proof.checked(["codesign", "--force", "--sign", "-", helper])
         proof.checked(["codesign", "--verify", "--strict", helper])
     proof.checked(["codesign", "--force", "--sign", "-", packaged_framework])
-    proof.checked(["lipo", binaries / "RadiusChromiumBridge.dylib", "-verify_arch", arch])
-    manifest = {"format": 2, "abi": 4, "runtimeStyle": "chrome", "architecture": arch, "cefVersion": proof.VERSION}
+    proof.checked(["lipo", binaries / "NeutrinoChromiumBridge.dylib", "-verify_arch", arch])
+    manifest = {"format": 2, "abi": 5, "runtimeStyle": "chromeViews", "architecture": arch, "cefVersion": proof.VERSION}
     (package / "Contents/Resources/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     proof.checked(["codesign", "--force", "--sign", "-", package])
     proof.checked(["codesign", "--verify", "--deep", "--strict", package])
-    source_files = [ROOT / "ChromiumRuntime/RadiusChromiumBridge.mm", ROOT / "ChromiumRuntime/Helper.cc",
+    source_files = [ROOT / "ChromiumRuntime/NeutrinoChromiumBridge.mm", ROOT / "ChromiumRuntime/Helper.cc",
                     ROOT / "ChromiumRuntime/CMakeLists.txt", ROOT / "ChromiumRuntime/Helper-Info.plist.in",
-                    ROOT / "Sources/RadiusEngineABI/include/RadiusEngineABI.h", Path(__file__).resolve()]
+                    ROOT / "Sources/NeutrinoEngineABI/include/NeutrinoEngineABI.h", Path(__file__).resolve()]
     source_digests = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_files}
     try:
-        radius_commit = subprocess.check_output(["git", "-C", ROOT, "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
+        neutrino_commit = subprocess.check_output(["git", "-C", ROOT, "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
     except (OSError, subprocess.CalledProcessError):
-        radius_commit = None
+        neutrino_commit = None
     evidence = {"package": str(package), "architecture": arch, "cefVersion": proof.VERSION,
-                "radiusCommit": radius_commit, "adapterSourceSHA256": source_digests,
+                "neutrinoCommit": neutrino_commit, "adapterSourceSHA256": source_digests,
                 "archiveSHA256": proof.ARCHIVES[arch][1], "sandbox": True,
-                "radiusAdapter": True, "radiusEmbeddedRuntimeValidated": False,
+                "neutrinoAdapter": True, "neutrinoEmbeddedRuntimeValidated": False,
                 "chromeExtensions": False, "developerID": False, "notarized": False,
                 "hostArchitecture": platform.machine()}
-    (work / ("radius-adapter-" + arch + ".json")).write_text(json.dumps(evidence, indent=2) + "\n")
+    (work / ("neutrino-adapter-" + arch + ".json")).write_text(json.dumps(evidence, indent=2) + "\n")
     print("Development package:", package, flush=True)
 
 
@@ -115,20 +115,20 @@ def embed(package, app):
     if manifest_path.stat().st_size > 4096 or not manifest_path.is_file():
         raise ValueError("Invalid Chromium package manifest")
     manifest = json.loads(manifest_path.read_text())
-    if (manifest.get("format") != 2 or manifest.get("abi") != 4 or manifest.get("runtimeStyle") != "chrome" or
+    if (manifest.get("format") != 2 or manifest.get("abi") != 5 or manifest.get("runtimeStyle") != "chromeViews" or
             manifest.get("cefVersion") != proof.VERSION or manifest.get("architecture") not in proof.ARCHIVES):
         raise ValueError("Incompatible Chromium development package")
     for path in package.rglob("*"):
         if not path.resolve(strict=True).is_relative_to(package):
             raise ValueError("A Chromium package link escapes its bundle")
     proof.checked(["codesign", "--verify", "--deep", "--strict", package])
-    destination = app.resolve(strict=True) / "Contents/Frameworks/Chromium.radiusengine"
+    destination = app.resolve(strict=True) / "Contents/Frameworks/Chromium.neutrinoengine"
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         shutil.rmtree(destination)
     proof.checked(["ditto", package, destination])
     proof.checked(["codesign", "--verify", "--deep", "--strict", destination])
-    print("Embedded Chromium for " + manifest["architecture"] + "; other architectures use WebKit.", flush=True)
+    print("Embedded Blink for " + manifest["architecture"], flush=True)
 
 
 if __name__ == "__main__":

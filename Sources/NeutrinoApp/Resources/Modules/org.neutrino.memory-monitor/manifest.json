@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.memory-monitor",
+  "name": "Memory Breakdown",
+  "version": 1,
+  "summary": "Replace Resource Monitor with detailed active, wired, compressed, inactive, and free memory measurements.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "resourceMonitor",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "nativeResourceWorker"
+}

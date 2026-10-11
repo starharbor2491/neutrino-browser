@@ -4,7 +4,7 @@
 import json
 import pathlib
 
-root = pathlib.Path(__file__).resolve().parents[1] / "Sources/RadiusApp/Resources/Modules"
+root = pathlib.Path(__file__).resolve().parents[1] / "Sources/NeutrinoApp/Resources/Modules"
 capabilities = {"resourceMonitor", "notes", "reader", "screenshot", "focusMode", "tabSystem", "theme", "layout", "icons", "menu", "startWidget"}
 found = set()
 counts = {"native": 0, "behavior": 0, "declarative": 0}
@@ -13,8 +13,8 @@ for path in sorted(root.glob("*/manifest.json")):
     assert manifest["id"] == path.parent.name and manifest["id"] not in found, path
     found.add(manifest["id"])
     assert manifest["capability"] in capabilities, path
-    assert manifest["version"] > 0 and manifest["publisher"] == "Radius", path
-    assert manifest["source"] == "https://github.com/starharbor2491/radius-browser", path
+    assert manifest["version"] > 0 and manifest["publisher"] == "Neutrino", path
+    assert manifest["source"] == "https://github.com/starharbor2491/neutrino-browser", path
     assert not manifest["dependencies"], path
     runtime = manifest["runtime"]
     if runtime in {"nativeResourceWorker", "nativeReaderWorker"}:

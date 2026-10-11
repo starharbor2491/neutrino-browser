@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.start-widget",
+  "name": "Start Page Tips",
+  "version": 2,
+  "summary": "Keyboard shortcuts for browsing and tabs on new-tab pages.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "startWidget",
+  "dependencies": [],
+  "defaultInstalled": true,
+  "runtime": "declarative"
+}

@@ -51,12 +51,12 @@ def digest(path):
 def code_hashes(app):
     checked(['codesign', '--verify', '--deep', '--strict', '--all-architectures', app])
     result = {}
-    for architecture in ('arm64', 'x86_64'):
+    for architecture in ('arm64',):
         info = subprocess.run(['codesign', '-d', '--verbose=4', '--arch', architecture, str(app)],
                               check=True, timeout=30, capture_output=True, text=True)
         match = re.search(r'^CDHash=([0-9a-f]{40})$', info.stderr, re.MULTILINE)
         if not match:
-            raise ValueError('The universal app has no verifiable ' + architecture + ' code hash')
+            raise ValueError('The Apple Silicon app has no verifiable ' + architecture + ' code hash')
         result[architecture] = match.group(1)
     return result
 
@@ -81,7 +81,7 @@ def process_snapshot():
 
 
 def owned_processes(app):
-    # The unique owned copy path distinguishes this launch from other Radius apps.
+    # The unique owned copy path distinguishes this launch from other Neutrino apps.
     aliases = {str(app), str(app.resolve())}
     return [pid for pid, row in process_snapshot().items()
             if any(alias + '/Contents/' in row['command'] for alias in aliases)]
@@ -122,8 +122,8 @@ def run_smoke(command, environment, timeout):
 def verify_normal_quit(log, acceptance):
     content = log.read_text()
     accepted_at = content.find(acceptance)
-    requested_at = content.find('Radius app delegate: applicationShouldTerminate entered', accepted_at)
-    replied_at = content.find('Radius app delegate: Sending termination reply: true', requested_at)
+    requested_at = content.find('Neutrino app delegate: applicationShouldTerminate entered', accepted_at)
+    replied_at = content.find('Neutrino app delegate: Sending termination reply: true', requested_at)
     if accepted_at < 0 or requested_at < accepted_at or replied_at < requested_at:
         raise ValueError('The installed app did not complete acceptance followed by its normal termination reply')
 
@@ -241,14 +241,14 @@ def main(restart):
         raise ValueError('Invalid installer file or size')
     if dmg.stat().st_size != package['bytes'] or digest(dmg) != package['sha256']:
         raise ValueError('Installer bytes differ from the packaging receipt')
-    expected = code_hashes(DIST / 'Radius.app')
+    expected = code_hashes(DIST / 'Neutrino.app')
     evidence = {'sourceCheckout': checked(['git', '-C', ROOT, 'rev-parse', 'HEAD']).decode().strip(),
                 'workflowSource': os.environ.get('GITHUB_SHA'), 'workflowRun': os.environ.get('GITHUB_RUN_ID'),
                 'package': package, 'codeDirectoryHashes': expected, 'passed': False}
-    temporary = Path(tempfile.mkdtemp(prefix='radius-installed-smoke-', dir=os.environ.get('RUNNER_TEMP')))
+    temporary = Path(tempfile.mkdtemp(prefix='neutrino-installed-smoke-', dir=os.environ.get('RUNNER_TEMP')))
     mount = temporary / 'mount'
     mount.mkdir()
-    copied = temporary / 'Applications/Radius.app'
+    copied = temporary / 'Applications/Neutrino.app'
     attached = False
     observation = PerformanceObservation(temporary)
     try:
@@ -263,15 +263,15 @@ def main(restart):
             raise ValueError('The installer volume is not read-only')
         if not (mount / 'Applications').is_symlink() or os.readlink(mount / 'Applications') != '/Applications':
             raise ValueError('The graphical installer has no correct Applications shortcut')
-        instructions = mount / 'Install Radius.txt'
+        instructions = mount / 'Install Neutrino.txt'
         if instructions.is_symlink() or not instructions.is_file() or not 0 < instructions.stat().st_size <= 16 * 1024:
             raise ValueError('The graphical installer has no bounded installation instructions')
-        mounted = mount / 'Radius.app'
+        mounted = mount / 'Neutrino.app'
         if mounted.is_symlink() or code_hashes(mounted) != expected:
             raise ValueError('The mounted app differs from the sealed build')
         if bounded_json(mounted / 'Contents/Resources/Distribution.json') != package['release']:
             raise ValueError('The mounted release differs from its package receipt')
-        expected_modules = {path.name for path in (ROOT / 'Sources/RadiusApp/Resources/Modules').iterdir() if path.is_dir()}
+        expected_modules = {path.name for path in (ROOT / 'Sources/NeutrinoApp/Resources/Modules').iterdir() if path.is_dir()}
         mounted_modules = {path.name for path in (mounted / 'Contents/Resources/Modules').iterdir() if path.is_dir()}
         if mounted_modules != expected_modules:
             raise ValueError('The offline installer is missing default module payloads')
@@ -283,11 +283,11 @@ def main(restart):
         attached = False
         evidence.update(readOnlyMount=True, sealedCopyVerified=True, detachedBeforeLaunch=True)
         environment = os.environ.copy()
-        environment.update(RADIUS_SMOKE_APP_PATH=str(copied), RADIUS_SMOKE_PERFORMANCE='1',
-                           RADIUS_SMOKE_LAUNCH_RECORD=str(temporary / 'launch'), RADIUS_SMOKE_PID_RECORD=str(temporary / 'pid'))
+        environment.update(NEUTRINO_SMOKE_APP_PATH=str(copied), NEUTRINO_SMOKE_PERFORMANCE='1',
+                           NEUTRINO_SMOKE_LAUNCH_RECORD=str(temporary / 'launch'), NEUTRINO_SMOKE_PID_RECORD=str(temporary / 'pid'))
         observation.thread.start()
         run_smoke(['bash', str(ROOT / 'scripts/smoke-app.sh')], environment, 500)
-        verify_normal_quit(DIST / 'smoke-app.log', 'Radius packaged-app smoke test passed.')
+        verify_normal_quit(DIST / 'smoke-app.log', 'Neutrino packaged-app smoke test passed.')
         evidence.update(normalQuit=True, applicationTerminationReplyAccepted=True)
         if restart:
             run_smoke(['python3', str(ROOT / 'scripts/smoke-chromium-restart.py')], environment, 100)
