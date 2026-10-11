@@ -5,8 +5,8 @@ Run `./scripts/test.sh` with Swift 6 and SQLite development headers. macOS addit
 ## Verified in this workspace
 
 On Linux with Swift 6.2.1:
-- 71 portable Swift tests passed.
-- Six installed-acceptance and six core-publication Python regressions passed.
+- 71 Swift Testing cases and 12 portable XCTest cases passed.
+- Six installed-acceptance, six core-publication, and four disk-image retry Python regressions passed.
 - All 18 bundled module packages validated.
 
 The portable suite covers database round trips/recovery, modules and transactional rollback, distribution trust policy, reader bounds, Profiles/Spaces, live-tab ownership, archiving, blocker host boundaries, AI endpoint restrictions, and foreign/duplicate organization proposals.
@@ -15,9 +15,13 @@ Swift syntax parsing checks grammar, not macOS type checking or execution. Nativ
 
 ## Native CI evidence
 
-Executable source: `79509ce1b8a70861332d3f65426a027d7335b4be`.
+Released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
 
-[macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38129249593) passed. The debug suite runs 160 tests; release native integration runs 89. The development WebKit DMG passed sealed copy, detached installed launch, ordinary quit and removal. Native captures cover the shell, settings, editor and all eight setup screens. Visual review caught and corrected an overflowing editor inspector; its header, exit and Save controls now remain visible. Screenshot capture does not verify interactive setup completion or all editor/accessibility workflows.
+[macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38138834489) passed. The debug suite runs 161 tests; release native integration runs 90. The development WebKit app ZIP/DMG passed sealed copy, detached installed launch, ordinary quit and removal. Native captures cover the shell, settings, editor and all eight setup screens. Visual review previously caught and corrected an overflowing editor inspector; its header, exit and Save controls remain visible. Screenshot capture does not verify interactive setup completion or all editor/accessibility workflows.
+
+[Preview publication](https://github.com/starharbor2491/neutrino-browser/actions/runs/38138835891) passed native build/tests and the real updater helper tests with the complete Blink bundle. A fresh macOS runner expanded the actual ZIP, compared its sealed code against the DMG, and verified installed shell launch, saved SQLite data, normal application-delegate quit, helper exit, and removal without changing the external library. GitHub's uploaded ZIP/DMG digests match their verified package receipt. The release includes `installed-smoke.json` and the independent failed `blink-acceptance.json`/log.
+
+The real helper test uses the packager's independent Apple `codesign` CDHash, rejects missing/wrong hashes, waits for a live parent to exit, replaces the app, checks version/security-floor changes, and verifies that external library, Profile, module and preference files remain byte-identical. Normal quit does not relaunch the replacement. Preview trust is the pinned GitHub repository plus download/code-seal checks; consumer trust additionally requires the same Developer ID publisher and notarization.
 
 [Blink integration CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38129249568) builds the complete Apple Silicon app and DMG. Rendering, custom tab/address commands, retained documents, popup POST/opener behavior, Profile/private isolation, Reader/capture and genuine Web Store installation pass. The full MV3 fixture fails with **Browser window has no toolbar** when exercising `chrome.action.openPopup`. Full Blink installed shutdown/restart acceptance therefore remains unverified. This failure remains a core release gate; the checks have not been disabled or treated as passing.
 
