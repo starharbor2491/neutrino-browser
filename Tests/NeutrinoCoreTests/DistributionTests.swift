@@ -48,6 +48,32 @@ final class DistributionTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: data, encoding: .utf8), "kept")
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
+    func testOnlyNewerCompatibleSameEngineReleasesAreOfferedAutomatically() throws {
+        let current = DistributionRelease(build: 20, version: "1.0.1-preview.1", securityEpoch: 154, architecture: "arm64", chromium: true)
+        func asset(_ build: Int, chromium: Bool = true, architecture: String = "arm64", epoch: Int = 154, minimum: String = "14.0") -> DistributionAsset {
+            DistributionAsset(release: .init(build: build, version: "1.0.1-preview.2", securityEpoch: epoch, architecture: architecture, chromium: chromium, minimumMacOS: minimum),
+                url: URL(string: "https://github.com/starharbor2491/neutrino-browser/releases/download/v1/Neutrino.dmg")!, sha256: String(repeating: "a", count: 64), bytes: 100)
+        }
+        let catalog = DistributionCatalog(releases: [asset(20), asset(19), asset(21), asset(25), asset(30, chromium: false),
+            asset(31, architecture: "x86_64"), asset(32, epoch: 153), asset(33, minimum: "99.0")])
+        XCTAssertEqual(catalog.updates(current: current, minimumEpoch: 154, architecture: "arm64",
+            operatingSystemVersion: .init(majorVersion: 15, minorVersion: 0, patchVersion: 0)).map(\.release.build), [25, 21])
+    }
+    func testGitHubChannelSelectionSkipsDraftsLegacyReleasesAndUntrustedCatalogs() throws {
+        func release(_ day: Int, preview: Bool, draft: Bool = false, url: String? = nil) -> [String: Any] {
+            ["draft": draft, "prerelease": preview, "published_at": "2026-10-\(day)T00:00:00Z",
+             "assets": url.map { [["name": "catalog.json", "browser_download_url": $0]] } ?? []]
+        }
+        let base = "https://github.com/starharbor2491/neutrino-browser/releases/download/"
+        let data = try JSONSerialization.data(withJSONObject: [release(15, preview: false, draft: true, url: base + "draft/catalog.json"),
+            release(14, preview: true), release(13, preview: true, url: base + "preview/catalog.json"),
+            release(12, preview: false, url: base + "stable/catalog.json")])
+        XCTAssertEqual(try GitHubBrowserRelease.catalogURL(in: data, previews: true)?.path, "/starharbor2491/neutrino-browser/releases/download/preview/catalog.json")
+        XCTAssertEqual(try GitHubBrowserRelease.catalogURL(in: data, previews: false)?.path, "/starharbor2491/neutrino-browser/releases/download/stable/catalog.json")
+        let invalid = try JSONSerialization.data(withJSONObject: [release(13, preview: true, url: "https://example.com/catalog.json")])
+        XCTAssertThrowsError(try GitHubBrowserRelease.catalogURL(in: invalid, previews: true))
+        XCTAssertNil(try GitHubBrowserRelease.catalogURL(in: Data("[]".utf8), previews: true))
+    }
     func testFailedVerificationAndActivationLeavePreviousApp() throws {
         let root = try temporary(), source = try app(root, "Candidate", contents: "new"), destination = try app(root, "Neutrino", contents: "old")
         let journal = root.appendingPathComponent("journal.json")

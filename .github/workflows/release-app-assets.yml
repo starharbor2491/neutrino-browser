@@ -1,0 +1,26 @@
+name: Add compiled apps to release assets
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, or all to backfill existing releases
+        required: true
+        default: all
+permissions:
+  contents: write
+jobs:
+  archive:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Add missing compiled app archives from published installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: python3 scripts/backfill-release-apps.py --tag "$RELEASE_TAG"

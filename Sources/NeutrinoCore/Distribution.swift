@@ -77,8 +77,10 @@ public struct DistributionAsset: Codable, Equatable, Sendable {
     public let url: URL
     public let sha256: String
     public let bytes: Int64
-    public init(release: DistributionRelease, url: URL, sha256: String, bytes: Int64) {
+    public let codeDirectoryHash: String?
+    public init(release: DistributionRelease, url: URL, sha256: String, bytes: Int64, codeDirectoryHash: String? = nil) {
         self.release = release; self.url = url; self.sha256 = sha256; self.bytes = bytes
+        self.codeDirectoryHash = codeDirectoryHash
     }
     public func validate() throws {
         guard url.scheme == "https", url.host == "github.com", url.user == nil, url.password == nil,
@@ -87,6 +89,11 @@ public struct DistributionAsset: Codable, Equatable, Sendable {
               bytes > 0, bytes <= 4_000_000_000, sha256.count == 64,
               sha256.allSatisfy({ "0123456789abcdef".contains($0) }) else {
             throw ValidationError("The release catalog contains an invalid asset.")
+        }
+        if let codeDirectoryHash {
+            guard codeDirectoryHash.count == 40, codeDirectoryHash.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+                throw ValidationError("The release catalog contains an invalid application code hash.")
+            }
         }
     }
 }
@@ -97,6 +104,43 @@ public struct DistributionCatalog: Codable, Sendable {
     public func validate() throws {
         guard format == 1, releases.count <= 16 else { throw ValidationError("The release catalog is incompatible or too large.") }
         for release in releases { try release.validate() }
+    }
+    public func updates(current: DistributionRelease, minimumEpoch: Int, architecture: String,
+                        operatingSystemVersion: OperatingSystemVersion? = nil) -> [DistributionAsset] {
+        releases.filter {
+            $0.release.build > current.build && $0.release.chromium == current.chromium &&
+            (try? $0.release.validate(current: current, minimumEpoch: minimumEpoch, architecture: architecture,
+                                     operatingSystemVersion: operatingSystemVersion)) != nil
+        }.sorted { $0.release.build > $1.release.build }
+    }
+}
+
+/// GitHub's `latest` endpoint excludes previews. Select the newest published
+/// release in the installed channel that actually carries our update catalog.
+public struct GitHubBrowserRelease: Decodable, Sendable {
+    public struct Asset: Decodable, Sendable { public let name: String; public let browser_download_url: URL }
+    public let draft: Bool
+    public let prerelease: Bool
+    public let published_at: Date?
+    public let assets: [Asset]
+    public static func catalogURL(in data: Data, previews: Bool) throws -> URL? {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let releases = try decoder.decode([Self].self, from: data)
+        guard releases.count <= 100 else { throw ValidationError("The GitHub release list is too large.") }
+        for release in releases.filter({ !$0.draft && $0.published_at != nil && (previews || !$0.prerelease) })
+            .sorted(by: { $0.published_at! > $1.published_at! }) {
+            if let asset = release.assets.first(where: { $0.name == "catalog.json" }) {
+                let url = asset.browser_download_url
+                guard url.scheme == "https", url.host == "github.com", url.user == nil, url.password == nil,
+                      url.query == nil, url.fragment == nil,
+                      url.path.hasPrefix("/starharbor2491/neutrino-browser/releases/download/"),
+                      url.lastPathComponent == "catalog.json" else {
+                    throw ValidationError("GitHub returned an unexpected update catalog location.")
+                }
+                return url
+            }
+        }
+        return nil
     }
 }
 

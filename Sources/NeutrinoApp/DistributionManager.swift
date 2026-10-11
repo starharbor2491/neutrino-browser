@@ -29,19 +29,34 @@ final class DistributionManager: ObservableObject {
     private var installerHelper: URL?
     private var generation = UUID()
     private var installOnQuit = false
-    var isRestartRequested: Bool { installOnQuit }
+    private var restartRequested = false
+    var isRestartRequested: Bool { restartRequested }
+    @Published var automaticUpdates = UserDefaults.standard.object(forKey: "automaticAppUpdates") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(automaticUpdates, forKey: "automaticAppUpdates")
+            if !restartRequested { installOnQuit = automaticUpdates && pending != nil && pending?.chromium == current?.chromium }
+            if !automaticUpdates && automaticDownload { operation?.cancel() }
+        }
+    }
+    private var automaticCheck: Task<Void, Never>?
+    private var automaticDownload = false
+    private var pendingCodeHash: String?
     @Published private(set) var pendingRecordInvalid = false
     private struct PendingInstall: Codable, Sendable {
         let candidate: URL
         let destination: URL
         let release: DistributionRelease
+        let codeDirectoryHash: String?
     }
     @Published private(set) var publisherAvailable = false
     @Published private(set) var current: DistributionRelease?
-    private var publisher: String?
+    private var authority: ReleaseTrust.UpdateAuthority?
     func cancel() { operation?.cancel() }
     func cancelAndWaitForOperation() async {
         terminationPending = true
+        automaticCheck?.cancel()
+        await automaticCheck?.value
+        automaticCheck = nil
         let active = operation
         active?.cancel()
         await active?.value
@@ -65,19 +80,41 @@ final class DistributionManager: ObservableObject {
         let installed = Bundle.main.bundleURL
         Task {
             do {
-                let team = try await Self.background { try ReleaseTrust.publisherTeam(of: installed) }
-                self.publisher = team
-                do { try await self.restorePending(team: team) }
+                let authority = try await Self.background { try ReleaseTrust.updateAuthority(of: installed) }
+                self.authority = authority
+                do { try await self.restorePending(authority: authority) }
                 catch { self.message = error.localizedDescription; self.pendingRecordInvalid = true }
                 self.publisherAvailable = true
+                self.scheduleAutomaticChecks()
             } catch { if self.message == nil { self.message = error.localizedDescription } }
         }
     }
-    func checkForUpdates(dataDirectory: URL) {
+    private func scheduleAutomaticChecks() {
+        guard automaticCheck == nil, ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] == nil,
+              !CommandLine.arguments.contains(where: { $0.contains("xctest") }) else { return }
+        automaticCheck = Task {
+            do {
+                try await Task.sleep(for: .seconds(20))
+                while !Task.isCancelled {
+                    if self.automaticUpdates, let directory = self.directory {
+                        self.checkForUpdates(dataDirectory: directory.deletingLastPathComponent(), automatically: true)
+                    }
+                    try await Task.sleep(for: .seconds(6 * 60 * 60))
+                }
+            } catch { }
+            self.automaticCheck = nil
+        }
+    }
+    func checkForUpdates(dataDirectory: URL, automatically: Bool = false) {
         start(dataDirectory: dataDirectory) {
-            guard self.publisher != nil else { throw ValidationError("An official Developer ID signed Neutrino app is required for installation and updates.") }
-            self.message = "Checking official releases…"
-            let url = URL(string: "https://github.com/starharbor2491/neutrino-browser/releases/latest/download/catalog.json")!
+            guard let authority = self.authority else { throw ValidationError("Install a published Neutrino release to enable updates.") }
+            self.message = "Checking GitHub releases…"
+            let list = self.directory!.appendingPathComponent("releases-\(UUID().uuidString).json")
+            defer { try? FileManager.default.removeItem(at: list) }
+            try await ReleaseDownload.download(URL(string: "https://api.github.com/repos/starharbor2491/neutrino-browser/releases?per_page=100")!, to: list, limit: 2_097_152) { _ in }
+            guard let url = try GitHubBrowserRelease.catalogURL(in: Data(contentsOf: list), previews: authority.includesPreviews) else {
+                self.available = []; self.message = "Neutrino is up to date. No newer release is published in this update channel."; return
+            }
             let file = self.directory!.appendingPathComponent("catalog-\(UUID().uuidString).json")
             defer { try? FileManager.default.removeItem(at: file) }
             try await ReleaseDownload.download(url, to: file, limit: 1_048_576) { _ in }
@@ -86,16 +123,23 @@ final class DistributionManager: ObservableObject {
             try catalog.validate()
             let current = try ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false)
             let floor = try self.securityFloor()
-            self.available = catalog.releases.filter {
-                (try? $0.release.validate(current: current, minimumEpoch: floor, architecture: Self.architecture)) != nil
-            }.sorted { $0.release.build > $1.release.build }
-            self.message = self.available.isEmpty ? "No compatible release is available." : "Compatible official installers are available. Installation happens after Neutrino quits."
+            self.available = catalog.updates(current: current, minimumEpoch: floor, architecture: Self.architecture)
+            self.message = self.available.isEmpty ? "Neutrino is up to date." : "A new Neutrino release is available. Your browser data is kept."
+            if automatically, self.automaticUpdates, let asset = self.available.first {
+                self.automaticDownload = true
+                defer { self.automaticDownload = false }
+                try await self.downloadAndStage(asset)
+            }
         }
     }
     func install(_ asset: DistributionAsset, dataDirectory: URL) {
         start(dataDirectory: dataDirectory) {
+            try await self.downloadAndStage(asset)
+        }
+    }
+    private func downloadAndStage(_ asset: DistributionAsset) async throws {
             try asset.validate()
-            guard self.publisher != nil else { throw ValidationError("An official Developer ID signed Neutrino app is required for installation and updates.") }
+            guard self.authority != nil else { throw ValidationError("Install a published Neutrino release to enable updates.") }
             let current = try ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false)
             try asset.release.validate(current: current, minimumEpoch: self.securityFloor(), architecture: Self.architecture)
             let file = self.directory!.appendingPathComponent("download-\(UUID().uuidString).dmg")
@@ -112,8 +156,7 @@ final class DistributionManager: ObservableObject {
                 throw ValidationError("The download failed its size or integrity check. The installed app has been kept.")
             }
             self.progress = nil
-            try await self.stage(file, expected: asset.release)
-        }
+            try await self.stage(file, expected: asset.release, codeDirectoryHash: asset.codeDirectoryHash)
     }
     func importInstaller(dataDirectory: URL) {
         guard !busy, !terminationPending else { return }
@@ -125,18 +168,21 @@ final class DistributionManager: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url,
               ["app", "dmg"].contains(url.pathExtension.lowercased()) else { return }
         start(dataDirectory: dataDirectory) {
-            guard self.publisher != nil else { throw ValidationError("An official Developer ID signed Neutrino app is required for installation and updates.") }
-            try await self.stage(url, expected: nil)
+            guard case .developerID = self.authority else { throw ValidationError("Offline import requires a Developer ID signed installation. Preview updates download directly from GitHub.") }
+            try await self.stage(url, expected: nil, codeDirectoryHash: nil)
         }
     }
     func requestRestart() {
         guard pending != nil, !busy else { return }
         installOnQuit = true
+        restartRequested = true
         NSApp.terminate(nil)
     }
     func cancelledQuit() {
         terminationPending = false
-        installOnQuit = false
+        restartRequested = false
+        installOnQuit = automaticUpdates && pending != nil && pending?.chromium == current?.chromium
+        scheduleAutomaticChecks()
         if let process = installerProcess, process.isRunning { process.terminate() }
         if let executable = installerHelper,
            executable.deletingLastPathComponent() == directory, executable.lastPathComponent.hasPrefix("NeutrinoUpdater-") {
@@ -169,7 +215,7 @@ final class DistributionManager: ObservableObject {
                     if fm.fileExists(atPath: record.path) { try fm.removeItem(at: record) }
                 }
                 self.candidate = nil; self.rejectedStage = nil; self.destination = nil; self.pending = nil
-                self.installOnQuit = false; self.pendingRecordInvalid = false
+                self.installOnQuit = false; self.restartRequested = false; self.pendingCodeHash = nil; self.pendingRecordInvalid = false
                 self.message = "The staged installer was removed. Your installed application is unchanged."
             } catch { self.message = error.localizedDescription }
         }
@@ -179,17 +225,19 @@ final class DistributionManager: ObservableObject {
     /// refused, cancelledQuit() stops the helper while the parent remains alive.
     func launchPendingInstaller() async throws {
         guard let candidate, let destination, let directory, pending != nil, installOnQuit, !installerStarted else { return }
-        guard let team = publisher else { throw ValidationError("The Neutrino publisher identity is unavailable.") }
+        guard let authority else { throw ValidationError("The Neutrino update authority is unavailable.") }
         try ReleaseTrust.verifyDestinationIsNotRunning(destination, excludingPID: ProcessInfo.processInfo.processIdentifier)
         let current = try ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false), floor = try securityFloor()
-        try await Self.background { try Self.verify(candidate, team: team, current: current, floor: floor) }
+        let codeHash = pendingCodeHash
+        try await Self.background { try Self.verify(candidate, authority: authority, codeHash: codeHash, current: current, floor: floor) }
         let bundledHelper = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/Updater/" + Self.architecture + "/NeutrinoUpdater")
         let helper = directory.appendingPathComponent("NeutrinoUpdater-\(UUID().uuidString)")
         do {
             try await Self.background {
-                try ReleaseTrust.verifySignature(bundledHelper, team: team, identifier: "org.neutrino.updater", notarized: false)
+                let hash = try ReleaseTrust.verifyCodeIntegrity(bundledHelper, identifier: "org.neutrino.updater")
+                if case .developerID(let team) = authority { try ReleaseTrust.verifySignature(bundledHelper, team: team, identifier: "org.neutrino.updater", notarized: false) }
                 try FileManager.default.copyItem(at: bundledHelper, to: helper)
-                try ReleaseTrust.verifySignature(helper, team: team, identifier: "org.neutrino.updater", notarized: false)
+                guard try ReleaseTrust.verifyCodeIntegrity(helper, identifier: "org.neutrino.updater") == hash else { throw ValidationError("The copied updater changed.") }
             }
         } catch {
             try? FileManager.default.removeItem(at: helper)
@@ -197,7 +245,7 @@ final class DistributionManager: ObservableObject {
         }
         let process = Process(); process.executableURL = helper
         process.arguments = [String(ProcessInfo.processInfo.processIdentifier), candidate.path, destination.path,
-                             journalURL!.path, String(floor), Bundle.main.bundlePath]
+                             journalURL!.path, String(floor), Bundle.main.bundlePath, codeHash ?? "", restartRequested ? "restart" : "quit"]
         process.standardInput = FileHandle.nullDevice
         do {
             try process.run(); installerProcess = process; installerHelper = helper
@@ -236,8 +284,8 @@ final class DistributionManager: ObservableObject {
             catch { self.message = error.localizedDescription }
         }
     }
-    private func stage(_ installer: URL, expected: DistributionRelease?) async throws {
-        guard let team = publisher else { throw ValidationError("The Neutrino publisher identity is unavailable.") }
+    private func stage(_ installer: URL, expected: DistributionRelease?, codeDirectoryHash: String?) async throws {
+        guard let authority else { throw ValidationError("The Neutrino update authority is unavailable.") }
         let current = try ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false)
         let stage = directory!.appendingPathComponent("stage-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -260,7 +308,7 @@ final class DistributionManager: ObservableObject {
                         throw ValidationError("This mounted image does not contain Neutrino.app. If the installer is already open in Finder, import Neutrino.app inside it instead.")
                     }
                     try await Self.background {
-                        try Self.verify(source, team: team, current: current, floor: floor)
+                        try Self.verify(source, authority: authority, codeHash: codeDirectoryHash, current: current, floor: floor)
                         try Task.checkCancellation()
                         try FileManager.default.copyItem(at: source, to: imported)
                     }
@@ -274,14 +322,14 @@ final class DistributionManager: ObservableObject {
                 }
             } else {
                 try await Self.background {
-                    try Self.verify(installer, team: team, current: current, floor: floor)
+                    try Self.verify(installer, authority: authority, codeHash: codeDirectoryHash, current: current, floor: floor)
                     try Task.checkCancellation()
                     try FileManager.default.copyItem(at: installer, to: imported)
                 }
             }
             try Task.checkCancellation()
             let release = try await Self.background {
-                try Self.verify(imported, team: team, current: current, floor: floor)
+                try Self.verify(imported, authority: authority, codeHash: codeDirectoryHash, current: current, floor: floor)
                 return try ReleaseTrust.metadata(of: imported)
             }
             if let expected, release != expected { throw ValidationError("The signed installer does not match the advertised release.") }
@@ -293,20 +341,27 @@ final class DistributionManager: ObservableObject {
                 guard alert.runModal() == .alertFirstButtonReturn else { throw CancellationError() }
                 try Task.checkCancellation()
             }
-            guard let installDestination = chooseDestination() else { throw CancellationError() }
+            guard let installDestination = chooseDestination() else {
+                if automaticDownload { throw ValidationError("Move Neutrino to a writable Applications folder, then check for updates again.") }
+                throw CancellationError()
+            }
             try ReleaseTrust.verifyDestinationIsNotRunning(installDestination, excludingPID: ProcessInfo.processInfo.processIdentifier)
             if FileManager.default.fileExists(atPath: installDestination.path) {
                 try await Self.background {
                     try ReleaseTrust.verifyBundleTree(installDestination)
-                    try ReleaseTrust.verifySignature(installDestination, team: team, identifier: "org.neutrino.browser", notarized: true)
+                    switch authority {
+                    case .developerID(let team): try ReleaseTrust.verifySignature(installDestination, team: team, identifier: "org.neutrino.browser", notarized: true)
+                    case .githubPreview: _ = try ReleaseTrust.verifyCodeIntegrity(installDestination, identifier: "org.neutrino.browser")
+                    }
                     let installed = try ReleaseTrust.metadata(of: installDestination, requireCompatibleArchitecture: false)
                     try release.validate(current: installed, minimumEpoch: floor, architecture: Self.architecture)
                 }
             }
             try Task.checkCancellation()
-            let saved = PendingInstall(candidate: imported, destination: installDestination, release: release)
+            let saved = PendingInstall(candidate: imported, destination: installDestination, release: release, codeDirectoryHash: codeDirectoryHash)
             try JSONEncoder().encode(saved).write(to: directory!.appendingPathComponent("pending-install.json"), options: [.atomic])
             candidate = imported; rejectedStage = nil; destination = installDestination; pending = release
+            pendingCodeHash = codeDirectoryHash; installOnQuit = automaticUpdates && release.chromium == current.chromium
             message = readyMessage(for: release, current: current)
         } catch {
             // Cancellation must still finish removing this owned disposable
@@ -321,7 +376,7 @@ final class DistributionManager: ObservableObject {
             throw error
         }
     }
-    private func restorePending(team: String) async throws {
+    private func restorePending(authority: ReleaseTrust.UpdateAuthority) async throws {
         guard let directory else { return }
         let file = directory.appendingPathComponent("pending-install.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return }
@@ -353,10 +408,11 @@ final class DistributionManager: ObservableObject {
         rejectedStage = stage
         let current = try ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false), floor = try securityFloor()
         try await Self.background {
-            try Self.verify(saved.candidate, team: team, current: current, floor: floor)
+            try Self.verify(saved.candidate, authority: authority, codeHash: saved.codeDirectoryHash, current: current, floor: floor)
             guard try ReleaseTrust.metadata(of: saved.candidate) == saved.release else { throw ValidationError("The staged installer version changed.") }
         }
         candidate = saved.candidate; destination = saved.destination; pending = saved.release
+        pendingCodeHash = saved.codeDirectoryHash; installOnQuit = automaticUpdates && saved.release.chromium == current.chromium
         rejectedStage = nil
         message = readyMessage(for: saved.release, current: current)
     }
@@ -364,7 +420,7 @@ final class DistributionManager: ObservableObject {
         if current.chromium, !release.chromium {
             return "Neutrino \(release.version) is ready. Restart to use WebKit and remove Chromium. " + Self.chromiumRemovalNotice
         }
-        return "Neutrino \(release.version) is ready. Choose Restart and install, or discard it. Your Neutrino profiles, saved records, installed modules, and layout are kept."
+        return "Neutrino \(release.version) is ready. \(automaticUpdates ? "It installs when you quit." : "Choose Restart and install.") Your profiles, website sign-ins, saved records, modules, and layout are kept."
     }
     private func chooseDestination() -> URL? {
         let current = Bundle.main.bundleURL.standardizedFileURL
@@ -374,6 +430,7 @@ final class DistributionManager: ObservableObject {
            FileManager.default.isWritableFile(atPath: parent.path), FileManager.default.isWritableFile(atPath: current.path) {
             return current
         }
+        if automaticDownload { return nil }
         let panel = NSOpenPanel()
         panel.title = "Choose the Neutrino installation folder"
         panel.message = "Neutrino cannot replace this copy in its current location. Choose a writable Applications folder. The new app uses your existing browser data."
@@ -406,9 +463,8 @@ final class DistributionManager: ObservableObject {
     nonisolated private static var architecture: String {
         ReleaseTrust.platformArchitecture
     }
-    nonisolated private static func verify(_ app: URL, team: String, current: DistributionRelease, floor: Int) throws {
-        try ReleaseTrust.verifyBundleTree(app)
-        try ReleaseTrust.verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
+    nonisolated private static func verify(_ app: URL, authority: ReleaseTrust.UpdateAuthority, codeHash: String?, current: DistributionRelease, floor: Int) throws {
+        try ReleaseTrust.verifyUpdate(app, authority: authority, codeDirectoryHash: codeHash)
         try ReleaseTrust.metadata(of: app).validate(current: current, minimumEpoch: floor, architecture: architecture)
     }
     nonisolated private static func sha256(_ file: URL) throws -> String {
@@ -498,7 +554,7 @@ private final class ReleaseDownload: NSObject, URLSessionDownloadDelegate, @unch
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
-        let hosts = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
+        let hosts = ["api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
         completionHandler(request.url?.scheme == "https" && hosts.contains(request.url?.host ?? "") ? request : nil)
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
@@ -515,7 +571,7 @@ private final class ReleaseDownload: NSObject, URLSessionDownloadDelegate, @unch
         do {
             guard let response = downloadTask.response as? HTTPURLResponse, response.statusCode == 200,
                   response.url?.scheme == "https",
-                  ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].contains(response.url?.host ?? ""),
+                  ["api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].contains(response.url?.host ?? ""),
                   Int64(try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= limit else {
                 throw ValidationError("The official release is unavailable or its download is invalid.")
             }

@@ -683,13 +683,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !saved {
                 quit = self.offerQuitWithoutSaving(state)
             }
-            if quit {
+            if quit && saved {
                 // The updater waits for this process to exit. Start and validate
                 // it before irreversible CefShutdown; a cancelled quit stops it.
                 do { try await DistributionManager.shared.launchPendingInstaller() }
                 catch { quit = false; state.notice = error.localizedDescription }
             }
-            if quit, DistributionManager.shared.isRestartRequested,
+            if quit && saved, DistributionManager.shared.isRestartRequested,
                DistributionManager.shared.pending?.chromium == false {
                 // Prepare only the restart's durable metadata after READY.
                 // A refused quit must keep live Chromium pages and choices.

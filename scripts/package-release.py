@@ -3,7 +3,8 @@
 """Create a graphical offline installer; production mode signs/notarizes/staples.
 
 The disk image contains the same Neutrino.app with its selected engine and default
-module payloads. Development mode is explicit and never emits a consumer catalog.
+module payloads. Explicit GitHub previews emit a preview update catalog; local
+development packages never subscribe to updates or claim consumer acceptance.
 """
 import argparse
 import hashlib
@@ -11,6 +12,8 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -49,6 +52,8 @@ def package(app, output, development, allow_webkit_development=False):
     app = app.resolve(strict=True)
     output.mkdir(parents=True, exist_ok=True)
     metadata = json.loads((app / 'Contents/Resources/Distribution.json').read_text())
+    channel = plistlib.loads((app / 'Contents/Info.plist').read_bytes()).get('NeutrinoUpdateChannel', 'local')
+    preview = development and channel == 'preview'
     if metadata['architecture'] != 'arm64':
         raise RuntimeError('Neutrino installers target Apple Silicon only')
     if not metadata['chromium'] and not (development and allow_webkit_development):
@@ -88,7 +93,8 @@ def package(app, output, development, allow_webkit_development=False):
             'Drag Neutrino to Applications, then open it.\n\n'
             'This is the same Neutrino application with ' + ('Chromium and WebKit' if metadata['chromium'] else 'system WebKit') + '. '
             'Its default modules are included for offline installation. Existing browser data, customized layouts and intentionally removed modules are kept.\n\n'
-            + ('Development build: ad-hoc signed and unnotarized. Consumer installation and updates are disabled.\n' if development else
+            + (('GitHub preview: ad-hoc signed and unnotarized. Updates download from the Neutrino GitHub repository and install after you quit.\n' if preview else
+                'Local development build: ad-hoc signed and unnotarized. Automatic updates are disabled.\n') if development else
                'To install this package from an existing Neutrino app, choose Settings > Browsing engines > Import offline installer. Neutrino verifies the publisher and replaces the app after quitting.\n')
             + 'Source and licenses: https://github.com/starharbor2491/neutrino-browser\n')
         checked(['hdiutil', 'create', '-volname', 'Neutrino', '-srcfolder', root, '-format', 'UDZO', '-ov', dmg])
@@ -96,17 +102,30 @@ def package(app, output, development, allow_webkit_development=False):
         checked(['codesign', '--force', '--timestamp', '--sign', identity, dmg])
         notarize(dmg)
         checked(['spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature', dmg])
+    # Archive the final sealed/stapled bundle, never an earlier build. A .app is
+    # a directory, so GitHub distributes it as a Finder-expandable ZIP.
+    archive = output / (prefix + '.app.zip')
+    if archive.exists():
+        archive.unlink()
+    checked(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, archive])
+    signature = subprocess.run(['codesign', '-d', '--verbose=4', '--arch', 'arm64', str(app)],
+                               check=True, capture_output=True, text=True)
+    code_hash = re.search(r'^CDHash=([0-9a-f]{40})$', signature.stderr, re.MULTILINE)
+    if not code_hash:
+        raise RuntimeError('The application has no Apple Silicon code directory hash')
     evidence = {'release': metadata, 'developerID': not development, 'notarized': not development,
                 'file': dmg.name, 'bytes': dmg.stat().st_size,
-                'sha256': digest(dmg)}
+                'sha256': digest(dmg), 'codeDirectoryHash': code_hash.group(1),
+                'applicationArchive': {'file': archive.name, 'bytes': archive.stat().st_size, 'sha256': digest(archive)}}
     (output / (prefix + '-package.json')).write_text(json.dumps(evidence, indent=2) + '\n')
-    if not development:
+    if not development or preview:
         tag = os.environ.get('NEUTRINO_RELEASE_TAG', 'v' + metadata['version'])
         if '/' in tag or '..' in tag or not tag:
             raise ValueError('Invalid release tag')
         asset = {'release': metadata, 'url': 'https://github.com/starharbor2491/neutrino-browser/releases/download/' + tag + '/' + dmg.name,
-                 'sha256': evidence['sha256'], 'bytes': evidence['bytes']}
+                 'sha256': evidence['sha256'], 'bytes': evidence['bytes'], 'codeDirectoryHash': evidence['codeDirectoryHash']}
         (output / (prefix + '-catalog-entry.json')).write_text(json.dumps(asset, indent=2) + '\n')
+    (output / 'SHA256SUMS').write_text(evidence['sha256'] + '  ' + dmg.name + '\n' + evidence['applicationArchive']['sha256'] + '  ' + archive.name + '\n')
     print(dmg)
 
 

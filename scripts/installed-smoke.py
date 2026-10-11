@@ -252,6 +252,21 @@ def main(restart):
     attached = False
     observation = PerformanceObservation(temporary)
     try:
+        archive = package['applicationArchive']
+        archive_name = archive['file']
+        if not isinstance(archive_name, str) or Path(archive_name).name != archive_name or not archive_name.endswith('.app.zip'):
+            raise ValueError('Invalid application archive basename')
+        zipped = DIST / archive_name
+        if (zipped.is_symlink() or not zipped.is_file() or not 0 < archive['bytes'] <= 4_000_000_000
+                or zipped.stat().st_size != archive['bytes'] or digest(zipped) != archive['sha256']):
+            raise ValueError('Application ZIP bytes differ from the packaging receipt')
+        expanded = temporary / 'archive'
+        checked(['ditto', '-x', '-k', zipped, expanded], timeout=120)
+        if (code_hashes(expanded / 'Neutrino.app') != expected
+                or bounded_json(expanded / 'Neutrino.app/Contents/Resources/Distribution.json') != package['release']):
+            raise ValueError('The downloadable app ZIP differs from the sealed application')
+        shutil.rmtree(expanded)
+        evidence['applicationArchiveVerified'] = True
         # A failed/timeout attach can still leave a mounted volume; retain ownership
         # before starting it, so cleanup never removes an attached directory.
         attached = True
