@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
-// All entry points and browser callbacks run on the AppKit main thread.
+// UI entry points and browser callbacks run on the AppKit main thread.
+// Resource filtering reads an immutable policy snapshot on CEF's IO thread.
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include "include/wrapper/cef_library_loader.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
+#include "include/views/cef_fill_layout.h"
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
 
@@ -343,7 +345,7 @@ Page* AdoptAuxiliaryBrowser(CefRefPtr<CefBrowser> browser,Page* preferred_owner)
 
 struct BlockPolicy {
   std::atomic<bool> enabled{false};
-  std::atomic<std::shared_ptr<const std::vector<std::string>>> domains;
+  std::shared_ptr<const std::vector<std::string>> domains;
 };
 class BlockedResourceHandler final : public CefResourceRequestHandler {
  public:
@@ -351,7 +353,7 @@ class BlockedResourceHandler final : public CefResourceRequestHandler {
   ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame>,
       CefRefPtr<CefRequest> request,CefRefPtr<CefCallback>) override {
     if (!policy_->enabled.load()) return RV_CONTINUE;
-    auto domains=policy_->domains.load(); if (!domains) return RV_CONTINUE;
+    auto domains=std::atomic_load(&policy_->domains); if (!domains) return RV_CONTINUE;
     CefURLParts parts; if (!CefParseURL(request->GetURL(),parts)) return RV_CONTINUE;
     const std::string scheme=CefString(&parts.scheme).ToString();
     if (scheme!="http" && scheme!="https") return RV_CONTINUE;
@@ -429,7 +431,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
   void SetBlocking(bool enabled,const std::vector<std::string>& domains) {
-    blocking_->domains.store(std::make_shared<const std::vector<std::string>>(domains));
+    std::atomic_store(&blocking_->domains,std::make_shared<const std::vector<std::string>>(domains));
     blocking_->enabled.store(enabled);
   }
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>,
