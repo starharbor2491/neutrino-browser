@@ -117,7 +117,7 @@ enum ChromiumAcceptance {
         let page = try requireChromium(browser.activeWebTab)
         try await wait { page.url == url && !page.loading && page.chromeWindow?.isVisible == true }
         try await verifyChromeGeometry(page, ownerWindow: ownerWindow)
-        _ = try await evaluate(page, "window.neutrinoLiveMarker=73; 'ready'")
+        _ = try await evaluate(page, "(window.neutrinoLiveMarker=73, 'ready')")
         let count = browser.session.tabs.count
         page.focus()
         try key("t", code: 17, modifiers: .command, window: page.chromeWindow!)
@@ -1021,15 +1021,12 @@ enum ChromiumAcceptance {
         while ContinuousClock.now < deadline {
             NSApp.activate(ignoringOtherApps: true)
             tab.nativeView.window?.makeKeyAndOrderFront(nil)
-            if tab.isAuxiliary || tab.hasNativeNavigationChrome {
-                tab.chromeWindow?.makeKeyAndOrderFront(nil)
-                tab.focus()
-            }
-            if tab.chromeWindow?.isKeyWindow == true && (tab.isAuxiliary || tab.hasNativeNavigationChrome) {
+            tab.chromeWindow?.makeKeyAndOrderFront(nil)
+            tab.focus()
+            if tab.chromeWindow?.isKeyWindow == true {
                 if tab.isAuxiliary { return }
                 let data = try await tab.request("Neutrino.chromeHostState", parameters: [:])
-                if (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["windowActive"] as? Bool == true,
-                   tab.hasNativeNavigationChrome { return }
+                if (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["windowActive"] as? Bool == true { return }
             }
             try await Task.sleep(for: .milliseconds(100))
         }
