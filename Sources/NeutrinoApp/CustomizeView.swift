@@ -61,7 +61,9 @@ struct CustomizeView: View {
           }
           Spacer(minLength: 0)
         }.padding(24).frame(maxWidth: .infinity).background(theme.canvas)
-        inspector.padding(20).frame(width: 238).background(theme.card)
+        ScrollView {
+          inspector.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(width: 238).background(theme.card)
       }
       Rectangle().fill(theme.foreground.opacity(0.08)).frame(height: 1)
       HStack {
