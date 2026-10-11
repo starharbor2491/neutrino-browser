@@ -57,7 +57,8 @@ if [[ "${NEUTRINO_WEBKIT_DEVELOPMENT_ONLY:-0}" != 1 ]]; then
 fi
 python3 scripts/distribution-metadata.py "$app_directory"
 # Consumer signing is explicit and fails closed if an identity is unavailable.
-# Local/CI builds retain ad-hoc signatures and cannot install consumer updates.
+# Local/CI builds retain ad-hoc signatures. Explicit published previews use
+# GitHub provenance/code seals; consumer updates retain Developer ID trust.
 if [[ -n "${NEUTRINO_SIGNING_IDENTITY:-}" ]]; then
   python3 scripts/sign-release.py "$app_directory"
 else

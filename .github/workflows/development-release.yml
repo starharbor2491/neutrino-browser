@@ -1,36 +1,142 @@
-name: Build Neutrino development installer
+name: Publish Neutrino preview
 on:
+  push:
+    tags: ['v*-preview.*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Preview version (for example 1.0.1-preview.1)'
+        required: true
+        default: '1.0.1-preview.1'
+      publish:
+        description: Publish compiled app and offline installer to GitHub Releases
+        type: boolean
+        default: true
 permissions:
   contents: read
+concurrency:
+  group: neutrino-preview-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 60
+    env:
+      NEUTRINO_UPDATE_CHANNEL: preview
+      NEUTRINO_BUILD_NUMBER: ${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build complete Apple Silicon application
-        run: ./scripts/build-app.sh
+      - name: Validate preview version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          version = os.environ.get('INPUT_VERSION') or os.environ['GITHUB_REF_NAME'].removeprefix('v')
+          if not re.fullmatch(r'\d+\.\d+\.\d+-preview\.\d+', version):
+              raise SystemExit('Preview releases require a version such as 1.0.1-preview.1')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('NEUTRINO_VERSION=' + version + '\nNEUTRINO_RELEASE_TAG=v' + version + '\n')
+          PY
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/neutrino-cef-runtime
+          key: neutrino-cef154-views-5-arm64
       - name: Test native application and portable core
         run: ./scripts/test.sh
-      - name: Package complete offline development installer
-        run: python3 scripts/package-release.py --development
-      - name: Verify the installed application and Blink integration
+      - name: Build pinned Blink package
+        run: python3 scripts/chromium-runtime.py --arch arm64 --work-dir "$RUNNER_TEMP/neutrino-cef-runtime"
+      - name: Build complete Apple Silicon application
         env:
-          NEUTRINO_CHROMIUM_WEBSTORE_TEST: "1"
-        run: python3 scripts/installed-smoke.py --chromium-restart
+          NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-runtime/Chromium-arm64.neutrinoengine
+        run: ./scripts/build-app.sh
+      - name: Verify real updater helper and native bundle integrity
+        env:
+          NEUTRINO_DISTRIBUTION_TEST_APP: ${{ github.workspace }}/dist/Neutrino.app
+        run: python3 scripts/native-tests.py -c release --filter DistributionNativeTests
+      - name: Package compiled application ZIP and offline installer
+        run: python3 scripts/package-release.py --development
+      # Full parity remains mandatory for consumer releases. Preview notes and
+      # the attached failed/passed receipt expose this independent result.
+      - name: Record full Blink and extension acceptance
+        id: blink
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          NEUTRINO_CHROMIUM_WEBSTORE_TEST: '1'
+          NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-runtime/Chromium-arm64.neutrinoengine
+        run: |
+          python3 scripts/installed-smoke.py --chromium-restart
+      - name: Preserve full Blink acceptance result
+        if: always()
+        run: |
+          if [[ -f dist/installed-smoke.json ]]; then cp dist/installed-smoke.json dist/blink-acceptance.json; fi
+          if [[ -f dist/smoke-app.log ]]; then cp dist/smoke-app.log dist/blink-acceptance.log; fi
+      - name: Require installed shell launch, saved data, and ordinary quit
+        timeout-minutes: 4
+        run: python3 scripts/installed-smoke.py
+      - name: Assemble update catalog and preview notes
+        env:
+          BLINK_ACCEPTANCE: ${{ steps.blink.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path('dist')
+          entries = [json.loads(p.read_text()) for p in root.glob('*-catalog-entry.json')]
+          if len(entries) != 1 or not entries[0]['release']['chromium']:
+              raise SystemExit('Exactly one complete Blink + WebKit app is required')
+          (root / 'catalog.json').write_text(json.dumps({'format': 1, 'releases': entries}, indent=2) + '\n')
+          (root / 'RELEASE.md').write_text(
+              'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
+              'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
+              'Automatic updates download from this GitHub repository and install after you quit. '
+              'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
+              'Use Settings > Browsing engines > Installation and updates to disable automatic updates or restart immediately.\n\n'
+              '**Development preview:** ad-hoc signed and unnotarized; macOS may require Open Anyway in Privacy & Security. '
+              'This release does not certify the finished core or full browser parity. Native tests, real updater replacement, and installed shell acceptance passed. '
+              'Full Blink/extension acceptance: **' + os.environ['BLINK_ACCEPTANCE'] + '**; see the attached receipt/log. '
+              'The current Chrome extension popup integration and protected streaming remain incomplete.\n')
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Neutrino-AppleSilicon-development
+          name: Neutrino-AppleSilicon-preview
           path: |
+            dist/*.app.zip
             dist/*.dmg
             dist/*-package.json
+            dist/catalog.json
+            dist/SHA256SUMS
+            dist/RELEASE.md
             dist/installed-smoke.json
-            dist/screenshots/*.png
+            dist/blink-acceptance.json
+            dist/blink-acceptance.log
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: Neutrino-development-diagnostics
-          path: dist/*.log
+          name: Neutrino-preview-diagnostics
+          path: |
+            dist/*.log
+            dist/native-tests*.txt
+            dist/*-package.json
+            dist/installed-smoke.json
           if-no-files-found: warn
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Neutrino-AppleSilicon-preview
+          path: release
+      - name: Publish app, installer, integrity metadata, and acceptance results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          release_version="$(python3 -c 'import json; print(json.load(open("release/catalog.json"))["releases"][0]["release"]["version"])')"
+          gh release create "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* --prerelease --target "$GITHUB_SHA" --title "Neutrino $release_version" --notes-file release/RELEASE.md

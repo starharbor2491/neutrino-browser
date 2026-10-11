@@ -49,6 +49,12 @@ struct BrowserCommands: Commands {
                 Button("Settings…") { browser?.sheet = .settings }.keyboardShortcut(",").disabled(browser == nil)
             }.disabled(app.finalQuitDataFrozen)
         }
+        CommandGroup(after: .appInfo) {
+            Button("Check for updates…") {
+                DistributionManager.shared.checkForUpdates(dataDirectory: app.dataDirectory)
+                browser?.sheet = .settings
+            }.disabled(!app.ready || app.finalQuitDataFrozen)
+        }
         CommandGroup(replacing: .saveItem) {
             Group {
                 if nativeTab != nil || browser?.hasNativeTabs == true {

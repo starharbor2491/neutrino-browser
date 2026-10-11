@@ -83,6 +83,12 @@ minimum_text = '.'.join(map(str, minimum if minimum[2] else minimum[:2]))
 info['CFBundleVersion'] = str(build)
 info['CFBundleShortVersionString'] = version
 info['LSMinimumSystemVersion'] = minimum_text
+channel = os.environ.get('NEUTRINO_UPDATE_CHANNEL', 'local')
+if channel not in ('local', 'preview', 'stable'):
+    raise ValueError('Invalid update channel')
+if channel == 'preview' and not chromium:
+    raise ValueError('Published previews must include Blink')
+info['NeutrinoUpdateChannel'] = channel
 info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
 (app / 'Contents/Resources/Distribution.json').write_text(json.dumps({
     'format': 1, 'build': build, 'version': version, 'securityEpoch': epoch,

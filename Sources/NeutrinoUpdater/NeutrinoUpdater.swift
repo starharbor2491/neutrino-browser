@@ -11,8 +11,8 @@ import NeutrinoDistribution
 struct NeutrinoUpdater {
     @MainActor static func main() async {
         let args = CommandLine.arguments
-        guard args.count == 7, let parent = Int32(args[1]), parent > 1,
-              let epoch = Int(args[5]), epoch >= 0 else { return }
+        guard args.count == 9, let parent = Int32(args[1]), parent > 1,
+              let epoch = Int(args[5]), epoch >= 0, ["restart", "quit"].contains(args[8]) else { return }
         let source = URL(fileURLWithPath: args[2]).standardizedFileURL
         let destination = URL(fileURLWithPath: args[3]).standardizedFileURL
         let journal = URL(fileURLWithPath: args[4]).standardizedFileURL
@@ -26,8 +26,12 @@ struct NeutrinoUpdater {
             }
         }
         do {
-            let team = try ReleaseTrust.publisherTeam(of: currentApp)
-            try ReleaseTrust.verifySignature(URL(fileURLWithPath: args[0]), team: team, identifier: "org.neutrino.updater", notarized: false)
+            let authority = try ReleaseTrust.updateAuthority(of: currentApp)
+            let bundledHelper = currentApp.appendingPathComponent("Contents/Resources/Updater/arm64/NeutrinoUpdater")
+            guard try ReleaseTrust.verifyCodeIntegrity(helper, identifier: "org.neutrino.updater") == ReleaseTrust.verifyCodeIntegrity(bundledHelper, identifier: "org.neutrino.updater") else {
+                throw ValidationError("The updater does not match the installed application.")
+            }
+            if case .developerID(let team) = authority { try ReleaseTrust.verifySignature(helper, team: team, identifier: "org.neutrino.updater", notarized: false) }
             let current = try ReleaseTrust.metadata(of: currentApp, requireCompatibleArchitecture: false)
             let architecture: String
             #if arch(arm64)
@@ -37,8 +41,7 @@ struct NeutrinoUpdater {
             #endif
             let sourceRelease = try ReleaseTrust.metadata(of: source)
             let verify: (URL) throws -> Void = { app in
-                try ReleaseTrust.verifyBundleTree(app)
-                try ReleaseTrust.verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
+                try ReleaseTrust.verifyUpdate(app, authority: authority, codeDirectoryHash: args[7].isEmpty ? nil : args[7])
                 let release = try ReleaseTrust.metadata(of: app)
                 guard release == sourceRelease else { throw ValidationError("The staged application changed after approval.") }
                 try release.validate(current: current, minimumEpoch: epoch, architecture: architecture)
@@ -48,7 +51,10 @@ struct NeutrinoUpdater {
                 // activating an older candidate. It remains unlaunched; all new
                 // candidates must meet the current build/security floor above.
                 try ReleaseTrust.verifyBundleTree(app)
-                try ReleaseTrust.verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
+                switch authority {
+                case .developerID(let team): try ReleaseTrust.verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
+                case .githubPreview: _ = try ReleaseTrust.verifyCodeIntegrity(app, identifier: "org.neutrino.browser")
+                }
             }
             try verify(source)
             let verifyInstalledForUpdate: (URL) throws -> Void = { app in
@@ -89,11 +95,17 @@ struct NeutrinoUpdater {
                 try? FileManager.default.removeItem(at: source.deletingLastPathComponent())
             }
             try? FileManager.default.removeItem(at: journal.deletingLastPathComponent().appendingPathComponent("pending-install.json"))
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            configuration.createsNewApplicationInstance = true
-            _ = try await NSWorkspace.shared.openApplication(at: destination, configuration: configuration)
+            if args[8] == "restart" {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                configuration.createsNewApplicationInstance = true
+                _ = try await NSWorkspace.shared.openApplication(at: destination, configuration: configuration)
+            }
         } catch {
+            if ProcessInfo.processInfo.environment["NEUTRINO_UPDATER_HEADLESS"] == "1" {
+                FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+                exit(1)
+            }
             NSApplication.shared.setActivationPolicy(.accessory)
             NSApplication.shared.activate(ignoringOtherApps: true)
             let alert = NSAlert()

@@ -6,6 +6,48 @@ import Darwin
 import NeutrinoCore
 
 public enum ReleaseTrust {
+    public enum UpdateAuthority: Equatable, Sendable {
+        case developerID(String)
+        case githubPreview
+        public var includesPreviews: Bool { self == .githubPreview }
+    }
+    public static func updateAuthority(of app: URL) throws -> UpdateAuthority {
+        if let team = try? publisherTeam(of: app) { return .developerID(team) }
+        let info = try PropertyListSerialization.propertyList(from: boundedData(at: app.appendingPathComponent("Contents/Info.plist"), maximum: 65_536), format: nil) as? [String: Any]
+        guard info?["NeutrinoUpdateChannel"] as? String == "preview" else {
+            throw ValidationError("Local builds do not subscribe to GitHub updates. Install a published Neutrino release.")
+        }
+        _ = try verifyCodeIntegrity(app, identifier: "org.neutrino.browser")
+        return .githubPreview
+    }
+    /// Preview provenance is the pinned GitHub repository over HTTPS. Its
+    /// advertised CDHash pins the sealed app across staging, copy and activation.
+    /// Consumer updates additionally require the original Apple publisher.
+    public static func verifyUpdate(_ app: URL, authority: UpdateAuthority, codeDirectoryHash: String?) throws {
+        try verifyBundleTree(app)
+        switch authority {
+        case .developerID(let team):
+            try verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
+        case .githubPreview:
+            guard let codeDirectoryHash, codeDirectoryHash.count == 40,
+                  try verifyCodeIntegrity(app, identifier: "org.neutrino.browser") == codeDirectoryHash else {
+                throw ValidationError("The application does not match the code seal published on GitHub. The installed app has been kept.")
+            }
+        }
+    }
+    public static func verifyCodeIntegrity(_ url: URL, identifier: String) throws -> String {
+        guard ["org.neutrino.browser", "org.neutrino.updater"].contains(identifier) else { throw ValidationError("Invalid code identity.") }
+        var code: SecStaticCode?
+        var information: CFDictionary?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckNestedCode | kSecCSCheckAllArchitectures), nil) == errSecSuccess,
+              SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let values = information as NSDictionary?, values[kSecCodeInfoIdentifier] as? String == identifier,
+              let hash = values[kSecCodeInfoUnique] as? Data, hash.count == 20 else {
+            throw ValidationError("The application or updater has a damaged code signature.")
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
     @MainActor public static func verifyDestinationIsNotRunning(_ destination: URL, excludingPID: Int32) throws {
         let target = destination.resolvingSymlinksInPath().standardizedFileURL
         let otherCopy = NSRunningApplication.runningApplications(withBundleIdentifier: "org.neutrino.browser").contains {

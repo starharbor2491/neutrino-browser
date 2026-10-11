@@ -4,6 +4,8 @@ A customizable, local-first macOS browser for Apple Silicon: Arc-inspired worksp
 
 This repository is being rebuilt against a [confirmed product brief](docs/PRODUCT_PLAN.md). The new product is not yet a verified core release. See [status](docs/RELEASE_STATUS.md) and the [parity ledger](docs/PARITY.md).
 
+Download compiled Apple Silicon builds from [GitHub Releases](https://github.com/starharbor2491/neutrino-browser/releases). Each Neutrino release includes a ZIP containing `Neutrino.app`, an offline DMG, and checksums. Published builds check GitHub for updates, download compatible newer versions, and install after a normal quit while retaining browsing data. Preview releases remain development builds with the limitations recorded in their release notes.
+
 Native captures of the first interface rebuild from [Apple Silicon CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38128463616):
 
 ![Neutrino's custom workspace shell](docs/images/neutrino-shell.png)

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import Foundation
+import AppKit
 import Security
 import Testing
 import NeutrinoCore
@@ -96,6 +97,81 @@ struct DistributionNativeTests {
             throw ValidationError("Damaged native fixture")
         }
         _ = try ReleaseTrust.metadata(of: app)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["NEUTRINO_DISTRIBUTION_TEST_APP"] != nil))
+    @MainActor func previewUpdaterWaitsForExitReplacesAppAndPreservesProfileData() async throws {
+        let fixture = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["NEUTRINO_DISTRIBUTION_TEST_APP"]))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Neutrino-real-updater-" + UUID().uuidString).resolvingSymlinksInPath()
+        let updates = root.appendingPathComponent("UserData/Updates")
+        try FileManager.default.createDirectory(at: updates, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installed = root.appendingPathComponent("Neutrino.app"), candidate = root.appendingPathComponent("stage/Neutrino.app")
+        try FileManager.default.createDirectory(at: candidate.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixture, to: installed)
+        try Self.signPreviewFixture(installed, incrementBuild: false)
+        #expect(try ReleaseTrust.updateAuthority(of: installed) == .githubPreview)
+        try FileManager.default.copyItem(at: installed, to: candidate)
+        try Self.signPreviewFixture(candidate, incrementBuild: true)
+        let old = try ReleaseTrust.metadata(of: installed), next = try ReleaseTrust.metadata(of: candidate)
+        let codeHash = try ReleaseTrust.verifyCodeIntegrity(candidate, identifier: "org.neutrino.browser")
+        #expect(throws: (any Error).self) { try ReleaseTrust.verifyUpdate(candidate, authority: .githubPreview, codeDirectoryHash: nil) }
+        #expect(throws: (any Error).self) { try ReleaseTrust.verifyUpdate(candidate, authority: .githubPreview, codeDirectoryHash: String(repeating: "0", count: 40)) }
+        try ReleaseTrust.verifyUpdate(candidate, authority: .githubPreview, codeDirectoryHash: codeHash)
+        var saved: [URL: Data] = [:]
+        for relative in ["library.sqlite", "Chromium/profile/Cookies", "WebKit/profile/WebsiteData", "Modules/custom.json", "preferences.json"] {
+            let path = root.appendingPathComponent("UserData/" + relative)
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let bytes = Data((relative + "-preserved").utf8); try bytes.write(to: path); saved[path] = bytes
+        }
+        let parent = Process(); parent.executableURL = URL(fileURLWithPath: "/bin/sleep"); parent.arguments = ["300"]
+        try parent.run()
+        defer { if parent.isRunning { parent.terminate(); parent.waitUntilExit() } }
+        let helper = updates.appendingPathComponent("NeutrinoUpdater-" + UUID().uuidString)
+        try FileManager.default.copyItem(at: installed.appendingPathComponent("Contents/Resources/Updater/arm64/NeutrinoUpdater"), to: helper)
+        let process = Process(); process.executableURL = helper
+        process.environment = ProcessInfo.processInfo.environment.merging(["NEUTRINO_UPDATER_HEADLESS": "1"]) { _, new in new }
+        let journal = updates.appendingPathComponent("replacement-journal.json")
+        process.arguments = [String(parent.processIdentifier), candidate.path, installed.path, journal.path, String(old.securityEpoch), installed.path, codeHash, "quit"]
+        process.standardInput = FileHandle.nullDevice
+        try process.run()
+        defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
+        let ready = helper.appendingPathExtension("ready")
+        let clock = ContinuousClock(); let deadline = clock.now.advanced(by: .seconds(90))
+        while !FileManager.default.fileExists(atPath: ready.path) {
+            try #require(process.isRunning && clock.now < deadline, "The real updater did not signal readiness")
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(try ReleaseTrust.metadata(of: installed) == old)
+        parent.terminate(); parent.waitUntilExit()
+        while process.isRunning {
+            try #require(clock.now < deadline, "The real updater did not complete replacement")
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(process.terminationStatus == 0)
+        #expect(try ReleaseTrust.metadata(of: installed) == next)
+        try ReleaseTrust.verifyUpdate(installed, authority: .githubPreview, codeDirectoryHash: codeHash)
+        for (path, bytes) in saved { #expect(try Data(contentsOf: path) == bytes) }
+        #expect(!FileManager.default.fileExists(atPath: journal.path))
+        #expect(!FileManager.default.fileExists(atPath: helper.path))
+        #expect(try JSONDecoder().decode(Int.self, from: Data(contentsOf: updates.appendingPathComponent("security-floor.json"))) == next.securityEpoch)
+        #expect(!NSRunningApplication.runningApplications(withBundleIdentifier: "org.neutrino.browser").contains { $0.bundleURL == installed })
+    }
+
+    private static func signPreviewFixture(_ app: URL, incrementBuild: Bool) throws {
+        let infoPath = app.appendingPathComponent("Contents/Info.plist")
+        var info = try #require(PropertyListSerialization.propertyList(from: Data(contentsOf: infoPath), format: nil) as? [String: Any])
+        info["NeutrinoUpdateChannel"] = "preview"
+        if incrementBuild {
+            let old = try ReleaseTrust.metadata(of: app)
+            let next = DistributionRelease(build: old.build + 1, version: "1.0.2-preview.1", securityEpoch: old.securityEpoch, architecture: old.architecture, chromium: old.chromium, minimumMacOS: old.minimumMacOS ?? "14.0")
+            info["CFBundleVersion"] = String(next.build); info["CFBundleShortVersionString"] = next.version
+            try JSONEncoder().encode(next).write(to: app.appendingPathComponent("Contents/Resources/Distribution.json"), options: .atomic)
+        }
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: infoPath, options: .atomic)
+        let signer = Process(); signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        signer.arguments = ["--force", "--sign", "-", "--preserve-metadata=identifier,entitlements,flags", "--timestamp=none", app.path]
+        try signer.run(); signer.waitUntilExit(); try #require(signer.terminationStatus == 0)
     }
 }
 

@@ -33,6 +33,7 @@ jobs:
       NEUTRINO_BUILD_NUMBER: ${{ github.run_id }}
       NEUTRINO_SECURITY_EPOCH: ${{ inputs.security_epoch }}
       NEUTRINO_RELEASE_TAG: v${{ inputs.version }}
+      NEUTRINO_UPDATE_CHANNEL: stable
       NEUTRINO_NOTARY_KEY_ID: ${{ secrets.NEUTRINO_NOTARY_KEY_ID }}
       NEUTRINO_NOTARY_ISSUER: ${{ secrets.NEUTRINO_NOTARY_ISSUER }}
     steps:
@@ -100,6 +101,8 @@ jobs:
           name: Neutrino-consumer-${{ matrix.variant }}
           path: |
             dist/*.dmg
+            dist/*.app.zip
+            dist/SHA256SUMS
             dist/*-package.json
             dist/*-catalog-entry.json
             dist/installed-smoke.json
@@ -155,4 +158,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "v$RELEASE_VERSION" release/*.dmg release/*-package.json release/catalog.json release/installed-smoke.json release/core-acceptance.json --title "Neutrino $RELEASE_VERSION" --notes 'Neutrino for Apple Silicon. This offline installer includes Blink, WebKit support, helpers, and built-in modules. Native, installed, and publisher-recorded core acceptance are attached.'
+        run: gh release create "v$RELEASE_VERSION" release/*.dmg release/*.app.zip release/SHA256SUMS release/*-package.json release/catalog.json release/installed-smoke.json release/core-acceptance.json --target "$GITHUB_SHA" --title "Neutrino $RELEASE_VERSION" --notes 'Neutrino for Apple Silicon. Download the app ZIP or drag Neutrino.app from the offline DMG to Applications. Both include Blink, WebKit support, helpers, and built-in modules. Updates download from GitHub and install after quitting while preserving browser data. Native, installed, and publisher-recorded core acceptance are attached.'
