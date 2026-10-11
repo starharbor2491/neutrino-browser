@@ -114,7 +114,10 @@ struct DistributionNativeTests {
         try FileManager.default.copyItem(at: installed, to: candidate)
         try Self.signPreviewFixture(candidate, incrementBuild: true)
         let old = try ReleaseTrust.metadata(of: installed), next = try ReleaseTrust.metadata(of: candidate)
-        let codeHash = try ReleaseTrust.verifyCodeIntegrity(candidate, identifier: "org.neutrino.browser")
+        // Use the same independent Apple CLI as release packaging, rather than
+        // deriving both sides of the comparison through our verifier.
+        let codeHash = try Self.packagedCodeHash(candidate)
+        #expect(try ReleaseTrust.verifyCodeIntegrity(candidate, identifier: "org.neutrino.browser") == codeHash)
         #expect(throws: (any Error).self) { try ReleaseTrust.verifyUpdate(candidate, authority: .githubPreview, codeDirectoryHash: nil) }
         #expect(throws: (any Error).self) { try ReleaseTrust.verifyUpdate(candidate, authority: .githubPreview, codeDirectoryHash: String(repeating: "0", count: 40)) }
         try ReleaseTrust.verifyUpdate(candidate, authority: .githubPreview, codeDirectoryHash: codeHash)
@@ -172,6 +175,15 @@ struct DistributionNativeTests {
         let signer = Process(); signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
         signer.arguments = ["--force", "--sign", "-", "--preserve-metadata=identifier,entitlements,flags", "--timestamp=none", app.path]
         try signer.run(); signer.waitUntilExit(); try #require(signer.terminationStatus == 0)
+    }
+    private static func packagedCodeHash(_ app: URL) throws -> String {
+        let command = Process(); command.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        command.arguments = ["-d", "--verbose=4", "--arch", "arm64", app.path]
+        let output = Pipe(); command.standardError = output; command.standardOutput = FileHandle.nullDevice
+        try command.run(); command.waitUntilExit(); try #require(command.terminationStatus == 0)
+        let text = String(decoding: try output.fileHandleForReading.readToEnd() ?? Data(), as: UTF8.self)
+        let line = try #require(text.split(separator: "\n").first { $0.hasPrefix("CDHash=") })
+        return String(line.dropFirst("CDHash=".count))
     }
 }
 

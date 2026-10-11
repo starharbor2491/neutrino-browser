@@ -18,8 +18,9 @@ struct DistributionSettingsView: View {
                     Label("Local builds do not receive updates. Install a published Neutrino release to enable them.", systemImage: "signature")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                Toggle("Automatically download updates and install when I quit", isOn: $distribution.automaticUpdates)
-                    .toggleStyle(.switch).disabled(!distribution.publisherAvailable)
+                ChoiceCard(title: "Automatic updates", detail: "Download new releases and install when I quit.", icon: "arrow.triangle.2.circlepath", selected: distribution.automaticUpdates) {
+                    distribution.automaticUpdates.toggle()
+                }.disabled(!distribution.publisherAvailable)
                 HStack {
                     Button("Check for updates") { distribution.checkForUpdates(dataDirectory: dataDirectory) }
                     Button("Import offline installer…") { distribution.importInstaller(dataDirectory: dataDirectory) }
@@ -52,12 +53,12 @@ struct DistributionSettingsView: View {
                 }
                 if distribution.pending != nil {
                     HStack {
-                        Button("Restart and install") { distribution.requestRestart() }.buttonStyle(.borderedProminent)
+                        Button("Restart and install") { distribution.requestRestart() }.buttonStyle(NeutrinoButtonStyle(prominent: true))
                         Button("Discard installer") { distribution.discardPending() }
                     }.disabled(distribution.busy)
                 }
             }.padding(8)
-        }.onAppear { distribution.configure(dataDirectory: dataDirectory) }
+        }.buttonStyle(NeutrinoButtonStyle()).onAppear { distribution.configure(dataDirectory: dataDirectory) }
     }
     private func confirmInstall(_ asset: DistributionAsset) {
         let alert = NSAlert()
