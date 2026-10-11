@@ -4,6 +4,17 @@ A customizable, local-first macOS browser for Apple Silicon: Arc-inspired worksp
 
 This repository is being rebuilt against a [confirmed product brief](docs/PRODUCT_PLAN.md). The new product is not yet a verified core release. See [status](docs/RELEASE_STATUS.md) and the [parity ledger](docs/PARITY.md).
 
+Native captures of the first interface rebuild from [Apple Silicon CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38128463616):
+
+![Neutrino's custom workspace shell](docs/images/neutrino-shell.png)
+
+<details>
+<summary>View the docking editor</summary>
+
+![Neutrino's docking editor with visible exit and Save controls](docs/images/neutrino-editor.png)
+
+</details>
+
 - Spaces organize shared tabs/folders; Profiles isolate website accounts.
 - Live tabs transfer between windows without intentionally reloading their documents.
 - Guided setup, custom shell, docking preview/undo, and named per-Space appearances.
