@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Build/run upstream CEF experiments. This does not install an engine in Radius."""
+"""Build/run upstream CEF experiments. This does not install an engine in Neutrino."""
 
 import argparse
 from datetime import datetime, timezone
@@ -97,7 +97,7 @@ def build(directory, architecture):
         "archive_verified": False,
         "compiled": False,
         "sandbox_requested": True,
-        "radius_integration_verified": False,
+        "neutrino_integration_verified": False,
         "consumer_extensions_verified": False,
         "signed_release_verified": False,
     }
@@ -137,7 +137,7 @@ def build(directory, architecture):
     evidence.update(sample_bundle=str(destination), compiled=True, executable_architectures=architectures)
     write_evidence(evidence_path, evidence)
     print(f"Built upstream CEF sample: {destination}")
-    print("Radius integration, extension compatibility, and distribution remain unverified.")
+    print("Neutrino integration, extension compatibility, and distribution remain unverified.")
 
 
 def sample_command(directory, architecture, style, url, probe=False):
@@ -145,7 +145,7 @@ def sample_command(directory, architecture, style, url, probe=False):
     if not executable.is_file():
         raise RuntimeError("Build the sample first with the build command.")
     # Both experiments use separate persistent CEF stores. Neither reads the
-    # user's Chrome/WebKit profiles or Radius's browser metadata.
+    # user's Chrome/WebKit profiles or Neutrino's browser metadata.
     profile = directory / "profiles" / architecture / (("probe-" if probe else "") + style)
     profile.mkdir(parents=True, exist_ok=True)
     flags = ["--use-views"] if style == "chrome" else ["--use-native", "--use-alloy-style"]
@@ -174,7 +174,7 @@ def probe(directory, architecture, style):
         "sandbox_disabled": False,
         "renderer_javascript_verified": False,
         "graceful_browser_exit_verified": False,
-        "radius_integration_verified": False,
+        "neutrino_integration_verified": False,
         "consumer_extensions_verified": False,
         "signed_release_verified": False,
     }
@@ -193,7 +193,7 @@ def probe(directory, architecture, style):
                 body = b"ok"
                 ready.set()
             else:
-                body = ("<!doctype html><title>Radius CEF integration proof</title>"
+                body = ("<!doctype html><title>Neutrino CEF integration proof</title>"
                         "<h1>Upstream CEF renderer check</h1>"
                         f"<script>fetch('/ready/{token}')</script>").encode()
             self.send_response(200)
@@ -231,7 +231,7 @@ def probe(directory, architecture, style):
             if result != 0:
                 raise RuntimeError(f"Sample did not quit cleanly (status {result}).")
             evidence.update(status="passed", graceful_browser_exit_verified=True)
-            print("Upstream sample rendered JavaScript and quit cleanly. Radius hosting and extensions remain unverified.", flush=True)
+            print("Upstream sample rendered JavaScript and quit cleanly. Neutrino hosting and extensions remain unverified.", flush=True)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         evidence.update(status="failed", error=str(error))
         raise

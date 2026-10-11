@@ -6,19 +6,19 @@ on:
       - 'ChromiumRuntime/**'
       - 'Package.swift'
       - 'Sources/CSQLite/**'
-      - 'Sources/RadiusCore/**'
-      - 'Sources/RadiusEngineABI/**'
-      - 'Sources/RadiusApp/**'
-      - 'Sources/RadiusDistribution/**'
-      - 'Sources/RadiusUpdater/**'
-      - 'Sources/RadiusReaderLogic/**'
-      - 'Sources/RadiusReaderWorker/**'
-      - 'Sources/RadiusResourcePlatform/**'
-      - 'Sources/RadiusResourceMonitor/**'
-      - 'Sources/RadiusMemoryMonitor/**'
-      - 'Tests/RadiusAppTests/**'
-      - 'Tests/RadiusCoreTests/**'
-      - 'Tests/RadiusReaderTests/**'
+      - 'Sources/NeutrinoCore/**'
+      - 'Sources/NeutrinoEngineABI/**'
+      - 'Sources/NeutrinoApp/**'
+      - 'Sources/NeutrinoDistribution/**'
+      - 'Sources/NeutrinoUpdater/**'
+      - 'Sources/NeutrinoReaderLogic/**'
+      - 'Sources/NeutrinoReaderWorker/**'
+      - 'Sources/NeutrinoResourcePlatform/**'
+      - 'Sources/NeutrinoResourceMonitor/**'
+      - 'Sources/NeutrinoMemoryMonitor/**'
+      - 'Tests/NeutrinoAppTests/**'
+      - 'Tests/NeutrinoCoreTests/**'
+      - 'Tests/NeutrinoReaderTests/**'
       - 'Resources/Info.plist'
       - 'Resources/Entitlements/**'
       - 'scripts/chromium-runtime.py'
@@ -38,7 +38,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: radius-chromium-runtime-${{ github.ref }}
+  group: neutrino-chromium-runtime-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   embedded:
@@ -48,8 +48,6 @@ jobs:
         include:
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
@@ -58,38 +56,38 @@ jobs:
         id: cef-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/radius-cef-runtime
-          key: radius-cef154-chrome-4-${{ matrix.arch }}
-      - name: Build pinned optional Chromium package
+          path: ${{ runner.temp }}/neutrino-cef-runtime
+          key: neutrino-cef154-views-5-${{ matrix.arch }}
+      - name: Build pinned Blink package
         id: chromium-build
-        run: python3 scripts/chromium-runtime.py --arch "${{ matrix.arch }}" --work-dir "$RUNNER_TEMP/radius-cef-runtime"
+        run: python3 scripts/chromium-runtime.py --arch "${{ matrix.arch }}" --work-dir "$RUNNER_TEMP/neutrino-cef-runtime"
       - name: Cache verified Chromium SDK
         if: steps.cef-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ runner.temp }}/radius-cef-runtime
-          key: radius-cef154-chrome-4-${{ matrix.arch }}
+          path: ${{ runner.temp }}/neutrino-cef-runtime
+          key: neutrino-cef154-views-5-${{ matrix.arch }}
       - name: Test native shell
         id: native-tests
         run: ./scripts/test.sh
-      - name: Build universal Radius application
+      - name: Build complete Apple Silicon Neutrino application
         id: app-build
         # Build, package and smoke provide diagnostics when an independent
         # native test fails. That failure still gates validated app artifacts.
         if: ${{ !cancelled() && steps.chromium-build.outcome == 'success' }}
         env:
-          RADIUS_CHROMIUM_PACKAGE: ${{ runner.temp }}/radius-cef-runtime/Chromium-${{ matrix.arch }}.radiusengine
+          NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-runtime/Chromium-${{ matrix.arch }}.neutrinoengine
         run: ./scripts/build-app.sh
       - name: Package graphical development installer
         id: installer-package
         if: ${{ !cancelled() && steps.app-build.outcome == 'success' }}
         run: python3 scripts/package-release.py --development
-      - name: Verify installed Chromium renders inside Radius and quits normally
+      - name: Verify installed Chromium renders inside Neutrino and quits normally
         if: ${{ !cancelled() && steps.chromium-build.outcome == 'success' && steps.app-build.outcome == 'success' }}
         timeout-minutes: 10
         env:
-          RADIUS_CHROMIUM_WEBSTORE_TEST: "1"
-          RADIUS_CHROMIUM_PACKAGE: ${{ runner.temp }}/radius-cef-runtime/Chromium-${{ matrix.arch }}.radiusengine
+          NEUTRINO_CHROMIUM_WEBSTORE_TEST: "1"
+          NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-runtime/Chromium-${{ matrix.arch }}.neutrinoengine
           NATIVE_TESTS_PASSED: ${{ steps.native-tests.outcome == 'success' }}
           INSTALLER_PACKAGE_PASSED: ${{ steps.installer-package.outcome == 'success' }}
         run: |
@@ -100,37 +98,37 @@ jobs:
           fi
       - name: Archive development runtime
         run: |
-          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/radius-cef-runtime/Chromium-${{ matrix.arch }}.radiusengine" "dist/Chromium-${{ matrix.arch }}.radiusengine.zip"
-          ditto -c -k --sequesterRsrc --keepParent dist/Radius.app "dist/Radius-Chromium-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/neutrino-cef-runtime/Chromium-${{ matrix.arch }}.neutrinoengine" "dist/Chromium-${{ matrix.arch }}.neutrinoengine.zip"
+          ditto -c -k --sequesterRsrc --keepParent dist/Neutrino.app "dist/Neutrino-Chromium-${{ matrix.arch }}.zip"
       - name: Record native runtime validation
         run: |
           python3 - <<'PY'
           import json, os
           from pathlib import Path
-          path = Path(os.environ['RUNNER_TEMP']) / 'radius-cef-runtime' / 'radius-adapter-${{ matrix.arch }}.json'
+          path = Path(os.environ['RUNNER_TEMP']) / 'neutrino-cef-runtime' / 'neutrino-adapter-${{ matrix.arch }}.json'
           evidence = json.loads(path.read_text())
-          evidence['radiusEmbeddedRuntimeValidated'] = True
+          evidence['neutrinoEmbeddedRuntimeValidated'] = True
           evidence['chromeExtensions'] = True
-          evidence['runtimeStyle'] = 'chrome'
+          evidence['runtimeStyle'] = 'chromeViews'
           evidence['testedSource'] = os.environ['GITHUB_SHA']
-          evidence['nativeChecks'] = ['HTTP', 'HTTPS', 'reader', 'PNG capture', 'profiles', 'private windows', 'normal/private popup policy and opener', 'Chrome toolbar geometry and focus', 'MV3 lifecycle and APIs', 'extension auxiliary window identity and lifetime', 'Chrome Web Store installation', 'extension persistence after process restart', 'extension removal', 'tab close', 'extension manager open during normal quit']
+          evidence['nativeChecks'] = ['HTTP', 'HTTPS', 'reader', 'PNG capture', 'profiles', 'private windows', 'normal/private popup policy and opener', 'Neutrino page geometry and focus', 'MV3 lifecycle and APIs', 'extension auxiliary window identity and lifetime', 'Chrome Web Store installation', 'extension persistence after process restart', 'extension removal', 'tab close', 'extension manager open during normal quit']
           path.write_text(json.dumps(evidence, indent=2) + '\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Radius-Chromium-${{ matrix.arch }}-development-runtime
+          name: Neutrino-Chromium-${{ matrix.arch }}-development-runtime
           path: |
             dist/*.dmg
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
-            dist/Chromium-*.radiusengine.zip
-            dist/Radius-Chromium-*.zip
+            dist/Chromium-*.neutrinoengine.zip
+            dist/Neutrino-Chromium-*.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Radius-Chromium-${{ matrix.arch }}-diagnostics
+          name: Neutrino-Chromium-${{ matrix.arch }}-diagnostics
           path: |
             dist/screenshots/*.png
             dist/smoke-*.log
@@ -142,5 +140,5 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
-            ${{ runner.temp }}/radius-cef-runtime/radius-adapter-*.json
+            ${{ runner.temp }}/neutrino-cef-runtime/neutrino-adapter-*.json
           if-no-files-found: warn

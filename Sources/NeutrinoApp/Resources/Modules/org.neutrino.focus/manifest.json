@@ -1,0 +1,20 @@
+{
+  "id": "org.neutrino.focus",
+  "name": "Focus Mode",
+  "version": 2,
+  "summary": "Hide Neutrino controls for focused reading. Escape restores them. Chromium keeps its toolbar.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "focusMode",
+  "dependencies": [],
+  "defaultInstalled": true,
+  "runtime": "behaviorProgram",
+  "settings": [
+    {
+      "id": "hideChrome",
+      "title": "Hide Neutrino controls in Focus Mode",
+      "kind": "toggle",
+      "defaultValue": true
+    }
+  ]
+}

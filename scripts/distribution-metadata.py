@@ -35,7 +35,7 @@ def runtime_minimum(runtime, baseline):
         # otool treats a filename ending in "(Renderer)" as archive(member).
         # A simple alias reads the same bytes without copying large frameworks
         # or modifying the bundle. Inspect every architecture in a fat binary.
-        with tempfile.TemporaryDirectory(prefix='radius-macos-minimum-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='neutrino-macos-minimum-') as temporary:
             inspected = Path(temporary) / 'binary'
             inspected.symlink_to(path.resolve(strict=True))
             commands = subprocess.check_output(['/usr/bin/otool', '-arch', 'all', '-l', str(inspected)], text=True)
@@ -63,22 +63,22 @@ def runtime_minimum(runtime, baseline):
 app = Path(sys.argv[1])
 info_path = app / 'Contents/Info.plist'
 info = plistlib.loads(info_path.read_bytes())
-build = int(os.environ.get('RADIUS_BUILD_NUMBER', info['CFBundleVersion']))
-version = os.environ.get('RADIUS_VERSION', info['CFBundleShortVersionString'])
-epoch = int(os.environ.get('RADIUS_SECURITY_EPOCH', '154'))
+build = int(os.environ.get('NEUTRINO_BUILD_NUMBER', info['CFBundleVersion']))
+version = os.environ.get('NEUTRINO_VERSION', info['CFBundleShortVersionString'])
+epoch = int(os.environ.get('NEUTRINO_SECURITY_EPOCH', '154'))
 if not 1 <= build <= 2**63 - 1 or not 154 <= epoch <= 2**63 - 1 or len(version) > 64 or not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?', version):
     raise ValueError('Invalid release version, build number, or security epoch')
-manifest_path = app / 'Contents/Frameworks/Chromium.radiusengine/Contents/Resources/manifest.json'
-architecture = 'universal'
+manifest_path = app / 'Contents/Frameworks/Chromium.neutrinoengine/Contents/Resources/manifest.json'
+architecture = 'arm64'
 chromium = manifest_path.exists()
 minimum = version_tuple(info['LSMinimumSystemVersion'])
 if chromium:
     manifest = json.loads(manifest_path.read_text())
     architecture = manifest['architecture']
-    if architecture not in ('arm64', 'x86_64') or epoch < int(manifest['cefVersion'].split('.')[0]):
+    if architecture != 'arm64' or epoch < int(manifest['cefVersion'].split('.')[0]):
         raise ValueError('Invalid runtime architecture or security epoch')
     if platform.system() == 'Darwin':
-        minimum = runtime_minimum(app / 'Contents/Frameworks/Chromium.radiusengine', minimum)
+        minimum = runtime_minimum(app / 'Contents/Frameworks/Chromium.neutrinoengine', minimum)
 minimum_text = '.'.join(map(str, minimum if minimum[2] else minimum[:2]))
 info['CFBundleVersion'] = str(build)
 info['CFBundleShortVersionString'] = version

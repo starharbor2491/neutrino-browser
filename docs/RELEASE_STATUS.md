@@ -1,31 +1,24 @@
-# Radius v1 implementation and release status
+# Neutrino rebuild status
 
-The v1 implementation combines a native WebKit browser, optional Chrome-style Chromium, 18 module packages, a graphical customization editor, and a verified complete-application installer. The accepted source, native checks, installer downloads and exact hashes are recorded in [AUDIT.md](AUDIT.md).
+Neutrino is being rebuilt against [the confirmed brief](PRODUCT_PLAN.md). No Neutrino core release or complete parity claim has been verified.
 
-The consolidated v1 branch is merged into `main`. [Radius 1.0.0](https://github.com/starharbor2491/radius-browser/releases/tag/v1.0.0) provides permanent DMG downloads for complete Chromium + WebKit installations on Apple Silicon and Intel, plus a smaller universal WebKit option. These are the exact accepted CI installers. The release is marked prerelease for its ad-hoc signing/notarization limitation.
+Implemented source includes a custom workspace shell/start surface, an eight-stage first-run flow, a docking editor, named per-Space setups, shared tab state and live-tab transfer ownership, folders, optional recoverable archiving, local Keychain password storage/requested login filling, starter blocking rules, BYOK/local page and selected-text assistance, validated organization proposals, and the documented OpenAI OSS account flow.
 
-| Area | Implemented behavior |
-| --- | --- |
-| Browsing | Multiple windows/profiles, tabs on four edges, pin/reorder/reopen, native history/bookmarks/import, find, zoom, downloads, popup/dialog/media controls, and engine crash recovery |
-| Engines | WebKit by default; normal Chrome windows with native grouped tabs, extension toolbar and stable tab/window identity. The active page can reopen with another engine; sign-ins and unsaved work remain separate |
-| Extensions | Native profile selector, Chrome extension manager and Web Store. Defined MV3 scope: content scripts, service workers, scripting/storage, permissions, actions/popups, options, side panels and native tab/window semantics. Extension-created Chrome windows are managed auxiliary windows |
-| Modules | Three independently installed native workers, three bounded behavior programs, twelve declarative packages. Installed payloads are removed on uninstall. Required tab systems and exclusive providers have validated, transactional replacement |
-| Catalogs | Official bundled packages, graphical local package/catalog import, bounded HTTPS community catalogs, payload integrity receipts, publisher and permission previews, dependency/version validation |
-| Appearance | macOS, Material-inspired, Liquid Glass-inspired, Graphite; typography, text/spacing scales, icon packs, colors and contrast feedback, borders/shadows, density/corners, component overrides and accessibility preferences |
-| Layout | Tabs on four edges, trees, split panes, multiple toolbar regions, draggable controls with keyboard placement/reorder, address/tab widths, sidebars on either side, responsive second panel, automatic sidebar hiding, menus and start widgets |
-| Setups | Preview, undo, saved configurations and bounded import/export with module requirements. Dependencies and activation permissions are reviewed before atomic application; browsing data and permission grants are excluded |
-| Privacy | Separate engine/profile stores; temporary private stores; no private browsing metadata/notes. Comprehensive profile deletion and website-data clearing have durable restart cleanup, scope checks and failure recovery |
-| Recovery | Native settings/modules/recovery survive engine failure; original-preserving library/module backups, configuration restore, write retry, safe return to WebKit, interrupted-package rollback |
-| Distribution | Universal WebKit app plus architecture-specific Chromium payloads in the same app. Graphical DMGs and signed update/offline-import flows stage a whole verified app, then activate with a READY-confirmed helper after explicit restart |
+Blink now uses Chrome-style CEF Views without Chrome's navigation toolbar. ABI 5 and runtime style `chromeViews` deliberately reject old hosting packages. Native checks verify rendering, Neutrino tab/address commands, retained documents, popup POST/opener behavior, Profile/private isolation, Reader/capture and genuine Web Store installation. Full extension acceptance fails because `chrome.action.openPopup` requires a browser toolbar; a Neutrino-owned replacement still needs engine integration. The complete Blink installer is not accepted for release.
+
+Build/package scripts target Apple Silicon and include Blink by default. Explicit WebKit-only development builds are incomplete. Consumer signing/notarization still require configured credentials.
 
 ## Verification boundary
 
-The current portable suite passes six installed-acceptance driver regressions and 69 Swift tests, including bounded grouped Chrome sessions, Unicode title limits, database recovery, hostile imports, paired custom colors, profile deletion/rollback, compatibility bounds, module installation and interrupted transaction rollback, publisher/ABI/update policy, and downgrade rejection. All 18 factory packages validate. Native tests additionally exercise real WebKit storage, downloads, module workers and app installation staging. Native debug/release and installed-app receipts are linked in [AUDIT.md](AUDIT.md).
+Portable Swift tests cover storage, module integrity/transactions, privacy records, workspace normalization, ownership, archiving, endpoint validation, and organization boundaries. macOS CI passes 160 tests in debug and 89 native tests in release, builds the app, captures its interface and verifies installed WebKit launch, ordinary quit and removal. Python tests cover installed-acceptance handling; all 18 module packages validate. Exact source and CI evidence are recorded in [TESTING.md](TESTING.md).
 
-The accepted Chromium variants require actual embedded HTTP/HTTPS rendering, Reader/capture, profile/private isolation, popup/auxiliary lifetime, native toolbar geometry/focus, the defined MV3 lifecycle, genuine Web Store installation, full-process persistence/removal, and ordinary shutdown. Recorded results identify the exact tested source.
+Outstanding gates:
+- Interactive setup/editor acceptance, accessibility and clean-Mac verification.
+- Full Blink extension/API compatibility, action popup integration and installed shutdown/restart acceptance.
+- Widevine/CDM licensing, codec distribution, and protected streaming playback.
+- Native OpenAI sign-in/refresh/revocation/model discovery/inference; xAI registration/entitlements.
+- Developer ID/notarization and the complete new installer.
 
-Developer ID and notarization credentials are not configured. Development artifacts are ad-hoc signed and unnotarized. The production workflow requires those credentials, signs nested code with hardened runtime, notarizes/staples the app and DMG, and fails closed if trust is unavailable. Development builds do not enable the trusted network installer by weakening publisher verification.
+See [TESTING.md](TESTING.md) and [PARITY.md](PARITY.md). [AUDIT.md](AUDIT.md) and [1.0.0 notes](RELEASE_NOTES_1.0.0.md) are historical predecessor records; they do not validate Neutrino.
 
-Interactive clean-Mac acceptance remains necessary for signing/distribution, VoiceOver, IME, multiple displays, media prompts and representative websites. No benchmark or universal extension-compatibility claim is made. Password, sync, translation, further engines and interchangeable engine internals are ecosystem expansion examples rather than shipped providers.
-
-No weekly usage-limit reset was invoked by the agent.
+The publishing workflow requires exact-installer installed acceptance and publisher-recorded core checks, including protected streaming. No passing Neutrino core receipt is supplied.

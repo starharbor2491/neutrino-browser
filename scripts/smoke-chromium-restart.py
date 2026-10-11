@@ -13,15 +13,15 @@ if not receipt.is_file():
     sys.exit("The first native smoke launch did not record a successful Web Store install.")
 environment = os.environ.copy()
 environment.update({
-    "RADIUS_SMOKE_TEST_DATA": str(data),
-    "RADIUS_SMOKE_TEST_OUTPUT": str(root / "dist/screenshots"),
-    "RADIUS_CHROMIUM_EXTENSION_RESTART": "1",
+    "NEUTRINO_SMOKE_TEST_DATA": str(data),
+    "NEUTRINO_SMOKE_TEST_OUTPUT": str(root / "dist/screenshots"),
+    "NEUTRINO_CHROMIUM_EXTENSION_RESTART": "1",
 })
 log = root / "dist/smoke-chromium-restart.log"
 try:
     with log.open("w") as output:
-        app = Path(environment.get("RADIUS_SMOKE_APP_PATH", str(root / "dist/Radius.app")))
-        result = subprocess.run([str(app / "Contents/MacOS/Radius"), "--smoke-test"],
+        app = Path(environment.get("NEUTRINO_SMOKE_APP_PATH", str(root / "dist/Neutrino.app")))
+        result = subprocess.run([str(app / "Contents/MacOS/Neutrino"), "--smoke-test"],
                                 cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT,
                                 timeout=90, check=False)
     status = result.returncode

@@ -1,3 +1,5 @@
+> Historical predecessor release record. This is not a release or acceptance claim for Neutrino.
+
 Radius 1.0.0 for macOS 14 or later. The Chromium installers include the complete native CEF runtime, five sandbox helper variants, framework resources, license notices, updater helpers, and all 18 default modules. WebKit is available in every installer through the macOS system framework. No Homebrew, Xcode, package manager, or additional engine download is required to use the installed app.
 
 | Mac | Complete installer |

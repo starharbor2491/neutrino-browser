@@ -9,7 +9,7 @@ smoke_watchdog_pid=""
 smoke_started_at="$(date +%s)"
 smoke_deadline=90
 smoke_timeout_marker="$PWD/dist/smoke-timeout.txt"
-if [[ -n "${RADIUS_CHROMIUM_PACKAGE:-}" ]]; then smoke_deadline=420; fi
+if [[ -n "${NEUTRINO_CHROMIUM_PACKAGE:-}" ]]; then smoke_deadline=420; fi
 cleanup() {
   smoke_status=$?
   trap - EXIT HUP INT TERM
@@ -37,7 +37,7 @@ cleanup() {
     fi
     if [[ "$smoke_status" -ge 128 ]]; then
       # ReportCrash can finish after the app exits. Collect only this launch's
-      # Radius reports, with a short deadline and a bounded artifact size.
+      # Neutrino reports, with a short deadline and a bounded artifact size.
       python3 - "$smoke_started_at" <<'PY' || true
 import pathlib, shutil, sys, time
 started = int(sys.argv[1])
@@ -46,7 +46,7 @@ locations = [pathlib.Path.home() / 'Library/Logs/DiagnosticReports', pathlib.Pat
 copied = set()
 for _ in range(10):
     for directory in locations:
-        for report in directory.glob('Radius*'):
+        for report in directory.glob('Neutrino*'):
             try:
                 if report.suffix not in {'.ips', '.crash'} or report.is_symlink() or report in copied:
                     continue
@@ -61,7 +61,7 @@ for _ in range(10):
     if copied:
         break
     time.sleep(0.5)
-print(f'Collected {len(copied)} current Radius crash reports.')
+print(f'Collected {len(copied)} current Neutrino crash reports.')
 PY
     fi
   fi
@@ -95,21 +95,21 @@ if [[ ! "$smoke_port" =~ ^[0-9]+$ ]]; then
 fi
 smoke_url="http://127.0.0.1:$smoke_port/"
 curl --noproxy '*' --connect-timeout 2 --max-time 5 -fsS "$smoke_url" >/dev/null
-smoke_app_path="${RADIUS_SMOKE_APP_PATH:-$PWD/dist/Radius.app}"
-if [[ -n "${RADIUS_SMOKE_LAUNCH_RECORD:-}" ]]; then
-  python3 - "$RADIUS_SMOKE_LAUNCH_RECORD" <<'PY' || echo 'Optional launch measurement record unavailable.' >&2
+smoke_app_path="${NEUTRINO_SMOKE_APP_PATH:-$PWD/dist/Neutrino.app}"
+if [[ -n "${NEUTRINO_SMOKE_LAUNCH_RECORD:-}" ]]; then
+  python3 - "$NEUTRINO_SMOKE_LAUNCH_RECORD" <<'PY' || echo 'Optional launch measurement record unavailable.' >&2
 import json, pathlib, sys, time
 pathlib.Path(sys.argv[1]).write_text(json.dumps({'monotonic': time.monotonic()}))
 PY
 fi
-RADIUS_SMOKE_TEST_DATA="$PWD/dist/smoke-data" \
-RADIUS_SMOKE_TEST_OUTPUT="$PWD/dist/screenshots" \
-RADIUS_SMOKE_TEST_URL="$smoke_url" \
-RADIUS_SMOKE_TEST_EXTENSION_FIXTURE="$PWD/Tests/Fixtures/ChromiumExtension" \
-  "$smoke_app_path/Contents/MacOS/Radius" --smoke-test >dist/smoke-app.log 2>&1 &
+NEUTRINO_SMOKE_TEST_DATA="$PWD/dist/smoke-data" \
+NEUTRINO_SMOKE_TEST_OUTPUT="$PWD/dist/screenshots" \
+NEUTRINO_SMOKE_TEST_URL="$smoke_url" \
+NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE="$PWD/Tests/Fixtures/ChromiumExtension" \
+  "$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test >dist/smoke-app.log 2>&1 &
 smoke_app_pid=$!
-if [[ -n "${RADIUS_SMOKE_PID_RECORD:-}" ]]; then
-  printf '%s\n' "$smoke_app_pid" >"$RADIUS_SMOKE_PID_RECORD" || echo 'Optional process measurement record unavailable.' >&2
+if [[ -n "${NEUTRINO_SMOKE_PID_RECORD:-}" ]]; then
+  printf '%s\n' "$smoke_app_pid" >"$NEUTRINO_SMOKE_PID_RECORD" || echo 'Optional process measurement record unavailable.' >&2
 fi
 (
   timer_pid=""
@@ -130,20 +130,20 @@ fi
   wait "$timer_pid"
   timer_pid=""
   if kill -0 "$smoke_app_pid" 2>/dev/null; then
-    echo "Radius is still running after 45 seconds; sampling process $smoke_app_pid."
+    echo "Neutrino is still running after 45 seconds; sampling process $smoke_app_pid."
     /usr/bin/sample "$smoke_app_pid" 3 -file dist/smoke-sample.txt >dist/smoke-sample.log 2>&1 &
     sample_pid=$!
   fi
   remaining=$((smoke_deadline - 45))
   quit_remaining=45
   while [[ "$remaining" -gt 0 ]]; do
-    if /usr/bin/grep -q 'Radius packaged-app smoke test passed.' dist/smoke-app.log; then
+    if /usr/bin/grep -q 'Neutrino packaged-app smoke test passed.' dist/smoke-app.log; then
       if [[ "$quit_remaining" -eq 0 ]]; then
-        echo 'Radius did not quit within 45 seconds after completing acceptance.' >&2
+        echo 'Neutrino did not quit within 45 seconds after completing acceptance.' >&2
         break
       fi
       if [[ "$quit_remaining" -eq 40 ]] && kill -0 "$smoke_app_pid" 2>/dev/null; then
-        echo "Radius is still running after its quit request; sampling process $smoke_app_pid."
+        echo "Neutrino is still running after its quit request; sampling process $smoke_app_pid."
         /usr/bin/sample "$smoke_app_pid" 3 -file dist/smoke-sample.txt >dist/smoke-sample.log 2>&1 &
         sample_pid=$!
       fi
@@ -158,7 +158,7 @@ fi
   if kill -0 "$smoke_app_pid" 2>/dev/null; then
     # TERM can produce exit status zero; record the timeout before signalling.
     : >"$smoke_timeout_marker"
-    echo "Radius failed to exit before its smoke-test deadline; sending TERM." >&2
+    echo "Neutrino failed to exit before its smoke-test deadline; sending TERM." >&2
     kill -TERM "$smoke_app_pid" 2>/dev/null || true
     sleep 5 &
     timer_pid=$!
@@ -196,7 +196,7 @@ with os.fdopen(descriptor, 'rb') as stream:
 if not encoded or len(encoded) > 4096:
     raise ValueError('Invalid download acceptance receipt.')
 staging = pathlib.Path(encoded.decode('utf-8').rstrip('\r\n'))
-filename = r'\.radius-download-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.part'
+filename = r'\.neutrino-download-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.part'
 if (not staging.is_absolute() or staging.parent != root.resolve(strict=True)
         or not re.fullmatch(filename, staging.name)):
     raise ValueError('Download acceptance receipt escapes its owned directory.')

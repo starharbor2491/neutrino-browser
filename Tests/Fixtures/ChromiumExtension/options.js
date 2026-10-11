@@ -5,27 +5,27 @@ const root = document.documentElement;
 
 function showTheme(theme) {
   checkbox.checked = theme === "dark";
-  root.dataset.radiusFixtureTheme = theme;
+  root.dataset.neutrinoFixtureTheme = theme;
   status.textContent = `Saved theme: ${theme}.`;
 }
 
 function showError(error) {
-  root.dataset.radiusFixtureError = String(error.message || error);
+  root.dataset.neutrinoFixtureError = String(error.message || error);
   status.textContent = `Fixture error: ${error.message || error}`;
 }
 
 chrome.storage.local.get({theme: "light"}).then(state => {
   showTheme(state.theme);
   checkbox.disabled = false;
-  root.dataset.radiusFixtureOptionsState = "ready";
+  root.dataset.neutrinoFixtureOptionsState = "ready";
 }, showError);
 
 checkbox.addEventListener("change", () => {
   const theme = checkbox.checked ? "dark" : "light";
-  root.dataset.radiusFixtureOptionsState = "saving";
+  root.dataset.neutrinoFixtureOptionsState = "saving";
   chrome.storage.local.set({theme}).then(() => {
     showTheme(theme);
-    root.dataset.radiusFixtureOptionsState = "saved";
+    root.dataset.neutrinoFixtureOptionsState = "saved";
   }, showError);
 });
 

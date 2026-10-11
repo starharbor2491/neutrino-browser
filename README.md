@@ -1,49 +1,37 @@
-# Radius
+# Neutrino
 
-A native macOS browser with WebKit and optional Chrome-style Chromium, local profiles, private windows, visual customization, split panes, and 18 module packages. Swift 6, SwiftUI, AppKit, and SQLite; no third-party Swift dependencies.
+A customizable, local-first macOS browser for Apple Silicon: Arc-inspired workspaces, a quiet custom interface, a visual docking editor, and Blink/WebKit adapters.
 
-Radius v1 includes Chrome extension management, a graphical module center, layout/theme editing, profile removal, and verified app installation/update/offline-DMG flows. See [release status](docs/RELEASE_STATUS.md), [acceptance evidence](docs/AUDIT.md), and [distribution](docs/DISTRIBUTION.md).
+This repository is being rebuilt against a [confirmed product brief](docs/PRODUCT_PLAN.md). The new product is not yet a verified core release. See [status](docs/RELEASE_STATUS.md) and the [parity ledger](docs/PARITY.md).
 
-## Install on a Mac
+- Spaces organize shared tabs/folders; Profiles isolate website accounts.
+- Live tabs transfer between windows without intentionally reloading their documents.
+- Guided setup, custom shell, docking preview/undo, and named per-Space appearances.
+- Keychain passwords, requested login filling, starter blocking rules, and recoverable tab archiving.
+- Optional BYOK/local AI, explicit page/selected-text sharing, and reviewed organization proposals. OpenAI OSS OAuth is implemented in source but awaits native acceptance; xAI registration is pending.
+- Existing SQLite, modules/workers, privacy cleanup, downloads, reader/capture, recovery, and trusted updater infrastructure remain reusable.
 
-Requires macOS 14 or later. Download a DMG from the [Radius 1.0.0 release](https://github.com/starharbor2491/radius-browser/releases/tag/v1.0.0), open it, drag Radius to Applications, eject the disk image, and open Radius.
+The finished target covers locally runnable Arc/Chrome/Opera/GX workflows in verified stages. No hosted sync, VPN, cloud storage, or Neutrino store.
 
-| Mac | Download |
-| --- | --- |
-| Apple Silicon (M-series), Chromium + WebKit | [Complete installer](https://github.com/starharbor2491/radius-browser/releases/download/v1.0.0/Radius-1.0.0-Chromium-arm64-development.dmg) |
-| Intel, Chromium + WebKit | [Complete installer](https://github.com/starharbor2491/radius-browser/releases/download/v1.0.0/Radius-1.0.0-Chromium-x86_64-development.dmg) |
-| Either CPU, WebKit only | [Smaller installer](https://github.com/starharbor2491/radius-browser/releases/download/v1.0.0/Radius-1.0.0-WebKit-universal-development.dmg) |
+## Build on Apple Silicon
 
-The complete installers bundle Chromium's framework, sandbox helpers, resources, and all 18 modules. WebKit uses the framework supplied by macOS. No package manager, developer tools, or additional engine download is required. The release includes checksums and installation receipts; see [AUDIT.md](docs/AUDIT.md).
-
-Choose **WebKit universal** for either Apple Silicon or Intel, **Chromium arm64** for Apple Silicon, or **Chromium x86_64** for Intel. Chromium installers also contain WebKit; change the default in **Settings → Browsing engines** or reopen the active page with another engine. Website sign-ins and unsaved forms remain separate.
-
-Developer ID and notarization credentials are not configured, so these development installers are ad-hoc signed and unnotarized. If macOS blocks the app, review its source and the installer checksum, then use **System Settings → Privacy & Security → Open Anyway** and confirm **Open**. The trusted in-app updater requires a publisher-signed release. [Distribution instructions](docs/DISTRIBUTION.md) describe installation and the production signing pipeline.
-
-## Build from source
-
-Requires Xcode 16+ or Swift 6 command-line tools.
+Requires macOS 14+, Swift 6/Xcode, Python 3, and CMake. Fetching the pinned CEF SDK requires network access during the build; the complete installer is intended to work offline.
 
 ```sh
 ./scripts/test.sh
 ./scripts/build-app.sh
-open dist/Radius.app
+python3 scripts/package-release.py --development
 ```
 
-You can also open `Package.swift` in Xcode and run the Radius executable. [Chromium build instructions and constraints](docs/CHROMIUM.md) describe the optional runtime.
+The default build includes Blink, WebKit, engine helpers, bundled modules, and the updater. Development artifacts are ad-hoc signed. Consumer packaging requires Developer ID/notarization credentials and all core acceptance gates.
 
-## Included
+An explicitly incomplete shell-development build is available with:
+```sh
+NEUTRINO_WEBKIT_DEVELOPMENT_ONLY=1 ./scripts/build-app.sh
+```
 
-- Multiple windows; tabs on all four edges; pinning, reordering, duplication, reopening, and expandable tab trees.
-- Resizable side-by-side or stacked browsing panes with independent pages and shared controls for the active pane.
-- Navigation, search, find, page zoom, popup controls, JavaScript dialogs, and web-process crash recovery.
-- Profile-separated website storage, bookmarks, history, and notes; private windows with temporary website storage and no saved browsing metadata.
-- Bookmark HTML import/export and native downloads in both engines, with destination, replacement and cancellation controls.
-- Resource Monitor, Memory Breakdown and Reader as removable executable packages; Notes, Capture and Focus as bounded behavior programs; alternate tab systems, themes, layouts, icon packs, menus and widgets as declarative packages. Dependencies, updates, role replacement, local import and community catalogs have native controls.
-- macOS, Material-inspired, Liquid Glass-inspired, and Graphite appearance; light/dark/system modes, accent, density, corners, transparency, and accessibility preferences.
-- Navigation at top/bottom, draggable toolbar regions, keyboard placement/reorder, fonts/colors/component styling, icon packs, responsive sidebars and widgets.
-- Preview, undo, named setups, configuration and required-module import/export, and native recovery independent of website engines.
+The custom Blink host needs native/extension acceptance. Blink alone does not establish licensed DRM playback or every extension API.
 
-Data lives in `~/Library/Application Support/org.radius.browser`. Regular browsing metadata is local SQLite. Each engine owns its separate profile stores; reopening a page in another engine reloads its safe URL and does not transfer cookies, forms, or JavaScript state. No telemetry, sync service, password database, or arbitrary native plugin loading is included. Community data catalogs can be added graphically; their publishers are self-reported.
+[Testing](docs/TESTING.md) · [Engines](docs/CHROMIUM.md) · [Distribution](docs/DISTRIBUTION.md) · [Design](docs/DESIGN.md) · [AI](docs/AI.md) · [Licensing](docs/LICENSING.md)
 
-The original repository license remains MIT. New Radius implementation files use MPL-2.0; see [licensing](docs/LICENSING.md).
+New code is MPL-2.0; the original repository retains its MIT license. Historical release records remain truthful.

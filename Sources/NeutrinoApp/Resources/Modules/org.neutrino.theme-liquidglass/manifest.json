@@ -1,0 +1,12 @@
+{
+  "id": "org.neutrino.theme-liquidglass",
+  "name": "Liquid Glass Theme",
+  "version": 1,
+  "summary": "Translucent glass surfaces that follow your Mac’s light or dark appearance.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "theme",
+  "dependencies": [],
+  "defaultInstalled": false,
+  "runtime": "declarative"
+}
