@@ -11,7 +11,15 @@ On Linux with Swift 6.2.1:
 
 The portable suite covers database round trips/recovery, modules and transactional rollback, distribution trust policy, reader bounds, Profiles/Spaces, live-tab ownership, archiving, blocker host boundaries, AI endpoint restrictions, and foreign/duplicate organization proposals.
 
-Swift syntax parsing checks grammar, not macOS type checking or execution. No macOS native tests or screenshots have run for the rebuilt Neutrino in this environment. Update this record if the source changes or more checks run.
+Swift syntax parsing checks grammar, not macOS type checking or execution. Native verification runs separately on GitHub's Apple Silicon macOS runners.
+
+## Native CI evidence
+
+Executable source: `79509ce1b8a70861332d3f65426a027d7335b4be`.
+
+[macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38129249593) passed. The debug suite runs 160 tests; release native integration runs 89. The development WebKit DMG passed sealed copy, detached installed launch, ordinary quit and removal. Native captures cover the shell, settings, editor and all eight setup screens. Visual review caught and corrected an overflowing editor inspector; its header, exit and Save controls now remain visible. Screenshot capture does not verify interactive setup completion or all editor/accessibility workflows.
+
+[Blink integration CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38129249568) builds the complete Apple Silicon app and DMG. Rendering, custom tab/address commands, retained documents, popup POST/opener behavior, Profile/private isolation, Reader/capture and genuine Web Store installation pass. The full MV3 fixture fails with **Browser window has no toolbar** when exercising `chrome.action.openPopup`. Full Blink installed shutdown/restart acceptance therefore remains unverified. This failure remains a core release gate; the checks have not been disabled or treated as passing.
 
 ## Native and installed gates
 
