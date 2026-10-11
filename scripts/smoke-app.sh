@@ -106,7 +106,7 @@ NEUTRINO_SMOKE_TEST_DATA="$PWD/dist/smoke-data" \
 NEUTRINO_SMOKE_TEST_OUTPUT="$PWD/dist/screenshots" \
 NEUTRINO_SMOKE_TEST_URL="$smoke_url" \
 NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE="$PWD/Tests/Fixtures/ChromiumExtension" \
-  "$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test -ApplePersistenceIgnoreState YES >dist/smoke-app.log 2>&1 &
+  "$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test >dist/smoke-app.log 2>&1 &
 smoke_app_pid=$!
 if [[ -n "${NEUTRINO_SMOKE_PID_RECORD:-}" ]]; then
   printf '%s\n' "$smoke_app_pid" >"$NEUTRINO_SMOKE_PID_RECORD" || echo 'Optional process measurement record unavailable.' >&2
