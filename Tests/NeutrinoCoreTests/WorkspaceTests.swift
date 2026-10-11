@@ -4,6 +4,20 @@ import Testing
 
 @testable import NeutrinoCore
 
+@Test func recreatedSpacesAndArchivedBlankTabsKeepTheChosenEngine() throws {
+  var state = LibraryState()
+  state.profiles[0].engineID = .webkit
+  state.spaces = nil
+  state.normalizeSpaces()
+  var space = try #require(state.spaces?.first)
+  #expect(space.tabs[0].engineID == .webkit)
+  let original = space.tabs[0].id
+  space.tabs[0].lastUsedAt = Date(timeIntervalSince1970: 0)
+  space.archiveIdleTabs(before: Date())
+  #expect(space.archivedTabs.first?.id == original)
+  #expect(space.tabs[0].engineID == .webkit)
+}
+
 @Test func spacesShareProfilesButKeepOrganizationAndSetupsSeparate() throws {
   var state = LibraryState()
   let profile = state.profiles[0].id

@@ -73,7 +73,8 @@ final class BrowserModel: ObservableObject {
     var bookmarks: [Bookmark] { app.library.bookmarks.filter { $0.profileID == session.profileID } }
     init(app: AppState, isPrivate: Bool) {
         self.app = app; self.isPrivate = isPrivate; session = app.claimSession(privateBrowsing: isPrivate)
-        for i in session.tabs.indices where session.tabs[i].engineID == nil { session.tabs[i].engineID = .chromium }
+        let engine = app.library.profiles.first { $0.id == session.profileID }?.engineID ?? .chromium
+        for i in session.tabs.indices where session.tabs[i].engineID == nil { session.tabs[i].engineID = engine }
         if isPrivate {
             privateDataStore = .nonPersistent()
             ChromiumRuntime.shared.beginPrivateSession(session.id)

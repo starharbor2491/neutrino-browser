@@ -96,7 +96,10 @@ final class AppState: ObservableObject {
                 library.sessions = []
                 for i in (library.spaces ?? []).indices {
                     library.spaces?[i].tabs.removeAll { !$0.pinned && $0.folderID == nil }
-                    if library.spaces?[i].tabs.isEmpty == true { library.spaces?[i].tabs = [BrowserTab(engineID: .chromium)] }
+                    if library.spaces?[i].tabs.isEmpty == true {
+                        let engine = library.profiles.first { $0.id == library.spaces?[i].profileID }?.engineID ?? .chromium
+                        library.spaces?[i].tabs = [BrowserTab(engineID: engine)]
+                    }
                 }
             }
             if let days = state.preferences.autoArchiveDays, days > 0 {
@@ -428,7 +431,8 @@ final class AppState: ObservableObject {
             claimedSessions.insert(saved.id); return saved
         }
         let space = library.spaces![0]
-        var session = WindowSession(profileID: space.profileID, tabs: privateBrowsing ? [BrowserTab(engineID: .chromium)] : space.tabs)
+        let engine = library.profiles.first { $0.id == space.profileID }?.engineID ?? .chromium
+        var session = WindowSession(profileID: space.profileID, tabs: privateBrowsing ? [BrowserTab(engineID: engine)] : space.tabs)
         if !privateBrowsing { session.spaceID = space.id }
         if !privateBrowsing { claimedSessions.insert(session.id); library.sessions.append(session) }
         return session

@@ -19,6 +19,7 @@ struct ReaderModuleTests {
         let repository = try ModuleRepository(root: directory.appendingPathComponent("Modules"))
         try repository.install(ModuleManifest(id: "org.example.legacy-reader", name: "AAA Legacy Reader", summary: "Legacy descriptor", capability: .reader))
         await app.load()
+        app.library.profiles[0].engineID = .webkit
         #expect(app.enabled(.reader))
         let model = BrowserModel(app: app, isPrivate: true)
         defer { model.closeWindow() }

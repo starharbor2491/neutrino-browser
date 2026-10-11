@@ -5,7 +5,7 @@ Run `./scripts/test.sh` with Swift 6 and SQLite development headers. macOS addit
 ## Verified in this workspace
 
 On Linux with Swift 6.2.1:
-- 70 portable Swift tests passed.
+- 71 portable Swift tests passed.
 - Six installed-acceptance and six core-publication Python regressions passed.
 - All 18 bundled module packages validated.
 

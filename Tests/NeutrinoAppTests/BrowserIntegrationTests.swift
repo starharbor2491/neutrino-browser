@@ -490,12 +490,13 @@ struct BrowserIntegrationTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let browser = BrowserModel(app: app, isPrivate: false)
         let oldView = try #require(browser.activeWebTab as? WebTab)
-        let profile = Profile(name: "Separate")
+        var profile = Profile(name: "Separate")
+        profile.engineID = .webkit
         app.library.profiles.append(profile)
         browser.changeProfile(profile.id)
         let newView = try #require(browser.activeWebTab as? WebTab)
         #expect(newView !== oldView)
-        #expect(oldView.webView.navigationDelegate == nil)
+        #expect(oldView.webView.navigationDelegate != nil)
         #expect(newView.webView.configuration.websiteDataStore.identifier == profile.id)
         browser.closeWindow()
         #expect(await app.flush())

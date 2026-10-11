@@ -61,7 +61,7 @@ public struct BrowserSpace: Identifiable, Codable, Equatable, Sendable {
     }
     archivedTabs.append(contentsOf: idle)
     tabs.removeAll { tab in idle.contains { $0.id == tab.id } }
-    if tabs.isEmpty { tabs = [BrowserTab(engineID: .chromium)] }
+    if tabs.isEmpty { tabs = [BrowserTab(engineID: idle.first?.engineID ?? .chromium)] }
     archivedTabs = Array(archivedTabs.suffix(200))
   }
   @discardableResult public mutating func restoreArchivedTab(_ id: UUID) -> Bool {
@@ -84,7 +84,10 @@ extension LibraryState {
     var valid = Array(
       (spaces ?? []).filter { profileIDs.contains($0.profileID) && seen.insert($0.id).inserted }
         .prefix(100))
-    if valid.isEmpty { valid = [BrowserSpace(name: "Personal", profileID: profiles[0].id)] }
+    if valid.isEmpty {
+      valid = [BrowserSpace(name: "Personal", profileID: profiles[0].id,
+        tabs: [BrowserTab(engineID: profiles[0].engineID ?? .chromium)])]
+    }
     var usedTabIDs = Set<UUID>()
     for i in valid.indices {
       valid[i].normalize()

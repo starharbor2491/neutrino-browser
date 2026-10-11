@@ -12,7 +12,7 @@ struct ProfilesIntegrationTests {
     @Test func deletingAProfileCancelsItsTransfersAfterTheWindowSwitchesProfiles() async throws {
         let (app, directory) = try await fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let removed = Profile(name: "Download origin"), kept = Profile(name: "Current profile")
+        let removed = webKitProfile("Download origin"), kept = webKitProfile("Current profile")
         app.library.profiles = [removed, kept]
         app.library.sessions = [WindowSession(profileID: removed.id)]
         let browser = BrowserModel(app: app, isPrivate: false)
@@ -45,8 +45,8 @@ struct ProfilesIntegrationTests {
     @Test func deletingAProfileResetsItsWindowsAndErasesOnlyItsWebsiteData() async throws {
         let (app, directory) = try await fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let removed = Profile(name: "Remove")
-        let kept = Profile(name: "Keep")
+        let removed = webKitProfile("Remove")
+        let kept = webKitProfile("Keep")
         app.library.profiles = [removed, kept]
         let first = BrowserTab(title: "Pinned", url: URL(string: "https://removed.invalid"), pinned: true, engineID: .webkit)
         let child = BrowserTab(title: "Child", url: URL(string: "https://child.invalid"), parentID: first.id, engineID: .webkit)
@@ -116,7 +116,7 @@ struct ProfilesIntegrationTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         // A state with no loaded database makes the commit fail deterministically.
         let app = AppState(directory: directory)
-        let removed = Profile(name: "Remove"), kept = Profile(name: "Keep")
+        let removed = webKitProfile("Remove"), kept = webKitProfile("Keep")
         app.library.profiles = [removed, kept]
         app.ready = true
         let browser = BrowserModel(app: app, isPrivate: false)
@@ -150,7 +150,7 @@ struct ProfilesIntegrationTests {
     @Test func queuedWebsiteClearSurvivesRestartAndKeepsLibraryDataAndOtherProfileStorage() async throws {
         let (app, directory) = try await fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let cleared = Profile(name: "Clear"), kept = Profile(name: "Keep")
+        let cleared = webKitProfile("Clear"), kept = webKitProfile("Keep")
         app.library.profiles = [cleared, kept]
         app.library.sessions = [WindowSession(profileID: cleared.id, tabs: [BrowserTab(url: URL(string: "https://restore.invalid"), engineID: .webkit)])]
         seedLibraryContents(app, profiles: [cleared, kept])
@@ -254,7 +254,7 @@ struct ProfilesIntegrationTests {
     @Test func switchingProfilesDuringDeletionKeepsBothSourceAndDestinationContextsIntact() async throws {
         let (app, directory) = try await fixture()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let deleting = app.library.profiles[0], kept = Profile(name: "Keep")
+        let deleting = app.library.profiles[0], kept = webKitProfile("Keep")
         app.library.profiles.append(kept)
         let source = BrowserModel(app: app, isPrivate: true)
         let destination = BrowserModel(app: app, isPrivate: true)
@@ -441,7 +441,7 @@ struct ProfilesIntegrationTests {
     @Test func finalQuitFreezeProtectsTheSnapshotAndCancellationResumesRealAutosave() async throws {
         let (app, directory) = try await fixture()
         let originalProfile = app.library.profiles[0]
-        let otherProfile = Profile(name: "Other profile")
+        let otherProfile = webKitProfile("Other profile")
         app.library.profiles.append(otherProfile)
         let firstTab = BrowserTab(title: "First", pinned: true, engineID: .webkit)
         let secondTab = BrowserTab(title: "Second", engineID: .webkit)
@@ -540,7 +540,7 @@ struct ProfilesIntegrationTests {
         let (app, directory) = try await fixture()
         defer { app.ready = false; try? FileManager.default.removeItem(at: directory) }
         let existing = app.library.profiles[0]
-        let firstProfile = Profile(name: "First request"), secondProfile = Profile(name: "Second request")
+        let firstProfile = webKitProfile("First request"), secondProfile = webKitProfile("Second request")
         app.library.profiles.append(contentsOf: [firstProfile, secondProfile])
         try await app.requestWebsiteDataClear(existing.id)
         var firstSave: ProfileCallbackWait<Bool>?
@@ -588,6 +588,11 @@ struct ProfilesIntegrationTests {
         #expect(persisted.profiles == app.library.profiles)
     }
 
+    private func webKitProfile(_ name: String) -> Profile {
+        var profile = Profile(name: name)
+        profile.engineID = .webkit
+        return profile
+    }
     private func fixture() async throws -> (AppState, URL) {
         _ = NSApplication.shared
         let directory = temporaryDirectory(), app = AppState(directory: directory)
