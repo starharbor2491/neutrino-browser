@@ -127,7 +127,7 @@ enum AppSmokeTest {
                 guard text.contains("Local browser check") else { throw ValidationError("Reader could not read the HTTP fixture.") }
                 trace("Capturing customized controls at wide and narrow window sizes")
                 let originalFrame = window.frame
-                let originalConfiguration = app.configuration
+                let originalConfiguration = browser.configuration
                 var customized = originalConfiguration
                 customized.theme.typography = .rounded; customized.theme.fontScale = 1.2
                 customized.theme.spacingScale = 1.15; customized.theme.iconStyle = .filled
@@ -174,21 +174,24 @@ enum AppSmokeTest {
                 }
                 window.setContentSize(NSSize(width: 1240, height: 720))
                 try await Task.sleep(for: .milliseconds(250))
+                let appDefaultBeforeClosing = app.library.preferences.configuration
                 browser.closeSecondarySidebar()
                 try await Task.sleep(for: .milliseconds(250))
                 guard let view = window.contentView, browser.panel == .resources,
                       layoutRegion("neutrino.primarySidebar", in: view) != nil,
                       layoutRegion("neutrino.secondarySidebar", in: view) == nil,
-                      app.library.preferences.configuration.layout.secondaryPanel == nil else {
+                      app.library.configuration(for: browser.session.spaceID).layout.secondaryPanel == nil,
+                      app.library.preferences.configuration == appDefaultBeforeClosing else {
                     throw ValidationError("Closing the second sidebar did not retain the primary panel and save the change.")
                 }
                 window.setFrame(originalFrame, display: true)
                 app.applyConfiguration(originalConfiguration)
+                app.applyConfiguration(originalConfiguration, to: browser.session.spaceID)
                 trace("Verifying split panes and tree tabs")
                 browser.panel = nil
-                var config = app.library.preferences.configuration
+                var config = browser.configuration
                 config.layout.tabs = .leading; config.layout.treeTabs = true; config.layout.split = .sideBySide
-                app.applyConfiguration(config); browser.synchronizeSplit()
+                app.applyConfiguration(config, to: browser.session.spaceID); browser.synchronizeSplit()
                 guard let pair = browser.session.split else { throw ValidationError("Split panes did not open.") }
                 browser.selectTab(pair.second); browser.navigate(address)
                 let splitDeadline = Date().addingTimeInterval(10)
