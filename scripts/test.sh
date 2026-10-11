@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 scripts/test-installed-acceptance.py
 python3 scripts/test-core-acceptance.py
+python3 scripts/test-disk-images.py
 if [[ "$(uname -s)" == Darwin ]]; then
   configuration=debug
   previous_argument=""

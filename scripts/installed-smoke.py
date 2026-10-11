@@ -19,12 +19,15 @@ import subprocess
 import tempfile
 import threading
 import time
+from disk_images import run as run_disk_image
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / 'dist'
 
 
 def checked(command, timeout=60):
+    if str(command[0]) == 'hdiutil':
+        return run_disk_image(command, timeout=timeout)
     result = subprocess.run([str(x) for x in command], timeout=timeout,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode:

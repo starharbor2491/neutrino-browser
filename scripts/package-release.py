@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from disk_images import run as run_disk_image
 
 
 def digest(path):
@@ -28,6 +29,8 @@ def digest(path):
 
 
 def checked(command):
+    if command[0] == 'hdiutil':
+        return run_disk_image(command)
     subprocess.run([str(x) for x in command], check=True)
 
 
