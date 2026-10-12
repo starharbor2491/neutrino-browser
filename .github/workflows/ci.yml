@@ -70,6 +70,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y libsqlite3-dev python3 build-essential curl ca-certificates
       - uses: dtolnay/rust-toolchain@stable
-      - run: apt-get update && apt-get install -y libsqlite3-dev python3 build-essential
       - run: ./scripts/test.sh

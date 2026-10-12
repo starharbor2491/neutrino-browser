@@ -121,6 +121,7 @@ fn serve(mut stream: TcpStream, shell: &mut Shell) -> std::io::Result<()> {
     }
     let path = first.split_whitespace().nth(1).unwrap_or("/");
     let (mime, body) = match path {
+        "/neutrino.svg" => ("image/svg+xml", neutrino_shell::LOGO.into()),
         "/shell.css" => ("text/css", CSS.into()),
         "/shell.js" => ("text/javascript", JS.into()),
         "/dispatch" => {

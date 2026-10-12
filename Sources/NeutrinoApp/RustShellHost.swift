@@ -56,13 +56,13 @@ final class RustShellContainer: NSView {
 private final class ShellAssets: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url, url.scheme == "neutrino-ui", url.host == "shell",
-              ["/index.html", "/shell.css", "/shell.js"].contains(url.path),
+              ["/index.html", "/shell.css", "/shell.js", "/neutrino.svg"].contains(url.path),
               let pointer = String(url.path.dropFirst()).withCString({ neutrino_shell_asset($0) }) else {
             urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist)); return
         }
         defer { neutrino_string_free(pointer) }
         let data = Data(String(cString: pointer).utf8)
-        let type = url.path.hasSuffix(".css") ? "text/css" : url.path.hasSuffix(".js") ? "text/javascript" : "text/html"
+        let type = url.path.hasSuffix(".svg") ? "image/svg+xml" : url.path.hasSuffix(".css") ? "text/css" : url.path.hasSuffix(".js") ? "text/javascript" : "text/html"
         urlSchemeTask.didReceive(URLResponse(url: url, mimeType: type, expectedContentLength: data.count, textEncodingName: "utf-8"))
         urlSchemeTask.didReceive(data)
         urlSchemeTask.didFinish()
@@ -212,7 +212,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func sendAction(_ request: [String: Any]) { push(stamped(handle.dispatch(request))) }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
-                               replyHandler: @escaping (Any?, String?) -> Void) {
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard !stopped, message.webView === container.chrome, message.frameInfo.isMainFrame,
               message.frameInfo.request.url?.scheme == "neutrino-ui", message.frameInfo.request.url?.host == "shell",
               let body = message.body as? [String: Any], let kind = body["kind"] as? String else {
@@ -384,7 +384,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard let id, let index = app.library.notes.firstIndex(where: { $0.id == id && $0.profileID == profileID }),
                   let value = command["value"] as? [String: String], let content = value["text"] else { return }
             if value["field"] == "title" { app.library.notes[index].title = String(content.prefix(200)) }
-            if value["field"] == "body" { app.library.notes[index].body = String(content.prefix(100_000)) }
+            if value["field"] == "body" { app.library.notes[index].text = String(content.prefix(100_000)) }
         case "deleteNote": if let id { app.library.notes.removeAll { $0.id == id && $0.profileID == profileID } }
         case "credentialFill":
             guard let model, let key = command["id"] as? String else { return }
@@ -403,7 +403,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard let model else { return }; assistantTask?.cancel()
             assistantTask = Task { @MainActor in
                 defer { assistantTask = nil; scheduleSync() }
-                do { assistantResponse = try await app.readerText(from: model.activeWebTab); sendAction(["op": "screen", "value": "assistant"]) }
+                do { assistantResponse = try await app.readerText(from: model.activeWebTab); sendAction(["op": "screen", "value": "reader"]) }
                 catch { app.notice = error.localizedDescription }
             }
         case "capture":

@@ -41,7 +41,7 @@ mkdir -p "$app_directory/Contents/Resources/Updater/arm64"
 cp "$arm_binary_directory/NeutrinoUpdater" "$app_directory/Contents/Resources/Updater/arm64/NeutrinoUpdater"
 codesign --force --sign - --identifier org.neutrino.updater "$app_directory/Contents/Resources/Updater/arm64/NeutrinoUpdater"
 cp LICENSE COPYING.MPL docs/LICENSING.md "$app_directory/Contents/Resources/Legal/"
-swift scripts/build-icon.swift dist/AppIcon.iconset
+cargo run --locked --release -p neutrino-icon -- dist/AppIcon.iconset
 iconutil -c icns dist/AppIcon.iconset -o "$app_directory/Contents/Resources/AppIcon.icns"
 # A complete build includes Blink. The explicit WebKit-only mode exists solely
 # for shell development/tests and cannot be published as a complete installer.

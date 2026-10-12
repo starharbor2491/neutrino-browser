@@ -12,16 +12,7 @@ public struct TabOrganization: Codable, Equatable, Sendable {
       throw ValidationError("The organization proposal is too large.")
     }
     let proposal = try JSONDecoder().decode(Self.self, from: data)
-    let ids = proposal.folders.flatMap(\.tabIDs)
-    guard proposal.folders.count <= 100, ids.count <= 200, Set(ids).count == ids.count,
-      Set(ids).isSubset(of: knownTabs),
-      proposal.folders.allSatisfy({
-        !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 80
-          && !$0.tabIDs.isEmpty
-      })
-    else {
-      throw ValidationError("The proposal contains invalid folders or tabs outside this Space.")
-    }
+    _ = try RustCore.request(["op": "validateOrganization", "proposal": try JSONSerialization.jsonObject(with: data), "knownTabs": knownTabs.map(\.uuidString)])
     return proposal
   }
   public func apply(to space: inout BrowserSpace) throws {

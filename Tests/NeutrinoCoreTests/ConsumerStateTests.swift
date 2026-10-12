@@ -132,7 +132,7 @@ import Testing
     #expect(config.theme.borderWidth == 2 && config.theme.shadowStrength == 0)
     #expect(config.theme.accentHex == nil && config.theme.textHex == nil && config.theme.surfaceHex == nil)
     #expect(config.theme.navigationAppearance?.cornerRadius == 10 && config.theme.navigationAppearance?.fontScale == 1.4)
-    #expect(config.layout.sidebarWidth == 240 && config.layout.addressWidth == 0.4 && config.layout.tabsWidth == 320)
+    #expect(config.layout.sidebarWidth == 240 && config.layout.addressWidth == 0.4 && config.layout.tabsWidth == 340)
     #expect(config.layout.tabs == .leading && config.layout.secondaryPanel == nil)
     #expect(config.layout.toolbarComponents?.count == 32)
     #expect(config.layout.toolbarComponents?.filter { $0.command == .back }.count == 1)

@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: MPL-2.0
+import AppKit
+import NeutrinoCore
+@preconcurrency import WebKit
+
+/// Runs against the bundled privileged UI in an actual macOS application window.
+/// The local web harness is deliberately not a substitute for these checks.
+@MainActor enum RustShellAcceptance {
+    static func webView(in root: NSView?) -> WKWebView? {
+        guard let root else { return nil }
+        if let web = root as? WKWebView, web.url?.scheme == "neutrino-ui" { return web }
+        return root.subviews.lazy.compactMap { webView(in: $0) }.first
+    }
+    static func waitForShell(in window: NSWindow) async throws -> WKWebView {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+        while ContinuousClock.now < deadline {
+            if let web = webView(in: window.contentView), (try? await web.evaluateJavaScript("!!document.querySelector('.app-shell')")) as? Bool == true { return web }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw ValidationError("The bundled Rust interface did not become ready.")
+    }
+    static func action(_ request: [String: Any], web: WKWebView) async throws {
+        let data = try JSONSerialization.data(withJSONObject: request)
+        let json = String(decoding: data, as: UTF8.self)
+        _ = try await web.callAsyncJavaScript("await window.neutrino.command(request);", arguments: ["request": try JSONSerialization.jsonObject(with: Data(json.utf8))], in: nil, contentWorld: .page)
+        try await Task.sleep(for: .milliseconds(80))
+    }
+    static func verify(window: NSWindow, app: AppState, model: BrowserModel, output: URL) async throws {
+        let web = try await waitForShell(in: window)
+        let initialFrame = window.frame
+        defer { window.setFrame(initialFrame, display: true) }
+        for width in [1240,760] {
+            window.setContentSize(NSSize(width: width, height: width == 760 ? 520 : 820))
+            try await Task.sleep(for: .milliseconds(160))
+            let fits = try await web.evaluateJavaScript("document.documentElement.scrollWidth <= innerWidth && !!document.querySelector('.start-search') && document.querySelector('.start-search').getBoundingClientRect().right <= innerWidth") as? Bool
+            guard fits == true else { throw ValidationError("The Rust start surface overflows the supported window size.") }
+            await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-shell-\(width).png"))
+        }
+        window.setContentSize(NSSize(width:1240,height:820))
+        // Drive actual DOM buttons through WebKit and the Rust/native command bridge.
+        _ = try await web.evaluateJavaScript("document.querySelector('.start-search').click()")
+        try await Task.sleep(for:.milliseconds(100))
+        guard (try await web.evaluateJavaScript("document.activeElement.id === 'command-input'")) as? Bool == true else { throw ValidationError("Search did not receive keyboard focus.") }
+        try await action(["op":"escape"], web:web)
+        try await action(["op":"screen","value":"editor"],web:web)
+        let original = model.configuration
+        try await action(["op":"dock","component":"tabs","region":"trailing"],web:web)
+        guard model.configuration == original else { throw ValidationError("An unsaved editor draft changed live configuration.") }
+        await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-customize.png"))
+        try await action(["op":"editor-undo"],web:web)
+        try await action(["op":"editor-save"],web:web)
+        guard model.configuration.layout.tabs == original.layout.tabs else { throw ValidationError("Editor undo was not applied before Save.") }
+        for screen in ["settings","modules","extensions","library"] {
+            try await action(["op":"screen","value":screen,"section":"general"],web:web)
+            guard (try await web.evaluateJavaScript("!!document.querySelector('.utility-screen')")) as? Bool == true else { throw ValidationError("The \(screen) interface did not render.") }
+            await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-\(screen).png"))
+            try await action(["op":"escape"],web:web)
+        }
+        // Moving a tab must retain both its live document and browsing context.
+        model.newTab(url:URL(string:"https://example.com"),engine:.webkit)
+        let moving=model.selectedTab.id, page=model.activeWebTab, profile=model.session.profileID
+        try await Task.sleep(for:.milliseconds(100))
+        try await action(["op":"move-tab","id":moving.uuidString,"group":"pinned"],web:web)
+        guard model.selectedTab.pinned, model.activeWebTab === page, model.session.profileID == profile else { throw ValidationError("A tab move lost its live document or Profile.") }
+        try await action(["op":"undo-tabs"],web:web)
+        guard !model.selectedTab.pinned, model.activeWebTab === page else { throw ValidationError("Tab move Undo did not preserve the document.") }
+        model.closeTab(moving)
+        var dark = model.configuration; dark.theme.colorMode = .dark
+        app.applyConfiguration(dark,to:model.session.spaceID)
+        try await Task.sleep(for:.milliseconds(150))
+        await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-shell-dark.png"))
+        app.applyConfiguration(original,to:model.session.spaceID)
+    }
+    static func verifyPageGeometry(window:NSWindow, model:BrowserModel) async throws {
+        let web=try await waitForShell(in:window)
+        try await action(["op":"screen","value":"browse"],web:web)
+        try await Task.sleep(for:.milliseconds(200))
+        let geometry = try await web.evaluateJavaScript("(()=>{const p=document.querySelector('.native-page');if(!p)return null;const r=p.getBoundingClientRect();return {width:r.width,height:r.height,x:r.x,y:r.y};})()") as? [String:Double]
+        guard let geometry, geometry["width",default:0]>=300, geometry["height",default:0]>=250,
+              model.activeWebTab.nativeView.window === window,
+              abs(model.activeWebTab.nativeView.bounds.width-geometry["width",default:0]) < 3 else { throw ValidationError("The native page does not match the Rust-rendered page region.") }
+    }
+}

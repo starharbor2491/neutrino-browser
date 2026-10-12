@@ -19,46 +19,20 @@ public enum SearchProvider: String, Codable, CaseIterable, Sendable {
 }
 
 public enum AddressResolver {
-    /// User-entered navigation only. Websites never gain access to local files or custom schemes.
+    /// Navigation policy lives in Rust and is shared with the interface reducer.
     public static func resolve(_ input: String, search: SearchProvider = .duckDuckGo) -> URL? {
-        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-        if let components = URLComponents(string: value), let scheme = components.scheme {
-            if ["http", "https"].contains(scheme.lowercased()),
-               let host = components.host, !host.isEmpty, components.user == nil, components.password == nil {
-                return components.url
-            }
-            // localhost:port and host:port are addresses, not executable schemes.
-            if !value.contains("://"), isHostWithPort(value) {
-                return URL(string: "http://" + value)
-            }
-            if ["javascript", "data", "file", "about", "vbscript"].contains(scheme.lowercased()) || value.contains("://") { return nil }
-            return search.searchURL(value)
-        }
-        if !value.contains(where: { $0.isWhitespace }),
-           (value.contains(".") || value == "localhost" || value.hasPrefix("localhost/") || value.hasPrefix("[")),
-           let parts = URLComponents(string: "https://" + value),
-           let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil {
-            let scheme = (host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]") ? "http://" : "https://"
-            return URL(string: scheme + value)
-        }
-        return search.searchURL(value)
-    }
-    private static func isHostWithPort(_ text: String) -> Bool {
-        guard let parts = URLComponents(string: "http://" + text),
-              let host = parts.host, parts.port != nil, parts.user == nil, parts.password == nil else { return false }
-        return host == "localhost" || host.contains(".") || host.contains(":")
+        guard let value = try? RustCore.request(["op": "resolveAddress", "input": input, "search": search.rawValue]) as? String else { return nil }
+        return URL(string: value)
     }
     public static func isWebURL(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), let host = url.host, !host.isEmpty else { return false }
-        return ["http", "https"].contains(scheme) && url.user == nil && url.password == nil
+        (try? RustCore.request(["op": "isWebURL", "url": url.absoluteString]) as? Bool) ?? false
     }
 }
 
 /// Website titles are limited to 512 Unicode scalars and at most 2048 UTF-8
 /// bytes; grapheme counts alone do not bound combining-character input.
 public func boundedPageTitle(_ title: String) -> String {
-    String(String.UnicodeScalarView(title.unicodeScalars.prefix(512)))
+    (try? RustCore.request(["op": "pageTitle", "title": title]) as? String) ?? "Website"
 }
 
 public enum BrowserEngineID: String, Codable, CaseIterable, Sendable {

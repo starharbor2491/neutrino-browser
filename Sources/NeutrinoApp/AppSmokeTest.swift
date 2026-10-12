@@ -38,76 +38,8 @@ enum AppSmokeTest {
             if let view = window.contentView { try capture(view, to: output.appendingPathComponent("Neutrino-first-launch.png")) }
             try await captureOnboarding(app: app, output: output)
             window.makeKeyAndOrderFront(nil)
-            let firstLaunchFrame = window.frame
-            window.setContentSize(NSSize(width: 760, height: 520))
-            try await Task.sleep(for: .milliseconds(400))
-            guard let shortView = window.contentView,
-                  let startViewport = layoutRegion("neutrino.startPageScroll", in: shortView),
-                  let startContent = layoutRegion("neutrino.startPageContent", in: shortView),
-                  startViewport.bounds.height > 0, startViewport.bounds.height <= 520,
-                  startContent.bounds.height >= startViewport.bounds.height else {
-                throw ValidationError("The start page did not fit the supported short window with scrollable content.")
-            }
-            trace("Short start page: viewport \(startViewport.bounds.size), content \(startContent.bounds.size)")
-            try capture(shortView, to: output.appendingPathComponent("Neutrino-first-launch-short.png"))
-            window.setFrame(firstLaunchFrame, display: true)
-            try await Task.sleep(for: .milliseconds(200))
             app.library.preferences.completedOnboarding = true
-            browser.panel = .resources
-            for design in DesignSystem.allCases {
-                trace("Capturing \(design.rawValue) appearance")
-                var config = Configuration(); config.theme.design = design
-                if design == .graphite { config.layout.tabs = .leading; config.layout.sidebar = .trailing }
-                app.applyConfiguration(config)
-                // Allow the monitor's second sample and native progress animation to settle.
-                try await Task.sleep(for: .milliseconds(2200))
-                guard let view = window.contentView else { throw ValidationError("The browser window has no content.") }
-                try capture(view, to: output.appendingPathComponent("Neutrino-\(design.rawValue).png"))
-            }
-            let baseline = app.configuration
-            for design in DesignSystem.allCases {
-                trace("Capturing \(design.rawValue) dark appearance")
-                var config = baseline; config.theme.design = design; config.theme.colorMode = .dark
-                app.applyConfiguration(config)
-                try await Task.sleep(for: .milliseconds(400))
-                guard let view = window.contentView else { throw ValidationError("The browser window has no content.") }
-                try capture(view, to: output.appendingPathComponent("Neutrino-\(design.rawValue)-dark.png"))
-            }
-            app.applyConfiguration(baseline)
-            // Verify native control surfaces render independently of a website engine.
-            for sheet in [BrowserSheet.modules, .customize, .settings, .engines, .recovery] {
-                trace("Opening \(sheet.rawValue) screen")
-                browser.sheet = sheet
-                try await Task.sleep(for: .milliseconds(400))
-                guard let view = window.attachedSheet?.contentView else { throw ValidationError("The \(sheet.rawValue) screen did not open.") }
-                try capture(view, to: output.appendingPathComponent("Neutrino-\(sheet.rawValue).png"))
-                if sheet == .modules {
-                    guard let picker = moduleSectionPicker(in: view),
-                          let segment = (0..<picker.segmentCount).first(where: { picker.label(forSegment: $0) == "Updates" }) else {
-                        throw ValidationError("The Modules screen has no native Updates selector.")
-                    }
-                    picker.selectedSegment = segment
-                    guard picker.sendAction(picker.action, to: picker.target) else { throw ValidationError("The Modules Updates selection did not respond.") }
-                    try await Task.sleep(for: .milliseconds(300))
-                    try capture(view, to: output.appendingPathComponent("Neutrino-modules-updates.png"))
-                }
-                browser.sheet = nil
-                try await Task.sleep(for: .milliseconds(300))
-            }
-            for mode in [ColorMode.light, .dark] {
-                var config = baseline; config.theme.colorMode = mode; config.theme.accent = mode == .dark ? .teal : .orange
-                app.applyConfiguration(config)
-                for sheet in mode == .dark ? [BrowserSheet.customize, .recovery] : [.customize] {
-                    trace("Capturing \(sheet.rawValue) \(mode.rawValue) contrast")
-                    browser.sheet = sheet
-                    try await Task.sleep(for: .milliseconds(400))
-                    guard let view = window.attachedSheet?.contentView else { throw ValidationError("The \(sheet.rawValue) contrast screen did not open.") }
-                    try capture(view, to: output.appendingPathComponent("Neutrino-\(sheet.rawValue)-\(mode.rawValue).png"))
-                    browser.sheet = nil
-                    try await Task.sleep(for: .milliseconds(300))
-                }
-            }
-            app.applyConfiguration(baseline)
+            try await RustShellAcceptance.verify(window: window, app: app, model: browser, output: output)
             if let address = ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_URL"] {
                 trace("Navigating to loopback HTTP fixture")
                 let navigationStarted = ProcessInfo.processInfo.systemUptime
@@ -125,68 +57,7 @@ enum AppSmokeTest {
                 trace("Extracting reader text")
                 let text = try await app.readerText(from: browser.activeWebTab)
                 guard text.contains("Local browser check") else { throw ValidationError("Reader could not read the HTTP fixture.") }
-                trace("Capturing customized controls at wide and narrow window sizes")
-                let originalFrame = window.frame
-                let originalConfiguration = browser.configuration
-                var customized = originalConfiguration
-                customized.theme.typography = .rounded; customized.theme.fontScale = 1.2
-                customized.theme.spacingScale = 1.15; customized.theme.iconStyle = .filled
-                customized.theme.surfaceHex = "#17212B"; customized.theme.textHex = "#F1F5F9"
-                customized.theme.accentHex = "#66D9CC"; customized.theme.colorMode = .dark
-                customized.theme.borderWidth = 1; customized.theme.shadowStrength = 0.2
-                var tabAppearance = ComponentAppearance(); tabAppearance.density = .compact; tabAppearance.cornerRadius = 6
-                customized.theme.tabsAppearance = tabAppearance
-                customized.layout.tabs = .leading; customized.layout.tabsWidth = 300
-                customized.layout.sidebar = .trailing; customized.layout.sidebarWidth = 360
-                customized.layout.secondaryPanel = "bookmarks"
-                customized.layout.toolbarComponents = ToolbarComponent.browserDefaults + [
-                    .init(command: .newTab, region: .top), .init(command: .reader, region: .top),
-                    .init(command: .screenshot, region: .bottom), .init(command: .downloads, region: .bottom),
-                    .init(command: .customize, region: .overflow)
-                ]
-                app.applyConfiguration(customized)
-                var wideTabsWidth: CGFloat = 0, wideSidebarWidth: CGFloat = 0
-                for width in [1240.0, 800.0] {
-                    window.setContentSize(NSSize(width: width, height: 720))
-                    try await Task.sleep(for: .milliseconds(450))
-                    guard let view = window.contentView else { throw ValidationError("Customized browser content is unavailable.") }
-                    guard abs(view.bounds.width - width) < 2,
-                          let tabs = layoutRegion("neutrino.verticalTabs", in: view),
-                          let primary = layoutRegion("neutrino.primarySidebar", in: view),
-                          let page = layoutRegion("neutrino.page", in: view), page.bounds.width >= 300 else {
-                        throw ValidationError("The customized browser did not fit its actual \(Int(width))-point content area with a usable page.")
-                    }
-                    let secondary = layoutRegion("neutrino.secondarySidebar", in: view)
-                    trace("Customized layout: content \(Int(view.bounds.width)), tabs \(Int(tabs.bounds.width)), primary sidebar \(Int(primary.bounds.width)), secondary \(secondary == nil ? "hidden" : "visible"), page \(Int(page.bounds.width))")
-                    if width == 1240 {
-                        guard let secondary, secondary.bounds.width >= 180, tabs.bounds.width > 220, primary.bounds.width > 240,
-                              tabs.bounds.width <= 300, primary.bounds.width <= 360 else {
-                            throw ValidationError("The wide browser did not render its second sidebar or use its actual width for panel sizing.")
-                        }
-                        wideTabsWidth = tabs.bounds.width; wideSidebarWidth = primary.bounds.width
-                    } else {
-                        guard secondary == nil, tabs.bounds.width < wideTabsWidth, primary.bounds.width < wideSidebarWidth else {
-                            throw ValidationError("The narrow browser did not shrink its panels and hide the second sidebar.")
-                        }
-                    }
-                    try capture(view, to: output.appendingPathComponent("Neutrino-customized-\(Int(width)).png"))
-                    await captureWindow(window, to: output.appendingPathComponent("Neutrino-customized-\(Int(width))-window.png"))
-                }
-                window.setContentSize(NSSize(width: 1240, height: 720))
-                try await Task.sleep(for: .milliseconds(250))
-                let appDefaultBeforeClosing = app.library.preferences.configuration
-                browser.closeSecondarySidebar()
-                try await Task.sleep(for: .milliseconds(250))
-                guard let view = window.contentView, browser.panel == .resources,
-                      layoutRegion("neutrino.primarySidebar", in: view) != nil,
-                      layoutRegion("neutrino.secondarySidebar", in: view) == nil,
-                      app.library.configuration(for: browser.session.spaceID).layout.secondaryPanel == nil,
-                      app.library.preferences.configuration == appDefaultBeforeClosing else {
-                    throw ValidationError("Closing the second sidebar did not retain the primary panel and save the change.")
-                }
-                window.setFrame(originalFrame, display: true)
-                app.applyConfiguration(originalConfiguration)
-                app.applyConfiguration(originalConfiguration, to: browser.session.spaceID)
+                try await RustShellAcceptance.verifyPageGeometry(window: window, model: browser)
                 trace("Verifying split panes and tree tabs")
                 browser.panel = nil
                 var config = browser.configuration

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/neutrino-shell"]
+members = ["crates/neutrino-shell", "crates/neutrino-icon"]
 resolver = "2"
 
 [workspace.package]

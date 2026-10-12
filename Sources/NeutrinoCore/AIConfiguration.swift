@@ -29,20 +29,8 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
     self.model = model
   }
   public func validatedEndpoint() throws -> URL {
-    guard let url = URL(string: endpoint), let host = url.host?.lowercased(),
-      url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
-      model.count <= 200, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    else { throw ValidationError("Enter a valid AI endpoint and model name.") }
-    let loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
-    guard url.scheme == "https" || (provider == .local && url.scheme == "http" && loopback) else {
-      throw ValidationError("Use HTTPS for remote models, or HTTP on localhost for a local model.")
-    }
-    if provider == .openAI && host != "api.openai.com" {
-      throw ValidationError("OpenAI keys can only be sent to api.openai.com.")
-    }
-    if provider == .xAI && host != "api.x.ai" {
-      throw ValidationError("xAI keys can only be sent to api.x.ai.")
-    }
+    _ = try RustCore.request(["op": "validateAI", "provider": provider.rawValue, "endpoint": endpoint, "model": model])
+    guard let url = URL(string: endpoint) else { throw ValidationError("Invalid AI endpoint.") }
     return url
   }
 }

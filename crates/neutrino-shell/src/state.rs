@@ -86,7 +86,9 @@ impl Shell {
     pub fn dispatch(&mut self, request: Value) -> Value {
         let op = text(&request, "op");
         let mut commands: Vec<Value> = vec![];
-        self.notice.clear();
+        if op != "sync" {
+            self.notice.clear();
+        }
         if op == "sync" {
             let previous = self.snapshot["session"]["spaceID"].clone();
             self.snapshot = request["snapshot"].clone();
@@ -606,7 +608,7 @@ impl Shell {
     }
 }
 pub fn default_configuration() -> Value {
-    json!({"theme":{"design":"native","accent":"purple","colorMode":"system","density":"comfortable","cornerRadius":12,"transparency":false,"reducedMotion":false,"iconStyle":"outline"},"layout":{"tabs":"leading","navigation":"top","sidebar":"leading","sidebarWidth":260,"bookmarksBar":false,"statusBar":false,"tabsWidth":240}})
+    json!({"theme":{"design":"native","accent":"rose","colorMode":"system","density":"comfortable","cornerRadius":12,"transparency":false,"reducedMotion":false,"iconStyle":"outline"},"layout":{"tabs":"leading","navigation":"top","sidebar":"leading","sidebarWidth":260,"bookmarksBar":false,"statusBar":false,"tabsWidth":240}})
 }
 pub fn resolve_address(input: &str, search: &str) -> Option<String> {
     let value = input.trim();
@@ -650,14 +652,14 @@ pub fn resolve_address(input: &str, search: &str) -> Option<String> {
     };
     let mut u = Url::parse(base).ok()?;
     u.query_pairs_mut().append_pair("q", value);
-    Some(u.into())
+    Some(u.to_string().replace('+', "%20"))
 }
 pub fn validate_ai(provider: &str, endpoint: &str, model: &str) -> bool {
     let Ok(url) = Url::parse(endpoint) else {
         return false;
     };
     if model.trim().is_empty()
-        || model.len() > 800
+        || model.chars().count() > 200
         || !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
