@@ -49,7 +49,7 @@ extension NativeIntegrationTests {
       _ = try await web.evaluateJavaScript("const e=document.querySelector('textarea[data-note]');e.focus();e.value='Kept after Escape';e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));")
       try await Task.sleep(for:.milliseconds(180))
       #expect(app.library.notes.first?.text == "Kept after Escape")
-      #expect((try await web.evaluateJavaScript("!document.querySelector('.library-panel')")) as? Bool == true)
+      #expect((try await web.evaluateJavaScript("!document.querySelector('.utility-screen[data-screen=library]')")) as? Bool == true)
     }
     @Test func auxiliaryDownloadsNeverProjectTheDefaultLibrary() async throws {
       _ = NSApplication.shared

@@ -62,6 +62,9 @@ final class RustShellContainer: NSView {
     }
     override func layout() { super.layout(); chrome.frame = bounds }
     func hidePages() { for page in mounted.values { page.isHidden = true } }
+    func nativeHit(_ point: NSPoint) -> Bool {
+        mounted.values.contains { !$0.isHidden && $0.frame.contains(point) } || dragRegions.contains { $0.frame.contains(point) }
+    }
     func unmount() { for page in mounted.values { page.unmount(); page.removeFromSuperview() }; mounted.removeAll() }
 }
 
@@ -112,11 +115,16 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var pendingSync: Task<Void, Never>?
     private var renderGeneration = 0
     private var showingOverlay = true
+    private var nonModalMenuRect: NSRect?
     private let editingOwner = UUID()
     private var editingEngines: [BrowserEngineTab] = []
     private var editingInputMonitor: Any?
     private var credentialMetadata: [[String: String]] = []
     private var ready = false
+    private var appliedFocusToken: Int?
+    private let resourceWorker = ResourceWorker()
+    private var resourceGeneration: UUID?
+    private var resourcesOpen = false
     private var stopped = false
     private var projectedProfileID: UUID?
     private var downloadScreenOpened = false
@@ -140,13 +148,28 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         container = RustShellContainer(chrome: chrome)
         super.init()
         chrome.navigationDelegate = self
-        editingInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            let windowID = event.window.map(ObjectIdentifier.init)
+        editingInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .leftMouseDown, .rightMouseDown]) { [weak self] event in
+            let mouseDown = event.type == .leftMouseDown || event.type == .rightMouseDown
+            var windowIDs: [ObjectIdentifier] = []
+            var eventWindow = event.window
+            while let window = eventWindow {
+                windowIDs.append(ObjectIdentifier(window))
+                if !mouseDown { break }; eventWindow = window.parent
+            }
+            let ownedWindowIDs = windowIDs
+            let screenPoint = mouseDown ? event.window?.convertPoint(toScreen:event.locationInWindow) : nil
             let closeTab = event.type == .keyDown && event.charactersIgnoringModifiers?.lowercased() == "w" &&
                 event.modifierFlags.intersection([.command,.shift,.option,.control]) == .command
             let blocked = MainActor.assumeIsolated {
                 guard let self, !self.stopped,
-                      windowID == self.container.window.map(ObjectIdentifier.init) else { return false }
+                      let window = self.container.window, ownedWindowIDs.contains(ObjectIdentifier(window)) else { return false }
+                if mouseDown {
+                    if let menu = self.nonModalMenuRect, let screenPoint {
+                        let point = self.container.convert(window.convertPoint(fromScreen:screenPoint),from:nil)
+                        if !menu.contains(point), self.container.nativeHit(point) { self.sendAction(["op":"escape"]) }
+                    }
+                    return false
+                }
                 if !self.editingEngines.isEmpty,
                    let responder = self.container.window?.firstResponder as? NSView,
                    self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) {
@@ -166,6 +189,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         }
         chrome.setValue(false, forKey: "drawsBackground")
         configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "neutrino")
+        resourceWorker.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         app.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         model?.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         DistributionManager.shared.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
@@ -175,7 +199,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             model.downloads.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
             NotificationCenter.default.publisher(for: .neutrinoFocusAddress).sink { [weak self] notification in
                 guard notification.object as? UUID == model.session.id else { return }
-                self?.sendAction(["op": "palette", "value": model.selectedTab.url?.absoluteString ?? ""])
+                self?.sendAction(["op": "focus-address"])
                 self?.container.window?.makeKey()
                 self?.container.window?.makeFirstResponder(self?.container.chrome)
             }.store(in: &subscriptions)
@@ -193,6 +217,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        resourceWorker.stop()
         editingEngines.forEach { $0.setInterfaceEditing(false, owner: editingOwner) }; editingEngines.removeAll()
         if let editingInputMonitor { NSEvent.removeMonitor(editingInputMonitor) }; editingInputMonitor = nil
         pendingSync?.cancel(); assistantTask?.cancel(); model?.shellAction = nil; subscriptions.removeAll(); downloadObservations.removeAll(); engineObservations.removeAll(); observedEngines.removeAll()
@@ -265,7 +290,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "assistantResponse": assistantResponse, "assistantBusy": assistantTask != nil,
             "updates": ["version": "Neutrino " + (update.current?.version ?? "development"), "automatic": update.automaticUpdates,
                         "message": update.message ?? "Updates are downloaded from GitHub. Your browsing data is kept.", "busy": update.busy, "pending": update.pending != nil],
-            "modules": app.installedModules.map { ["id": $0.id, "name": $0.manifest.name, "description": $0.manifest.summary, "enabled": $0.enabled] as [String: Any] },
+            "modules": moduleSnapshot(), "moduleCatalogs": app.communityCatalogNames,
+            "menuItems": encoded(app.declarativeDefinition(.menu)?.menu ?? []),
+            "icons": app.declarativeDefinition(.icons)?.icons ?? [:],
+            "startWidgets": encoded(app.startWidgets),
+            "resources": ["frame": encoded(resourceWorker.frame), "failure": resourceWorker.failure ?? ""],
         ]
         if let model, !model.isClosed {
             var projectedSession = model.session
@@ -276,6 +305,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 if (projectedSession.tabs[i].faviconDataURL?.utf8.count ?? 0) > 12_000 { projectedSession.tabs[i].faviconDataURL = nil }
             }
             snapshot["session"] = encoded(projectedSession)
+            snapshot["focusMode"] = model.focusMode
+            snapshot["focusHidden"] = Array(model.focusHiddenComponents).sorted()
             let tab = model.activeWebTab
             snapshot["loading"] = tab.loading
             let visible = model.visibleEngineTabs
@@ -313,6 +344,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         return stamped(result)
     }
     private func stamped(_ response: [String: Any]) -> [String: Any] {
+        let needsResources = response["screen"] as? String == "resources" && model != nil && !app.terminating && !app.finalQuitDataFrozen
+        if needsResources && (!resourcesOpen || resourceGeneration != app.resourceWorkerGeneration) {
+            resourcesOpen = true; resourceGeneration = app.resourceWorkerGeneration
+            do { let package = try app.resourceWorkerPackage(); try resourceWorker.start(executable: package.url, moduleID: package.id) }
+            catch { resourceWorker.showFailure(error) }
+        } else if !needsResources && resourcesOpen {
+            resourcesOpen = false; resourceGeneration = nil; resourceWorker.stop()
+        }
         renderGeneration += 1
         var result = response; result["generation"] = renderGeneration
         showingOverlay = response["overlay"] as? Bool ?? true
@@ -323,8 +362,37 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         for engine in next where !editingEngines.contains(where: { $0 === engine }) { engine.setInterfaceEditing(true, owner: editingOwner) }
         editingEngines = next
         if entering { container.window?.makeKey(); container.window?.makeFirstResponder(container.chrome) }
+        if let token = response["focusToken"] as? Int, token != appliedFocusToken,
+           let focus = response["focus"] as? String, !focus.isEmpty {
+            appliedFocusToken = token
+            container.window?.makeKey(); container.window?.makeFirstResponder(container.chrome)
+        }
         if showingOverlay { container.hidePages() }
         return result
+    }
+    private func moduleSnapshot() -> [[String:Any]] {
+        let catalogIDs = Set(app.catalog.map(\.id))
+        let manifests = app.catalog + app.installedModules.filter { !catalogIDs.contains($0.id) }.map(\.manifest)
+        return manifests.map { manifest in
+            let installed = app.installedModules.first { $0.id == manifest.id }
+            let current = installed?.manifest ?? manifest
+            let provider = app.installedModules.first { $0.enabled && $0.manifest.capability == current.capability && $0.id != current.id }
+            let values: [String:ModuleValue] = (try? app.repository?.settings(for: current.id)) ?? [:]
+            let settings: [[String:Any]] = (current.settings ?? []).map { setting in
+                ["id":setting.id,"title":setting.title,"kind":setting.kind.rawValue,
+                 "choices":setting.choices ?? [],"value":encoded(values[setting.id] ?? setting.defaultValue)]
+            }
+            return ["id":current.id,"name":current.name,"description":current.summary,
+                    "version":current.version,"availableVersion":manifest.version,"publisher":current.publisher,
+                    "capability":current.capability.rawValue,"permission":current.capability.permission ?? "",
+                    "installed":installed != nil,"enabled":installed?.enabled == true,
+                    "available":catalogIDs.contains(current.id),"bundled":app.bundledModuleIDs.contains(current.id),
+                    "updateAvailable":installed != nil && manifest.version > current.version,
+                    "replacesProvider":current.capability.isExclusive && provider != nil,
+                    "providerName":current.capability.isExclusive ? provider?.manifest.name ?? "" : "",
+                    "dependencies":current.dependencies.map { id in app.catalog.first { $0.id == id }?.name ?? id },
+                    "settings":settings] as [String:Any]
+        }
     }
     private struct SpaceIdentity: Encodable { let id: UUID; let name: String; let profileID: UUID }
     private func push(_ response: [String: Any], interactive: Bool = false) {
@@ -371,6 +439,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func updateGeometry(_ body: [String: Any]) {
         guard ready, body["generation"] as? Int == renderGeneration else { return }
+        if let r = body["menuRect"] as? [String:Double],
+           let x=r["x"], let y=r["y"], let width=r["width"], let height=r["height"],
+           [x,y,width,height].allSatisfy(\.isFinite), width>0,height>0,width<=container.bounds.width,height<=container.bounds.height {
+            nonModalMenuRect = NSRect(x:x,y:y,width:width,height:height)
+        } else { nonModalMenuRect = nil }
         if let rectangles = body["dragRegions"] as? [[String: Double]], rectangles.count <= 10 {
             container.setDragRegions(rectangles.compactMap { r in
                 guard let x=r["x"], let y=r["y"], let width=r["width"], let height=r["height"], [x,y,width,height].allSatisfy(\.isFinite), width>0, height>0, height<=48 else { return nil }
@@ -421,6 +494,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         switch operation {
         case "navigate":
             if let value = command["url"] as? String { model?.navigate(value) }
+        case "clearNotice": app.notice = nil
         case "newTab": model?.newTab()
         case "selectTab": if let id { model?.selectTab(id) }
         case "closeTab": if let id { model?.requestCloseTab(id) }
@@ -473,6 +547,25 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if let name = command["name"] as? String, let index = app.library.spaces?.firstIndex(where: { $0.id == id }) { app.library.spaces?[index].name = String(name.prefix(80)) }
         case "moveTabToSpace":
             if let id, let raw = command["spaceID"] as? String, let space = UUID(uuidString: raw) { model?.moveTab(id, toSpace: space) }
+        case "reorderSpaces":
+            guard let model, !model.isPrivate, var spaces = app.library.spaces,
+                  let raw = command["ids"] as? [String] else { return }
+            let ids = raw.compactMap(UUID.init(uuidString:))
+            let indices = spaces.indices.filter { spaces[$0].profileID == model.session.profileID }
+            let owned = indices.map { spaces[$0] }
+            guard ids.count == raw.count, Set(ids).count == ids.count,
+                  Set(ids) == Set(owned.map(\.id)) else { return }
+            let ordered = ids.compactMap { id in owned.first { $0.id == id } }
+            for (i, index) in indices.enumerated() { spaces[index] = ordered[i] }
+            app.library.spaces = spaces
+        case "reorderFolders":
+            guard let model, !model.isPrivate,
+                  let index = app.library.spaces?.firstIndex(where: { $0.id == model.session.spaceID }),
+                  let folders = app.library.spaces?[index].folders,
+                  let raw = command["ids"] as? [String] else { return }
+            let ids = raw.compactMap(UUID.init(uuidString:))
+            guard ids.count == raw.count, Set(ids).count == ids.count, Set(ids) == Set(folders.map(\.id)) else { return }
+            app.library.spaces?[index].folders = ids.compactMap { id in folders.first { $0.id == id } }
         case "applyConfiguration":
             guard let object = command["configuration"], let data = try? JSONSerialization.data(withJSONObject: object),
                   var configuration = try? JSONDecoder().decode(Configuration.self, from: data) else { app.notice = "That appearance could not be saved."; return }
@@ -511,6 +604,23 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             else if let url = item.destination, !item.active { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         case "toggleModule":
             if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.toggleModule(module) }
+        case "installModule":
+            if let raw = command["id"] as? String, app.catalog.contains(where: { $0.id == raw }) { app.install(raw) }
+        case "repairModule":
+            if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.reinstallWorker(module) }
+        case "uninstallModule":
+            if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.uninstall(module) }
+        case "setModuleSetting":
+            guard let raw = command["id"] as? String, let key = command["key"] as? String,
+                  let module = app.installedModules.first(where: { $0.id == raw }),
+                  let schema = module.manifest.settings?.first(where: { $0.id == key }),
+                  let value = command["value"],
+                  let data = try? JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed),
+                  let decoded = try? JSONDecoder().decode(ModuleValue.self, from: data) else { return }
+            app.setModuleSetting(schema,value:decoded,moduleID:raw)
+        case "importCatalog": app.importCatalog()
+        case "removeCatalog":
+            if let name = command["id"] as? String { app.removeCatalog(named:name) }
         case "importModule": app.importModule()
         case "webStore": model?.newTab(url: URL(string: "https://chromewebstore.google.com/"), engine: .chromium)
         case "installExtension", "extensionAction", "openExtensionOptions", "removeExtension":
@@ -570,6 +680,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "retrySave": Task { @MainActor in if await app.flush() { app.notice = "Browser data saved." } }
         case "showDataFolder": NSWorkspace.shared.open(app.dataDirectory)
         case "assistant": askAssistant(command)
+        case "toggleFocus":
+            guard let model else { return }; if model.focusMode { model.exitFocus() } else { model.enterFocus() }
+        case "retryResources":
+            resourcesOpen = false; scheduleSync()
         case "reader":
             guard let model else { return }; assistantTask?.cancel()
             let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID

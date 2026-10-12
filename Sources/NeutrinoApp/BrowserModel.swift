@@ -186,12 +186,16 @@ final class BrowserModel: ObservableObject {
             guard let self, !self.isClosed, !self.app.finalQuitDataFrozen, let tab else { return }
             if self.session.selectedTabID != id { self.selectTab(id) }
             switch command {
-            case "newTab": self.newTab(); NotificationCenter.default.post(name: .neutrinoFocusAddress, object: self.session.id)
+            case "newTab":
+                if let action = self.shellAction { action(["op":"newTab"]) }
+                else { self.newTab(); NotificationCenter.default.post(name: .neutrinoFocusAddress, object: self.session.id) }
             case "reopenTab": self.reopenClosedTab()
             case "nextTab": self.selectRelativeTab(1)
             case "previousTab": self.selectRelativeTab(-1)
             case "focusAddress": NotificationCenter.default.post(name: .neutrinoFocusAddress, object: self.session.id)
-            case "closeTab": self.closeTab(id)
+            case "closeTab":
+                if let action = self.shellAction { action(["op":"closeTab","id":id.uuidString]) }
+                else { self.closeTab(id) }
             case "closeWindow": tab.nativeView.window?.performClose(nil)
             case "newWindow": NotificationCenter.default.post(name: .neutrinoOpenBrowserWindow, object: self.session.id, userInfo: ["private": false])
             case "privateWindow": NotificationCenter.default.post(name: .neutrinoOpenBrowserWindow, object: self.session.id, userInfo: ["private": true])
