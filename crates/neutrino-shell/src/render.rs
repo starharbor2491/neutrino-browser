@@ -258,7 +258,7 @@ pub fn render(s: &Shell) -> Markup {
     };
     html! {div class="app-shell" data-mode=(mode) data-accent=(accent) data-density=(text(&s.config()["theme"],"density")) {
         @if flag(&s.snapshot,"downloadsWindow"){main class="downloads-window"{header{h1{"Downloads"}(button("Close downloads","escape","close"))}(library(s))}} @else if s.onboarding(){(setup(s))} @else if s.screen=="editor"{(editor(s))} @else {(browser(s,false))
-            @if !["browse","library"].contains(&s.screen.as_str()) {div class="screen-scrim"{section class="utility-screen" role="dialog" aria-modal="true" aria-label=(s.screen.as_str()){
+            @if !["browse","library"].contains(&s.screen.as_str()) {div class="screen-scrim"{section class="utility-screen" data-screen=(s.screen.as_str()) role="dialog" aria-modal="true" aria-label=(s.screen.as_str()){
                 header class="utility-header"{div{div class="eyebrow"{"NEUTRINO"}h1{(match s.screen.as_str(){"settings"=>"Settings","library"=>"Your library","modules"=>"Make more of your browser","extensions"=>"Extensions","assistant"=>"A little help","reader"=>"Reader","recovery"=>"Recovery",_=>"Neutrino"})}}(button("Close","escape","close"))}
                 (utility(s))
             }}}
@@ -266,7 +266,7 @@ pub fn render(s: &Shell) -> Markup {
         @if s.palette{(palette(s))}
         @if !s.menu.is_empty(){(menu(s))}
         @let notice=if !s.notice.is_empty(){s.notice.as_str()}else{text(&s.snapshot,"notice")};
-        @if !notice.is_empty(){div class="toast" role="status"{(icon("check"))span{(notice)}@if notice.starts_with("Tab moved.") && !s.tab_undo.is_empty(){button data-op="undo-tabs"{"Undo"}}}}
+        @if !notice.is_empty(){div class=(if s.screen=="editor"{"toast editor-toast"}else{"toast"}) role="status"{(icon("check"))span{(notice)}@if notice.starts_with("Tab moved.") && !s.tab_undo.is_empty(){button data-op="undo-tabs"{"Undo"}}}}
     }}
 }
 fn setup(s: &Shell) -> Markup {
@@ -316,13 +316,13 @@ fn swatches(s: &Shell, setup: bool) -> Markup {
     html! {div class="swatches" role="group" aria-label="Accent color"{@for (value,label) in [("rose","Rose"),("purple","Iris"),("teal","Sage"),("blue","Ocean"),("orange","Sand")] {button class=(format!("swatch {} {}",value,if current==value{"selected"}else{""})) data-op=(if setup{"setup-field"}else{"editor-value"}) data-key="accent" data-value=(value) aria-label=(label) aria-pressed=((current==value).to_string()) title=(label){@if current==value{(icon("check"))}}}}}
 }
 fn editor(s: &Shell) -> Markup {
-    html! {div class="editor" {
+    html! {div class=(if s.expanded_preview{"editor expanded-preview"}else{"editor"}) {
         header class="editor-header"{div{span class="eyebrow"{"MAKE IT YOURS"}h1{"A browser, arranged by you."}}div class="editor-actions"{label class="save-scope"{span{"Apply to"}select data-scope="true" aria-label="Where to apply appearance"{option value="true" selected[s.apply_space]{"This Space"}option value="false" selected[!s.apply_space]{"Browser default"}}}(action("Cancel","escape",false))(action("Save changes","editor-save",true))}}
-        div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · live layout"}span{"Drag a component to a highlighted edge"}}
+        div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · live layout"}button class="preview-size" data-op="editor-preview-size" aria-expanded=(s.expanded_preview.to_string()) aria-controls="appearance-controls"{(icon(if s.expanded_preview{"sidebar"}else{"external"}))(if s.expanded_preview{"Show controls"}else{"Expand preview"})}}
             div class="editor-preview"{div class="preview-canvas" inert="" {(browser(s,true))}@for region in ["leading","trailing","top","bottom"]{div class=(format!("dock-target dock-{region}")) data-dock=(region){span{(match region{"leading"=>"Left","trailing"=>"Right","top"=>"Top",_=>"Bottom"})}}}}
             div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span{"Changes apply when you save."}}
         }
-        aside class="editor-inspector"{div class="inspector-section"{h2{"Arrange"}p{"Drag a component, or choose its position."}
+        aside class="editor-inspector" id="appearance-controls" hidden[s.expanded_preview]{div class="inspector-section"{h2{"Arrange"}p{"Drag a component, or choose its position."}
             @for (component,label,glyph) in [("tabs","Tabs","sidebar"),("navigation","Navigation","search"),("panels","Library panel","grid")] {div class=(if s.edit_component==component{"component selected"}else{"component"}) draggable="true" data-component=(component){button data-op="editor-select" data-value=(component){(icon(glyph))span{(label)}(icon("grip"))}}}
             div class="position-controls" role="group" aria-label="Component position"{@for (region,label) in [("leading","Left"),("top","Top"),("trailing","Right"),("bottom","Bottom")] { @let valid=s.edit_component=="tabs" || s.edit_component=="navigation"&&["top","bottom"].contains(&region) || s.edit_component=="panels"&&["leading","trailing"].contains(&region);button class=(if text(&s.config()["layout"],match s.edit_component.as_str(){"tabs"=>"tabs","navigation"=>"navigation",_=>"sidebar"})==region{"selected"}else{""}) aria-pressed=((text(&s.config()["layout"],match s.edit_component.as_str(){"tabs"=>"tabs","navigation"=>"navigation",_=>"sidebar"})==region).to_string()) data-op="dock" data-component=(s.edit_component.as_str()) data-region=(region) disabled[!valid]{(label)}}}
             @if s.edit_component=="tabs"{label class="field"{span{"Sidebar width"}input type="range" min="200" max="340" step="4" value=(s.config()["layout"]["tabsWidth"].as_f64().unwrap_or(240.)) data-editor="tabsWidth" aria-label="Sidebar width";}}
@@ -490,6 +490,10 @@ fn module_glyph(id: &str) -> &str {
 }
 fn module_description(module: &Value) -> &str {
     match text(module, "id") {
+        "org.neutrino.reader" => "Read articles in a quiet, focused view.",
+        "org.neutrino.focus" => {
+            "Give the page more room. Press Escape to bring your controls back."
+        }
         "org.neutrino.resource-monitor" => "See CPU and memory use while you browse.",
         "org.neutrino.memory-monitor" => "See how your Mac’s memory is being used.",
         _ => text(module, "description"),

@@ -53,6 +53,7 @@ import NeutrinoCore
         for screen in ["settings","modules","extensions","library"] {
             try await action(["op":"screen","value":screen,"section":"general"],web:web)
             guard (try await web.evaluateJavaScript(screen == "library" ? "!!document.querySelector('.library-panel')" : "!!document.querySelector('.utility-screen')")) as? Bool == true else { throw ValidationError("The \(screen) interface did not render.") }
+            try await recordScrollGeometry(web, label:screen)
             await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-\(screen).png"))
             try await action(["op":"escape"],web:web)
         }
@@ -109,6 +110,13 @@ import NeutrinoCore
         }
         _ = try await evaluatePage(page,"document.getElementById('neutrino-input-probe').style.opacity='0'; 'ok'")
         await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-editor-live-\(page.engineID.rawValue).png"))
+        try await recordScrollGeometry(web, label:"editor-\(page.engineID.rawValue)")
+        try await action(["op":"editor-preview-size"],web:web)
+        let expanded = try await web.evaluateJavaScript("document.querySelector('.editing-preview .native-page').getBoundingClientRect().width") as? Double
+        guard let expanded, expanded > preview + 80, model.activeWebTab === page,
+              abs(page.nativeView.bounds.width-expanded) < 3 else { throw ValidationError("Expanding the live preview lost its document or geometry.") }
+        await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-editor-expanded-\(page.engineID.rawValue).png"))
+        try await action(["op":"editor-preview-size"],web:web)
         try await action(["op":"editor-cancel"],web:web)
         guard model.activeWebTab === page,
               (page.nativeView.superview as? EngineViewContainer)?.isPreviewing == false else { throw ValidationError("Cancel did not restore browsing on the original page.") }
@@ -117,6 +125,10 @@ import NeutrinoCore
         try await Task.sleep(for:.milliseconds(100))
         guard try await inputProbeCount(page) > before else { throw ValidationError("Closing the editor did not restore page keyboard input.") }
         _ = try await evaluatePage(page,"document.getElementById('neutrino-input-probe')?.remove(); 'ok'")
+    }
+    private static func recordScrollGeometry(_ web:WKWebView,label:String) async throws {
+        let value = try await web.evaluateJavaScript("JSON.stringify([...document.querySelectorAll('*')].filter(e=>['auto','scroll'].includes(getComputedStyle(e).overflowY)&&e.scrollHeight>e.clientHeight).map(e=>({element:e.tagName+'.'+e.className,height:e.clientHeight,content:e.scrollHeight,top:e.scrollTop,rect:e.getBoundingClientRect().toJSON()})))")
+        print("Neutrino Rust scroll geometry \(label): \(value)")
     }
     private static func sendKey(to window:NSWindow) {
         for type in [NSEvent.EventType.keyDown,.keyUp] {

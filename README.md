@@ -6,7 +6,7 @@ This repository is being rebuilt against a [confirmed product brief](docs/PRODUC
 
 Download compiled Apple Silicon builds from [GitHub Releases](https://github.com/starharbor2491/neutrino-browser/releases). Each Neutrino release includes a ZIP containing `Neutrino.app`, an offline DMG, and checksums. Published builds check GitHub for updates, download compatible newer versions, and install after a normal quit while retaining browsing data. Preview releases remain development builds with the limitations recorded in their release notes.
 
-Native captures of the first interface rebuild from [Apple Silicon CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38128463616):
+Native captures of the Rust interface from [Apple Silicon CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38241270198) (`5e0e85c`). These show the compiled app; interaction and release gates are recorded separately in [Testing](docs/TESTING.md):
 
 ![Neutrino's custom workspace shell](docs/images/neutrino-shell.png)
 
@@ -14,6 +14,8 @@ Native captures of the first interface rebuild from [Apple Silicon CI](https://g
 <summary>View the docking editor</summary>
 
 ![Neutrino's docking editor with visible exit and Save controls](docs/images/neutrino-editor.png)
+
+![Neutrino’s guided bookmark import](docs/images/neutrino-setup.png)
 
 </details>
 

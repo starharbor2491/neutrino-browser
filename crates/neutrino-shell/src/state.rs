@@ -38,6 +38,7 @@ pub struct Shell {
     pub name: String,
     pub sidebar_hidden: bool,
     pub edit_component: String,
+    pub expanded_preview: bool,
     pub apply_space: bool,
     pub setup_busy: bool,
     adjustment: String,
@@ -64,6 +65,7 @@ impl Default for Shell {
             name: String::new(),
             sidebar_hidden: false,
             edit_component: "tabs".into(),
+            expanded_preview: false,
             apply_space: true,
             setup_busy: false,
             adjustment: String::new(),
@@ -404,6 +406,7 @@ impl Shell {
                     self.apply_space = request["value"].as_bool().unwrap_or(true);
                 }
                 "editor-value" => self.edit_value(&request),
+                "editor-preview-size" => self.expanded_preview = !self.expanded_preview,
                 "editor-end-adjustment" => {}
                 "dock" => self.dock(&request),
                 "editor-undo" => {
