@@ -4,6 +4,8 @@ Confirmed with the product owner on 11 October 2026 after a 21-question intervie
 
 Neutrino is an Apple Silicon macOS browser with an Arc-inspired interface, Vivaldi/Shift customization, and Helium/Safari restraint. Neutrino owns the visible browser interface independently of its rendering engine. Use a deliberate design system; native operating-system permission and security dialogs remain appropriate.
 
+The implementation direction is Rust for portable product logic and interface rendering, with Swift confined progressively to required macOS integration. Preserve working engine, privacy, storage, module and distribution infrastructure while migrating it deliberately. Use REA and an independent code/UI/UX gauntlet against Arc; implementation stays with one coder. The supplied `neutrino.svg` is the source artwork for the application icon.
+
 ## Core experience
 
 The core milestone includes navigation, tabs, Spaces, Profiles, folders, split view, bookmarks, history, downloads, private browsing, extensions, local passwords/autofill, ad/tracker blocking, the visual editor, guided setup, and a complete offline installer. Protected streaming must pass actual service playback before the core release is called complete.

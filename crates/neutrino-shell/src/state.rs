@@ -643,7 +643,18 @@ impl Shell {
             draft["layout"]["treeTabs"] = json!(false);
         }
         self.edit_component = component.into();
-        self.notice = format!("{} moved to {}.", component, region);
+        let label = match component {
+            "tabs" => "Tabs",
+            "navigation" => "Navigation",
+            _ => "Library panel",
+        };
+        let position = match region {
+            "leading" => "left",
+            "trailing" => "right",
+            "top" => "top",
+            _ => "bottom",
+        };
+        self.notice = format!("{label} moved to the {position}.");
     }
     fn move_tab(&mut self, r: &Value, commands: &mut Vec<Value>) {
         let id = text(r, "id");

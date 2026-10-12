@@ -101,6 +101,15 @@ enum ChromiumAcceptance {
             try await Task.sleep(for:.milliseconds(50))
         }
         guard !page.hasNativeNavigationChrome else { throw ValidationError("Chrome's native toolbar remains active.") }
+        // The address palette intentionally hides native page windows. Dismiss
+        // it through AppKit before testing commands with the page focused.
+        try key("\u{1b}", code:53, window:ownerWindow)
+        let dismissDeadline = ContinuousClock.now.advanced(by:.seconds(5))
+        while (try await shell.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true {
+            guard ContinuousClock.now < dismissDeadline else { throw ValidationError("Escape did not dismiss the address palette.") }
+            try await Task.sleep(for:.milliseconds(30))
+        }
+        try await wait("page remount after address palette") { page.chromeWindow?.parent === ownerWindow && page.chromeWindow?.isVisible == true }
         func performMenuItem(_ title: String, in menu: NSMenu) -> Bool {
             menu.update()
             for (index, item) in menu.items.enumerated() {
@@ -110,6 +119,7 @@ enum ChromiumAcceptance {
             return false
         }
         page.focus()
+        try await wait("page focus before File menu") { page.chromeWindow?.isKeyWindow == true }
         guard let menu = NSApp.mainMenu, performMenuItem("New tab", in: menu) else { throw ValidationError("The Neutrino New tab menu is unavailable with Blink focused.") }
         try await wait("New tab menu") { browser.session.tabs.count == count + 1 }
         guard performMenuItem("Close tab", in: menu) else { throw ValidationError("The Neutrino Close tab menu is unavailable.") }

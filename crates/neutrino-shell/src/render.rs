@@ -266,7 +266,7 @@ pub fn render(s: &Shell) -> Markup {
         @if s.palette{(palette(s))}
         @if !s.menu.is_empty(){(menu(s))}
         @let notice=if !s.notice.is_empty(){s.notice.as_str()}else{text(&s.snapshot,"notice")};
-        @if !notice.is_empty(){div class=(if s.screen=="editor"{"toast editor-toast"}else{"toast"}) role="status"{(icon("check"))span{(notice)}@if notice.starts_with("Tab moved.") && !s.tab_undo.is_empty(){button data-op="undo-tabs"{"Undo"}}}}
+        @if !notice.is_empty() && s.screen!="editor"{div class="toast" role="status"{(icon("check"))span{(notice)}@if notice.starts_with("Tab moved.") && !s.tab_undo.is_empty(){button data-op="undo-tabs"{"Undo"}}}}
     }}
 }
 fn setup(s: &Shell) -> Markup {
@@ -320,7 +320,7 @@ fn editor(s: &Shell) -> Markup {
         header class="editor-header"{div{span class="eyebrow"{"MAKE IT YOURS"}h1{"A browser, arranged by you."}}div class="editor-actions"{label class="save-scope"{span{"Apply to"}select data-scope="true" aria-label="Where to apply appearance"{option value="true" selected[s.apply_space]{"This Space"}option value="false" selected[!s.apply_space]{"Browser default"}}}(action("Cancel","escape",false))(action("Save changes","editor-save",true))}}
         div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · live layout"}button class="preview-size" data-op="editor-preview-size" aria-expanded=((!s.expanded_preview).to_string()) aria-controls="appearance-controls"{(icon(if s.expanded_preview{"sidebar"}else{"external"}))(if s.expanded_preview{"Show controls"}else{"Expand preview"})}}
             div class="editor-preview"{div class="preview-canvas" inert="" {(browser(s,true))}@for region in ["leading","trailing","top","bottom"]{div class=(format!("dock-target dock-{region}")) data-dock=(region){span{(match region{"leading"=>"Left","trailing"=>"Right","top"=>"Top",_=>"Bottom"})}}}}
-            div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span{"Changes apply when you save."}}
+            div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span class="editor-feedback" role="status"{(if !s.notice.is_empty(){s.notice.as_str()}else if !text(&s.snapshot,"notice").is_empty(){text(&s.snapshot,"notice")}else{"Changes apply when you save."})}}
         }
         aside class="editor-inspector" id="appearance-controls" hidden[s.expanded_preview]{div class="inspector-section"{h2{"Arrange"}p{"Drag a component, or choose its position."}
             @for (component,label,glyph) in [("tabs","Tabs","sidebar"),("navigation","Navigation","search"),("panels","Library panel","grid")] {div class=(if s.edit_component==component{"component selected"}else{"component"}) draggable="true" data-component=(component){button data-op="editor-select" data-value=(component){(icon(glyph))span{(label)}(icon("grip"))}}}
