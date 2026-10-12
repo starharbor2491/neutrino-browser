@@ -21,6 +21,15 @@ extension NativeIntegrationTests {
       window.contentView = coordinator.container; window.makeKeyAndOrderFront(nil)
       defer { coordinator.stop(); model.closeWindow(); window.orderOut(nil); try? FileManager.default.removeItem(at:directory) }
       let web = try await RustShellAcceptance.waitForShell(in:window)
+      // Exercise range input on the actual custom-scheme origin, where secure
+      // context browser APIs available in localhost fixtures may be absent.
+      try await RustShellAcceptance.action(["op":"screen","value":"editor"],web:web)
+      _ = try await web.evaluateJavaScript("window.originalWidth=Number(document.querySelector('[data-editor]').value); const slider=document.querySelector('[data-editor]');slider.focus();slider.value='280';slider.dispatchEvent(new Event('input',{bubbles:true}));slider.value='300';slider.dispatchEvent(new Event('input',{bubbles:true}));slider.dispatchEvent(new Event('change',{bubbles:true}));")
+      try await Task.sleep(for:.milliseconds(180))
+      #expect((try await web.evaluateJavaScript("document.querySelector('[data-editor]').value==='300'")) as? Bool == true)
+      try await RustShellAcceptance.action(["op":"editor-undo"],web:web)
+      #expect((try await web.evaluateJavaScript("Number(document.querySelector('[data-editor]').value)===window.originalWidth")) as? Bool == true)
+      try await RustShellAcceptance.action(["op":"editor-cancel"],web:web)
       try await RustShellAcceptance.action(["op":"screen","value":"library","section":"notes"],web:web)
       let note = try #require(app.library.notes.first)
       try await RustShellAcceptance.action(["op":"native","action":"selectNote","id":note.id.uuidString],web:web)

@@ -307,7 +307,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         for engine in editingEngines where !next.contains(where: { $0 === engine }) { engine.setInterfaceEditing(false, owner: editingOwner) }
         for engine in next where !editingEngines.contains(where: { $0 === engine }) { engine.setInterfaceEditing(true, owner: editingOwner) }
         editingEngines = next
-        if entering { container.window?.makeKeyWindow(); container.window?.makeFirstResponder(container.chrome) }
+        if entering { container.window?.makeKey(); container.window?.makeFirstResponder(container.chrome) }
         if showingOverlay { container.hidePages() }
         return result
     }

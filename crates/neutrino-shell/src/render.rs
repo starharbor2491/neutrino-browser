@@ -502,7 +502,7 @@ fn extensions(s: &Shell) -> Markup {
     html! {div class="extensions-content"{
         p class="section-description"{"Add Chrome extensions, review their permissions, and remove them whenever you like."}
         div class="button-row"{button class="button primary" data-op="installExtension" disabled[!flag(&s.snapshot,"blinkAvailable")]{"Open extension manager"}button class="button" data-op="webStore" disabled[!flag(&s.snapshot,"blinkAvailable")]{"Chrome Web Store"}}
-        @if !flag(&s.snapshot,"blinkAvailable"){(empty("Extensions aren’t included in this build","Download the full Neutrino app to use Chrome extensions.","grid"))button class="button primary" data-op="navigate" data-value="https://github.com/starharbor2491/neutrino-browser/releases/latest"{"Get the full app"}}
+        @if !flag(&s.snapshot,"blinkAvailable"){(empty("Extensions aren’t included in this build","Download the full Neutrino app to use Chrome extensions.","grid"))button class="button primary" data-op="navigate" data-value="https://github.com/starharbor2491/neutrino-browser/releases"{"Get the full app"}}
         @else {p class="field-help"{"The manager opens in a Neutrino tab. Enable developer mode there to load a local extension folder."}}
     }}
 }

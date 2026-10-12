@@ -100,7 +100,7 @@ import NeutrinoCore
         sendKey(to: window)
         let point = page.nativeView.convert(NSPoint(x:20,y:20),to:nil)
         for type in [NSEvent.EventType.leftMouseDown,.leftMouseUp] {
-            if let event = NSEvent.mouseEvent(with:type,location:point,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:1) { NSApp.sendEvent(event) }
+            if let event = NSEvent.mouseEvent(with:type,location:point,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:1) { NSApp.postEvent(event, atStart:false) }
         }
         try await Task.sleep(for:.milliseconds(100))
         guard try await inputProbeCount(page) == before else { throw ValidationError("Editing delivered keyboard or mouse input to the live page.") }
@@ -120,7 +120,7 @@ import NeutrinoCore
     }
     private static func sendKey(to window:NSWindow) {
         for type in [NSEvent.EventType.keyDown,.keyUp] {
-            if let event=NSEvent.keyEvent(with:type,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,characters:"x",charactersIgnoringModifiers:"x",isARepeat:false,keyCode:7) { NSApp.sendEvent(event) }
+            if let event=NSEvent.keyEvent(with:type,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,characters:"x",charactersIgnoringModifiers:"x",isARepeat:false,keyCode:7) { NSApp.postEvent(event, atStart:false) }
         }
     }
     private static func installInputProbe(_ page:BrowserEngineTab) async throws {

@@ -134,7 +134,7 @@ final class ChromiumTab: BrowserEngineTab {
                           windowID == ObjectIdentifier(chrome) else { return }
                     self.runtime.objectWillChange.send()
                     guard becameKey else { return }
-                    if self.interfaceEditing { self.hostView.window?.makeKeyWindow(); return }
+                    if self.interfaceEditing { self.hostView.window?.makeKey(); return }
                     if let owner = self.hostView.window, owner.isVisible, owner.canBecomeMain {
                         owner.makeMain()
                     }
