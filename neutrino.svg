@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1130 1130" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Neutrino browser icon</title>
+  <desc id="desc">A purple isometric cube with three trails sweeping from the upper left, against a midnight galaxy with violet nebulae and distant stars.</desc>
+  <defs>
+    <linearGradient id="space" x1="100" y1="0" x2="1030" y2="1130" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#090D22"/>
+      <stop offset=".5" stop-color="#110C25"/>
+      <stop offset="1" stop-color="#050A17"/>
+    </linearGradient>
+    <radialGradient id="violet">
+      <stop stop-color="#7335AD" stop-opacity=".55"/>
+      <stop offset=".45" stop-color="#48217B" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#30134F" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blue">
+      <stop stop-color="#277C9D" stop-opacity=".38"/>
+      <stop offset=".5" stop-color="#244C82" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#17304D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dust" x1="110" y1="970" x2="1000" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4B99C9" stop-opacity="0"/>
+      <stop offset=".3" stop-color="#5264B7" stop-opacity=".22"/>
+      <stop offset=".72" stop-color="#AE6ACF" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#8046B5" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="vignette" cx=".5" cy=".46" r=".72">
+      <stop offset=".45" stop-color="#020611" stop-opacity="0"/>
+      <stop offset="1" stop-color="#020611" stop-opacity=".55"/>
+    </radialGradient>
+    <filter id="softDust" x="-40%" y="-40%" width="180%" height="180%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="32"/>
+    </filter>
+    <filter id="markShadow" x="-15%" y="-15%" width="130%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#02030B" flood-opacity=".55"/>
+    </filter>
+    <clipPath id="tile">
+      <rect width="1130" height="1130" rx="244"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="1130" height="1130" fill="url(#space)"/>
+    <ellipse cx="790" cy="288" rx="570" ry="240" transform="rotate(-32 790 288)" fill="url(#violet)"/>
+    <ellipse cx="282" cy="864" rx="480" ry="270" transform="rotate(-32 282 864)" fill="url(#blue)"/>
+    <ellipse cx="947" cy="980" rx="390" ry="260" fill="url(#violet)" opacity=".5"/>
+    <g filter="url(#softDust)">
+      <path d="M64 1020C208 942 280 757 393 592C511 419 704 272 1068 138" stroke="url(#dust)" stroke-width="98"/>
+      <path d="M170 1100C278 930 341 755 475 577C629 371 819 244 1100 226" stroke="url(#dust)" stroke-width="26" opacity=".6"/>
+    </g>
+    <rect width="1130" height="1130" fill="url(#vignette)"/>
+    <g fill="#C5C6F5" opacity=".5">
+      <circle cx="182" cy="181" r="2"/>
+      <circle cx="320" cy="126" r="1.5"/>
+      <circle cx="489" cy="172" r="2"/>
+      <circle cx="641" cy="119" r="1.5"/>
+      <circle cx="835" cy="131" r="2"/>
+      <circle cx="1005" cy="284" r="1.8"/>
+      <circle cx="929" cy="366" r="1.4"/>
+      <circle cx="107" cy="407" r="1.7"/>
+      <circle cx="186" cy="553" r="1.4"/>
+      <circle cx="117" cy="733" r="2"/>
+      <circle cx="274" cy="780" r="1.5"/>
+      <circle cx="423" cy="876" r="2"/>
+      <circle cx="533" cy="1009" r="1.5"/>
+      <circle cx="713" cy="953" r="2"/>
+      <circle cx="913" cy="970" r="1.4"/>
+      <circle cx="1008" cy="823" r="1.8"/>
+      <circle cx="1040" cy="607" r="1.5"/>
+      <circle cx="582" cy="340" r="1.5"/>
+      <circle cx="728" cy="287" r="1.3"/>
+      <circle cx="339" cy="937" r="1.3"/>
+      <circle cx="73" cy="603" r="1.2"/>
+      <circle cx="975" cy="446" r="1.2"/>
+      <circle cx="1044" cy="966" r="1.4"/>
+      <circle cx="403" cy="722" r="1.2"/>
+    </g>
+    <g fill="#E2DDFF">
+      <circle cx="875" cy="236" r="2.7" opacity=".85"/>
+      <circle cx="244" cy="937" r="2.6" opacity=".8"/>
+      <circle cx="463" cy="104" r="2" opacity=".65"/>
+      <path d="M963 176L965 185L974 187L965 189L963 198L961 189L952 187L961 185Z" opacity=".75"/>
+      <path d="M154 886L155.5 893.5L163 895L155.5 896.5L154 904L152.5 896.5L145 895L152.5 893.5Z" opacity=".7"/>
+    </g>
+    <g filter="url(#markShadow)">
+      <path d="M165 291L502 485V543L165 349Z" fill="#6E2DC8"/>
+      <path d="M165 291L215 262L552 456L502 485Z" fill="#B94AE6"/>
+      <path d="M365 291L415 262L652 399L602 428Z" fill="#B94AE6"/>
+      <path d="M265 464L502 601V659L265 522Z" fill="#6E2DC8"/>
+      <path d="M765 406L965 522V753L765 868L565 753V522Z" fill="#913DE2"/>
+      <path d="M565 522L765 637V868L565 753Z" fill="#6E2DC8"/>
+      <path d="M765 406L965 522L765 637L565 522Z" fill="#B94AE6"/>
+    </g>
+  </g>
+</svg>
