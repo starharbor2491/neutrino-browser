@@ -317,7 +317,7 @@ fn swatches(s: &Shell, setup: bool) -> Markup {
 fn editor(s: &Shell) -> Markup {
     html! {div class="editor" {
         header class="editor-header"{div{span class="eyebrow"{"MAKE IT YOURS"}h1{"A browser, arranged by you."}}div class="editor-actions"{label class="save-scope"{span{"Apply to"}select data-scope="true" aria-label="Where to apply appearance"{option value="true" selected[s.apply_space]{"This Space"}option value="false" selected[!s.apply_space]{"Browser default"}}}(action("Cancel","escape",false))(action("Save changes","editor-save",true))}}
-        div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · scaled preview"}span{"Drag a component to a highlighted edge"}}
+        div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · live layout"}span{"Drag a component to a highlighted edge"}}
             div class="editor-preview"{div class="preview-canvas" inert="" {(browser(s,true))}@for region in ["leading","trailing","top","bottom"]{div class=(format!("dock-target dock-{region}")) data-dock=(region){span{(match region{"leading"=>"Left","trailing"=>"Right","top"=>"Top",_=>"Bottom"})}}}}
             div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span{"Changes apply when you save."}}
         }

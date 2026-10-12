@@ -547,7 +547,7 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"overlay":self.onboarding() || self.palette || !["browse","library"].contains(&self.screen.as_str()) || !self.menu.is_empty(),"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { "" }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"overlay":self.onboarding() || self.palette || !["browse","library","editor"].contains(&self.screen.as_str()) || !self.menu.is_empty(),"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { "" }})
     }
     fn close_screen(&mut self) {
         self.screen = "browse".into();

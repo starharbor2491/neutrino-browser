@@ -1,26 +1,38 @@
 # Interface rebuild gauntlet
 
-Owner constraint: one implementer; independent code, UI and UX critics only. The application icon is owned by another agent and is outside this change.
+One implementer owns code changes. Three independent, read-only critics review code, UI and UX; no implementation is delegated. The supplied `neutrino.svg` is unchanged, including its artwork. The app and installer use generated raster sizes from that source.
 
-Reference: Arc for macOS, its published interface and documented tab/Space workflows. Compare actual rendered output at matched window sizes, with labels removed where practical. A source review is not a visual pass. A screenshot is not an interaction pass. No score inflation or fixed number of rounds: record the largest remaining gap, fix it, and resubmit.
+The reference is Arc for macOS: its published interface and documented tab/Space workflows. Compare actual renderings at comparable sizes, with identifying labels removed where practical. Source review does not count as visual review. Screenshots do not establish interaction behavior. No numerical taste scores or fixed round limit substitute for a critic’s preference.
 
-Method adapted from [Gauntlet Loop](https://github.com/robonuggets/gauntlet-loop), by Jay E / RoboNuggets (CC BY 4.0), based on Matt Shumer's builder/critic technique. Use [REA](https://github.com/morluto/rea) for shipped-artifact/runtime evidence; use ordinary source tools for this repository.
+Method adapted from [Gauntlet Loop](https://github.com/robonuggets/gauntlet-loop), by Jay E / RoboNuggets (CC BY 4.0), based on Matt Shumer’s builder/critic technique. [REA](https://github.com/morluto/rea) was used to discover and capture the running local Rust-rendered interface over CDP. That evidence concerns the fixture harness, not a macOS executable. Official Arc captures cover the sidebar, Spaces, pins, theme picker, and a published import flow; the historical import GIF is not represented as Arc’s entire current onboarding.
 
-## Design constraints
+## Reference principles
 
-- [Arc](https://arc.net/): page-first composition, a coherent sidebar, persistent pins and folders, quick keyboard navigation, guided personal setup.
-- [Laws of UX](https://lawsofux.com/): familiar browser shortcuts (Jakob), progressive decisions (Hick), reachable targets (Fitts), visible immediate feedback (Doherty), spatial grouping (proximity/common region).
-- [Material Design](https://m3.material.io/components/buttons/overview): consistent action hierarchy and hover/focus/pressed/disabled states.
-- [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/drag-and-drop): direct manipulation, native window behavior, keyboard/VoiceOver alternatives, reduced motion, and meaningful drag previews/drop feedback.
-- [IBM Carbon](https://www.carbondesignsystem.com/building-blocks/core/patterns/empty-states): purposeful empty states, explicit labels and recovery, no decorative controls without actions.
+- [Laws of UX](https://lawsofux.com/): familiar browser shortcuts, manageable choices, reachable targets, immediate feedback, spatial grouping.
+- [Material](https://m3.material.io/components/buttons/overview): consistent action hierarchy and hover/focus/pressed/disabled states.
+- [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/drag-and-drop): direct manipulation, window behavior, keyboard/accessibility alternatives and recovery.
+- [Carbon](https://carbondesignsystem.com/patterns/empty-states-pattern/): purposeful empty states, explicit labels, validation and recovery.
 
-## Evidence required
+## Review record
 
-1. Real shell, populated workspace, setup, editor, settings, and command palette at narrow/wide sizes and light/dark appearances.
-2. Pointer and keyboard tab reordering; folder/pin/Space moves; sidebar resize; docking with insertion feedback; cancellation and undo.
-3. Setup Back/Continue, defaults, validation, optional import/AI, interrupted-save retry, first successful navigation.
-4. Engine focus/geometry, split panes, popups, private/profile isolation, shared live documents, normal save/quit/relaunch.
-5. Rust reducer/FFI tests, adversarial bridge messages, escaped untrusted titles, and no remote navigation or credential leakage into the privileged shell.
-6. Mac compiled-app acceptance and independent final critic findings tied to source and binary identity.
+| Source | Independent findings and resulting work | Evidence boundary |
+| --- | --- | --- |
+| `327af19` | Baseline SwiftUI composition, setup and interaction problems established. Replaced the screen collection with Rust rendering and a shared visual system. | Source and prior native captures. |
+| `0ccc58d` | Docking, focus, editor exit/undo, narrow panels and engine/lifecycle defects identified. The native shell still had excess titlebar chrome; setup snapshots were black. | macOS CI passed, but black setup captures were explicitly rejected as visual evidence. |
+| `cea661c` | Editor/folder grouping, note layout, menu focus and footer refinements. Code review found Profile leakage in auxiliary Downloads, global privacy propagation and AI lifetime issues. | Renderer checks; macOS failed on a missing redirect delegate, subsequently restored. |
+| `4656345` | Auxiliary capabilities, privacy propagation, redirects, task identity, split error handling, favicon policy, SQLite migration and note storage reviewed. Critics found Settings search opening behind Settings, hidden narrow-sidebar action, note-list scroll reset, missing horizontal folder options, suppressed note updates, and two stale host projections. | Portable tests passed; native screenshot API did not compile, so no new native claim. |
+| `8863146` | All four UX residuals passed. Live note typing retained node/caret and Chromium Undo/Redo while URL, error and privacy state updated. Code critic found no new P0/P1; account option availability remained stale. UX found slider-focused Undo suppressed. | Independent rendered-fixture and source review. Neither established native IME or Arc-wide parity. |
+| `c4aa34b` | Account options reconcile live; slider shortcut routes to appearance Undo; invalid raw-NUL storage fails without modifying data. Native image conversion returns Data across the async boundary. | Mac verification is tracked in TESTING.md. |
 
-Baseline: `327af19`. Initial critiques are independent and read-only. Audit findings and review evidence will be recorded as the loop progresses. Arc-equivalent acceptance remains unverified until the critics inspect real comparable evidence.
+The next editor revision keeps the original native page mounted while its frame follows the layout draft, addressing the UX critic’s preference for Arc’s contextual customization. Input to the page is paused during editing, and dragging hides it briefly to expose docking targets. Cancel restores normal interaction on the same document. Native acceptance must prove this behavior; a fixture image cannot.
+
+## Required evidence
+
+1. Shell, populated workspace, seven setup screens, editor, settings and command palette at wide/narrow sizes and light/dark appearances.
+2. Pointer/keyboard reordering; pin/folder/Space moves; resize; docking feedback; cancellation; Undo/Redo.
+3. Setup Back/Continue, validation, optional import/AI, interrupted-save retry and first successful navigation.
+4. Native engine geometry/focus, split recovery, modal isolation, private/Profile boundaries, shared live documents, persistence and quit/relaunch.
+5. Rust reducer/FFI and existing native service tests; escaped page titles, main-frame message isolation, no password values in UI snapshots.
+6. Compiled-app identity, actual screenshots, installed acceptance and independent final findings.
+
+Full Arc-equivalent, accessibility, extension and protected-streaming acceptance remain separate from a source or fixture pass. Record unresolved findings rather than treating a critic’s withheld preference as approval.

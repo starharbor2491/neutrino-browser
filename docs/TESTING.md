@@ -1,6 +1,6 @@
 # Neutrino verification
 
-Run `./scripts/test.sh` with Swift 6 and SQLite development headers. macOS additionally builds and tests the native app targets. Linux runs portable core/reader tests only.
+Run `./scripts/test.sh` with Rust 1.88+, Swift 6 and SQLite development headers. macOS additionally builds and tests the native app targets. Linux runs the Rust workspace and portable Swift core/reader tests.
 
 ## Verified in this workspace
 
@@ -13,9 +13,17 @@ The portable suite covers database round trips/recovery, modules and transaction
 
 Swift syntax parsing checks grammar, not macOS type checking or execution. Native verification runs separately on GitHub's Apple Silicon macOS runners.
 
-## Native CI evidence
+## Rust rebuild checks
 
-Released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
+`8863146` passes 21 Rust workflow/core tests and 71 portable Swift tests, including existing bookmark import/export and SQLite persistence/recovery cases after their Rust migration. Browser-harness checks independently cover search destinations, narrow Library, folders, editor save/discard, docking, note scroll, live identity/error updates, and text Undo/Redo. Follow-up checks cover slider-focused Undo, live account-option availability, and replacement of editable nodes on Profile changes.
+
+The native `RustShellNativeTests` suite uses an actual WKWebView to exercise a large library, immediate note dismissal, live security/error updates during note editing, native text Undo, auxiliary Downloads isolation, canonical AI endpoints and view ownership. Installed smoke also checks editor draft isolation and live-document identity/geometry. These checks must pass on the final compiled revision.
+
+`0ccc58d` [macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38230973377) built and installed the Rust shell, but its black setup captures are invalid visual evidence. Subsequent native compilation failures were fixed, not reported as passes. Current native evidence is pending the final revision below.
+
+## Historical release CI evidence
+
+Pre-Rust released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
 
 [macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38138834489) passed. The debug suite runs 161 tests; release native integration runs 90. The development WebKit app ZIP/DMG passed sealed copy, detached installed launch, ordinary quit and removal. Native captures cover the shell, settings, editor and all eight setup screens. Visual review previously caught and corrected an overflowing editor inspector; its header, exit and Save controls remain visible. Screenshot capture does not verify interactive setup completion or all editor/accessibility workflows.
 
@@ -36,7 +44,7 @@ python3 scripts/package-release.py --development
 python3 scripts/installed-smoke.py --chromium-restart
 ```
 
-The packaged smoke runner also captures all eight guided setup screens without completing the wizard or accessing a real account; those captures still require macOS execution and visual review.
+The Rust packaged smoke runner advances through seven guided setup screens using the real command bridge. It captures them with WKWebView snapshots and rejects identical images. It does not use a real account. Current screenshot and interaction results must be reviewed separately from the historical eight-screen implementation.
 
 Native workspace tests use a real WebKit document to check live-tab identity, unsaved form/JavaScript preservation, callback rewiring, shared descriptors, per-Space setups, and inactive Profile cleanup. Existing services retain real store/worker/download/write-failure tests.
 

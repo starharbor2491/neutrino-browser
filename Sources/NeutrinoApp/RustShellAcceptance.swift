@@ -71,7 +71,7 @@ import NeutrinoCore
         await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-shell-dark.png"))
         app.applyConfiguration(original,to:model.session.spaceID)
     }
-    static func verifyPageGeometry(window:NSWindow, model:BrowserModel) async throws {
+    static func verifyPageGeometry(window:NSWindow, model:BrowserModel, output:URL) async throws {
         let web=try await waitForShell(in:window)
         try await action(["op":"screen","value":"browse"],web:web)
         try await Task.sleep(for:.milliseconds(200))
@@ -79,5 +79,20 @@ import NeutrinoCore
         guard let geometry, geometry["width",default:0]>=300, geometry["height",default:0]>=250,
               model.activeWebTab.nativeView.window === window,
               abs(model.activeWebTab.nativeView.bounds.width-geometry["width",default:0]) < 3 else { throw ValidationError("The native page does not match the Rust-rendered page region.") }
+        let page = model.activeWebTab
+        let configuration = model.configuration
+        try await action(["op":"screen","value":"editor"],web:web)
+        try await action(["op":"dock","component":"tabs","region":"trailing"],web:web)
+        let preview = try await web.evaluateJavaScript("document.querySelector('.editing-preview .native-page').getBoundingClientRect().width") as? Double
+        guard let preview, preview > 100,
+              model.activeWebTab === page,
+              let container = page.nativeView.superview as? EngineViewContainer,
+              container.window === window, !container.isHidden, container.isPreviewing,
+              abs(page.nativeView.bounds.width-preview) < 3,
+              model.configuration == configuration else { throw ValidationError("The editor did not preserve its live page and isolated layout draft.") }
+        await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-editor-live-page.png"))
+        try await action(["op":"editor-cancel"],web:web)
+        guard model.activeWebTab === page,
+              (page.nativeView.superview as? EngineViewContainer)?.isPreviewing == false else { throw ValidationError("Cancel did not restore browsing on the original page.") }
     }
 }

@@ -356,6 +356,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             let view = container.mounted[id] ?? EngineViewContainer(page: tab.nativeView)
             if view.superview !== container { container.addSubview(view) }
             view.mount(tab.nativeView); view.frame = rect; view.isHidden = false
+            view.isPreviewing = body["editing"] as? Bool == true
             view.identifier = NSUserInterfaceItemIdentifier("neutrino.page")
             view.wantsLayer = true; view.layer?.cornerRadius = 10; view.layer?.masksToBounds = true
             container.mounted[id] = view; visible.insert(id)

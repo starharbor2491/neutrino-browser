@@ -57,7 +57,7 @@ enum AppSmokeTest {
                 trace("Extracting reader text")
                 let text = try await app.readerText(from: browser.activeWebTab)
                 guard text.contains("Local browser check") else { throw ValidationError("Reader could not read the HTTP fixture.") }
-                try await RustShellAcceptance.verifyPageGeometry(window: window, model: browser)
+                try await RustShellAcceptance.verifyPageGeometry(window: window, model: browser, output: output)
                 trace("Verifying split panes and tree tabs")
                 browser.panel = nil
                 var config = browser.configuration
