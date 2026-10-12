@@ -21,6 +21,14 @@ The native `RustShellNativeTests` suite uses an actual WKWebView to exercise a l
 
 `0ccc58d` [macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38230973377) built and installed the Rust shell, but its black setup captures are invalid visual evidence. Subsequent native compilation failures were fixed, not reported as passes. [c4aa34b native CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38237647239) passed portable, debug/release native, package and installed-shell checks. Its seven setup images are distinct WKWebView snapshots. The new live-page editor is being verified on its own subsequent revision.
 
+[336b1f1 macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38243160959) and [d19a1f0 macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38244385471) passed 165 debug tests, 94 release native tests, packaging, installed shell launch and normal quit. These revisions include the live editor and native input isolation. The portable suite has 22 Rust tests in addition to the 71 Swift Testing and 12 XCTest cases.
+
+Native screenshots now use the OS window compositor, which includes Blink child windows. The full Blink run independently exercises page keyboard controls before editing, rejection during editing, and restored input afterward; editor resize/expand/cancel preserves document identity. Parent-directed mouse events plus the child-window input flag establish a narrower mouse boundary than independent WindowServer targeting. Single shell scroll containers are recorded alongside screenshots.
+
+`7720c97` [macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38247169537) passes 22 Rust tests, the portable Swift suites, 165 macOS debug tests and 94 release native tests. The actual packaged application passes Command-W while its address palette is open, tab/window preservation, editor checks, read-only DMG copy, installed launch, normal quit and removal. This is the verified application source for the final documentation/CI-path cleanup.
+
+The same-source [full Blink run](https://github.com/starharbor2491/neutrino-browser/actions/runs/38247169538) passed native compilation/tests, packaging, custom keyboard and File-menu tab commands, address focus, retained documents, navigation Retry, Reader/capture, download ownership, native hosting, Web Store installation and regular/private cookie-lifetime checks. It fails only the collected MV3 action-popup gate: **Browser window has no toolbar**. Full Blink shutdown/restart acceptance is therefore still incomplete; this result is not a passing core receipt.
+
 ## Historical release CI evidence
 
 Pre-Rust released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
