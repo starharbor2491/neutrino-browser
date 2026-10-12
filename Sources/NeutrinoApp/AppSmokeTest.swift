@@ -217,8 +217,7 @@ enum AppSmokeTest {
                     }
                     guard window.isVisible, browser.activeWebTab.engineID == .webkit else { throw ValidationError("Closing Chromium also closed the native window or WebKit pane.") }
                     trace("Leaving the native extension manager open to verify quit ownership")
-                    browser.sheet = .extensions
-                    try await ChromiumAcceptance.verifyExtensionSheet(browser: browser, ownerWindow: window)
+                    try await ChromiumAcceptance.verifyExtensionInterface(browser: browser, ownerWindow: window)
                     trace("Embedded Chromium runtime check passed")
                 }
             }
@@ -226,7 +225,7 @@ enum AppSmokeTest {
             guard await app.flush() else { throw ValidationError(app.notice ?? "App data could not be saved.") }
             trace("Neutrino packaged-app smoke test passed.")
             // Return this actor job before AppKit enters its deferred-termination loop.
-            // The extension-manager sheet can leave AppKit in modal-panel mode.
+            // The extension manager is a Neutrino tab and joins normal engine shutdown.
             requestNormalQuit()
         } catch { fail(error.localizedDescription) }
     }
