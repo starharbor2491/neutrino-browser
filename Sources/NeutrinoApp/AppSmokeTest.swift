@@ -267,14 +267,18 @@ enum AppSmokeTest {
             if step > 0 { try await RustShellAcceptance.action(["op":"setup-next"],web:web) }
             guard (try await web.evaluateJavaScript("!!document.querySelector('.onboarding.step-\(step)')")) as? Bool == true else { throw ValidationError("Setup did not render step \(step+1).") }
             // WebKit renders out of process; NSView.cacheDisplay produces black frames.
-            let image: NSImage = try await withCheckedThrowingContinuation { continuation in
+            let png: Data = try await withCheckedThrowingContinuation { continuation in
                 web.takeSnapshot(with: nil) { image, error in
                     if let error { continuation.resume(throwing: error) }
-                    else if let image { continuation.resume(returning: image) }
+                    else if let image, let tiff = image.tiffRepresentation,
+                            let bitmap = NSBitmapImageRep(data: tiff),
+                            let data = bitmap.representation(using: .png, properties: [:]) {
+                        continuation.resume(returning: data)
+                    }
                     else { continuation.resume(throwing: ValidationError("Setup snapshot was unavailable.")) }
                 }
             }
-            guard let tiff=image.tiffRepresentation, let bitmap=NSBitmapImageRep(data:tiff), let png=bitmap.representation(using:.png,properties:[:]), png.count>1000, png != previous else { throw ValidationError("Setup capture did not change between steps.") }
+            guard png.count>1000, png != previous else { throw ValidationError("Setup capture did not change between steps.") }
             try png.write(to:output.appendingPathComponent("Neutrino-setup-\(step+1).png")); previous=png
         }
         trace("Captured seven distinct native WebKit setup screens")

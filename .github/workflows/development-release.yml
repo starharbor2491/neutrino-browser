@@ -2,6 +2,8 @@ name: Publish Neutrino preview
 on:
   push:
     tags: ['v*-preview.*']
+    branches: [main]
+    paths: [PREVIEW_VERSION]
   workflow_dispatch:
     inputs:
       version:
@@ -33,7 +35,8 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, re
-          version = os.environ.get('INPUT_VERSION') or os.environ['GITHUB_REF_NAME'].removeprefix('v')
+          from pathlib import Path
+          version = os.environ.get('INPUT_VERSION') or (os.environ['GITHUB_REF_NAME'].removeprefix('v') if os.environ['GITHUB_REF_TYPE'] == 'tag' else Path('PREVIEW_VERSION').read_text().strip())
           if not re.fullmatch(r'\d+\.\d+\.\d+-preview\.\d+', version):
               raise SystemExit('Preview releases require a version such as 1.0.1-preview.1')
           with open(os.environ['GITHUB_ENV'], 'a') as env:
@@ -131,7 +134,7 @@ jobs:
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
               'Automatic updates download from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
-              'Use Settings > Browsing engines > Installation and updates to disable automatic updates or restart immediately.\n\n'
+              'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
               '**Development preview:** ad-hoc signed and unnotarized; macOS may require Open Anyway in Privacy & Security. '
               'This release does not certify the finished core or full browser parity. Native tests, real updater replacement, and installed shell acceptance passed. '
               'Full Blink/extension acceptance: **' + os.environ['BLINK_ACCEPTANCE'] + '**; see the attached receipt/log. '

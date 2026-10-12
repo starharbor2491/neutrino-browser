@@ -44,7 +44,13 @@ function reconcile(parent, incoming, preserveEditing) {
    for (const attr of fresh.attributes) {
     if (!(editing && attr.name === 'value') && current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
    }
-   if (!editing) {
+   if (editing && current.matches('select')) {
+    const selected = current.value;
+    reconcile(current, fresh, preserveEditing);
+    const usable = [...current.options].find(option => option.value === selected && !option.disabled);
+    const fallback = [...current.options].find(option => option.value === fresh.value && !option.disabled) || [...current.options].find(option => !option.disabled);
+    current.value = (usable || fallback)?.value || '';
+   } else if (!editing) {
     reconcile(current, fresh, preserveEditing);
     if (current.matches('input,textarea,select') && current.value !== fresh.value) current.value = fresh.value;
    }
@@ -62,9 +68,8 @@ function patch(result) {
  if (result.context) currentContext = result.context;
  const active = document.activeElement, key = selector(active);
  const selection = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
- const preserved = sameContext && key && active.matches('input,textarea,select') ? active.value : null;
+ const preserved = sameContext && key && active.matches('input,textarea') ? active.value : null;
  const scrolls = [...root.querySelectorAll('.tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list')].map(e => [e.className,e.scrollTop]);
- const fields = sameContext ? [...root.querySelectorAll('.ai-form input,.ai-form select')].map(e => [e.name,e.value]) : [];
  const openDetails = [...root.querySelectorAll('details[open]')].map(e => e.className);
  const hadDialog = !!topDialog();
  const template = document.createElement('template');
@@ -74,10 +79,6 @@ function patch(result) {
  const dialog = topDialog();
  for (const el of root.querySelectorAll('.browser-shell,.editor,.utility-screen,.command-palette')) el.inert = !!dialog && !el.contains(dialog) && el !== dialog;
  if (dialog && !hadDialog) returnFocus = key;
- for (const [name,value] of fields) {
-  const el = root.querySelector('.ai-form [name="'+CSS.escape(name)+'"]');
-  if (el && el.value !== value) el.value = value;
- }
  for (const cls of openDetails) { const el = root.getElementsByClassName(cls)[0]; if (el) el.open = true; }
  for (const [cls,top] of scrolls) { const el = root.getElementsByClassName(cls)[0]; if (el) el.scrollTop = top; }
  const next = key ? root.querySelector(key) : null;
@@ -108,7 +109,7 @@ document.addEventListener('compositionend',()=>{composition=false;});
 document.addEventListener('input',e=>{const el=e.target;if(el.dataset.note)transport({kind:'action',request:{op:'native',action:'saveNote',id:el.dataset.note,value:{field:el.dataset.noteField,text:el.value}}}).then(result=>patch({...result,passive:true})).catch(e=>announce('Could not save note. '+e.message));else if(el.id==='command-input')send({op:'query',value:el.value});else if(el.dataset.setup)send({op:'setup-field',key:el.dataset.setup,value:el.value});else if(el.dataset.name!==undefined)send({op:'name',value:el.value});});
 document.addEventListener('change',e=>{const el=e.target;if(el.dataset.scope)send({op:'editor-scope',value:el.value==='true'});if(el.dataset.editor)send({op:'editor-value',key:el.dataset.editor,value:Number(el.value)});if(el.name==='provider'){const input=el.form.elements.endpoint;input.value=el.value==='local'?'http://localhost:1234/v1':el.value==='xAI'?'https://api.x.ai/v1':'https://api.openai.com/v1';el.form.elements.key.value='';}});
 document.addEventListener('submit',e=>{e.preventDefault();const form=e.target;if(form.dataset.form==='credential'){const f=new FormData(form);const request={op:'saveCredential',origin:f.get('origin'),username:f.get('username'),password:f.get('password')};form.elements.password.value='';send(request);}else if(form.dataset.form==='find'){send({op:'find',value:new FormData(form).get('find')});send({op:'escape'});}else if(form.dataset.form==='ai'){const f=new FormData(form);const request={op:'saveAI',provider:f.get('provider'),endpoint:f.get('endpoint'),model:f.get('model'),key:f.get('key'),useAccount:f.get('useAccount')==='account'};form.elements.key.value='';send(request);}else if(form.dataset.form==='assistant')send({op:'assistant',value:new FormData(form).get('prompt')});});
-document.addEventListener('keydown',e=>{const typing=e.target.matches('input,textarea,select'),command=e.metaKey||e.ctrlKey;
+document.addEventListener('keydown',e=>{const typing=e.target.matches('textarea,select,input:not([type=range]):not([type=checkbox]):not([type=radio])'),command=e.metaKey||e.ctrlKey;
  if(e.key==='Escape'){e.preventDefault();if(resize){finishResize(false);return;}send({op:'escape'});return;}
  if(e.key==='Tab'){const modal=topDialog();if(modal){const list=[...modal.querySelectorAll('button:not(:disabled),input,textarea,select,[tabindex="0"]')].filter(x=>x.getClientRects().length);if(list.length){const first=list[0],last=list[list.length-1];if(e.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}return;}
  if(e.target.id==='command-input'){if(['ArrowDown','ArrowUp','Enter'].includes(e.key)){e.preventDefault();send({op:e.key==='Enter'?'activate-result':e.key==='ArrowDown'?'result-next':'result-previous'});}return;}
