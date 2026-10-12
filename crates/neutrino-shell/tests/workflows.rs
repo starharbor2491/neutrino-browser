@@ -359,3 +359,23 @@ fn global_search_reveals_results_but_cancel_returns_to_settings() {
     assert_eq!(s.screen, "browse");
     assert!(!s.sidebar_hidden);
 }
+
+#[test]
+fn continuous_width_drag_is_one_undo_step_despite_passive_updates() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    for width in [250, 280, 310] {
+        s.dispatch(json!({"op":"editor-value","key":"tabsWidth","value":width,"gesture":"drag-1"}));
+        s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    }
+    assert_eq!(s.config()["layout"]["tabsWidth"], 310);
+    s.dispatch(json!({"op":"editor-end-adjustment"}));
+    s.dispatch(json!({"op":"editor-undo"}));
+    assert_eq!(s.config()["layout"]["tabsWidth"], 240);
+    s.dispatch(json!({"op":"editor-redo"}));
+    assert_eq!(s.config()["layout"]["tabsWidth"], 310);
+    s.dispatch(json!({"op":"editor-value","key":"tabsWidth","value":300,"gesture":"drag-2"}));
+    s.dispatch(json!({"op":"editor-end-adjustment"}));
+    s.dispatch(json!({"op":"editor-undo"}));
+    assert_eq!(s.config()["layout"]["tabsWidth"], 310);
+}

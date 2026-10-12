@@ -112,6 +112,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var pendingSync: Task<Void, Never>?
     private var renderGeneration = 0
     private var showingOverlay = true
+    private let editingOwner = UUID()
+    private var editingEngines: [BrowserEngineTab] = []
+    private var editingInputMonitor: Any?
     private var credentialMetadata: [[String: String]] = []
     private var ready = false
     private var stopped = false
@@ -137,6 +140,16 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         container = RustShellContainer(chrome: chrome)
         super.init()
         chrome.navigationDelegate = self
+        editingInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, !self.editingEngines.isEmpty,
+                      event.window === self.container.window,
+                      let responder = event.window?.firstResponder as? NSView,
+                      self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) else { return event }
+                self.container.window?.makeFirstResponder(self.container.chrome)
+                return nil
+            }
+        }
         chrome.setValue(false, forKey: "drawsBackground")
         configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "neutrino")
         app.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
@@ -165,6 +178,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        editingEngines.forEach { $0.setInterfaceEditing(false, owner: editingOwner) }; editingEngines.removeAll()
+        if let editingInputMonitor { NSEvent.removeMonitor(editingInputMonitor) }; editingInputMonitor = nil
         pendingSync?.cancel(); assistantTask?.cancel(); model?.shellAction = nil; subscriptions.removeAll(); downloadObservations.removeAll(); engineObservations.removeAll(); observedEngines.removeAll()
         container.chrome.configuration.userContentController.removeScriptMessageHandler(forName: "neutrino", contentWorld: .page)
         container.chrome.navigationDelegate = nil
@@ -286,6 +301,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         renderGeneration += 1
         var result = response; result["generation"] = renderGeneration
         showingOverlay = response["overlay"] as? Bool ?? true
+        let editing = response["editing"] as? Bool == true
+        let next = editing ? (model?.visibleEngineTabs.map(\.page) ?? []) : []
+        let entering = editingEngines.isEmpty && !next.isEmpty
+        for engine in editingEngines where !next.contains(where: { $0 === engine }) { engine.setInterfaceEditing(false, owner: editingOwner) }
+        for engine in next where !editingEngines.contains(where: { $0 === engine }) { engine.setInterfaceEditing(true, owner: editingOwner) }
+        editingEngines = next
+        if entering { container.window?.makeKeyWindow(); container.window?.makeFirstResponder(container.chrome) }
         if showingOverlay { container.hidePages() }
         return result
     }

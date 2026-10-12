@@ -81,6 +81,12 @@ import NeutrinoCore
               abs(model.activeWebTab.nativeView.bounds.width-geometry["width",default:0]) < 3 else { throw ValidationError("The native page does not match the Rust-rendered page region.") }
         let page = model.activeWebTab
         let configuration = model.configuration
+        try await installInputProbe(page)
+        page.focus()
+        sendKey(to: (page as? ChromiumTab)?.chromeWindow ?? window)
+        try await Task.sleep(for:.milliseconds(100))
+        let before = try await inputProbeCount(page)
+        guard before > 0 else { throw ValidationError("The editor input test could not deliver its browsing control key.") }
         try await action(["op":"screen","value":"editor"],web:web)
         try await action(["op":"dock","component":"tabs","region":"trailing"],web:web)
         let preview = try await web.evaluateJavaScript("document.querySelector('.editing-preview .native-page').getBoundingClientRect().width") as? Double
@@ -90,9 +96,46 @@ import NeutrinoCore
               container.window === window, !container.isHidden, container.isPreviewing,
               abs(page.nativeView.bounds.width-preview) < 3,
               model.configuration == configuration else { throw ValidationError("The editor did not preserve its live page and isolated layout draft.") }
-        await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-editor-live-page.png"))
+        page.focus() // Programmatic page activation must also remain suspended.
+        sendKey(to: window)
+        let point = page.nativeView.convert(NSPoint(x:20,y:20),to:nil)
+        for type in [NSEvent.EventType.leftMouseDown,.leftMouseUp] {
+            if let event = NSEvent.mouseEvent(with:type,location:point,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,eventNumber:0,clickCount:1,pressure:1) { NSApp.sendEvent(event) }
+        }
+        try await Task.sleep(for:.milliseconds(100))
+        guard try await inputProbeCount(page) == before else { throw ValidationError("Editing delivered keyboard or mouse input to the live page.") }
+        if let chrome = (page as? ChromiumTab)?.chromeWindow {
+            guard chrome.ignoresMouseEvents, !chrome.isKeyWindow else { throw ValidationError("The Chromium child still accepts input during editing.") }
+        }
+        _ = try await evaluatePage(page,"document.getElementById('neutrino-input-probe').style.opacity='0'; 'ok'")
+        await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-editor-live-\(page.engineID.rawValue).png"))
         try await action(["op":"editor-cancel"],web:web)
         guard model.activeWebTab === page,
               (page.nativeView.superview as? EngineViewContainer)?.isPreviewing == false else { throw ValidationError("Cancel did not restore browsing on the original page.") }
+        page.focus()
+        sendKey(to: (page as? ChromiumTab)?.chromeWindow ?? window)
+        try await Task.sleep(for:.milliseconds(100))
+        guard try await inputProbeCount(page) > before else { throw ValidationError("Closing the editor did not restore page keyboard input.") }
+        _ = try await evaluatePage(page,"document.getElementById('neutrino-input-probe')?.remove(); 'ok'")
+    }
+    private static func sendKey(to window:NSWindow) {
+        for type in [NSEvent.EventType.keyDown,.keyUp] {
+            if let event=NSEvent.keyEvent(with:type,location:.zero,modifierFlags:[],timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,characters:"x",charactersIgnoringModifiers:"x",isARepeat:false,keyCode:7) { NSApp.sendEvent(event) }
+        }
+    }
+    private static func installInputProbe(_ page:BrowserEngineTab) async throws {
+        _ = try await evaluatePage(page,"(()=>{window.neutrinoProbeCount=0;const input=document.createElement('input');input.id='neutrino-input-probe';input.style='position:fixed;left:8px;top:8px;z-index:2147483647;width:100px';document.body.append(input);document.addEventListener('keydown',()=>window.neutrinoProbeCount++);document.addEventListener('mousedown',()=>window.neutrinoProbeCount++);input.focus();return 'ok';})()")
+    }
+    private static func inputProbeCount(_ page:BrowserEngineTab) async throws -> Int {
+        Int(try await evaluatePage(page,"String(window.neutrinoProbeCount)")) ?? -1
+    }
+    private static func evaluatePage(_ page:BrowserEngineTab,_ expression:String) async throws -> String {
+        if let web=page as? WebTab { return (try await web.webView.evaluateJavaScript(expression)) as? String ?? "" }
+        if let chrome=page as? ChromiumTab {
+            let data=try await chrome.request("Runtime.evaluate",parameters:["expression":expression,"returnByValue":true])
+            let object=try JSONSerialization.jsonObject(with:data) as? [String:Any]
+            return (object?["result"] as? [String:Any])?["value"] as? String ?? ""
+        }
+        throw ValidationError("The editor input test requires a website engine.")
     }
 }

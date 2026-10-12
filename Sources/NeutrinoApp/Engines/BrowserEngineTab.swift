@@ -44,6 +44,11 @@ class BrowserEngineTab: NSObject, ObservableObject {
     var title: String? { nil }
     var engineID: BrowserEngineID { preconditionFailure("An engine must identify itself") }
     func refreshActiveContent() {}
+    private var interfaceEditors = Set<UUID>()
+    var interfaceEditing: Bool { !interfaceEditors.isEmpty }
+    func setInterfaceEditing(_ value: Bool, owner: UUID) {
+        if value { interfaceEditors.insert(owner) } else { interfaceEditors.remove(owner) }
+    }
     func performNativeTabCommand(_ command: NativeTabCommand) -> Bool { false }
     var chromiumSessionPages: [ChromiumSessionPage]? { nil }
     func restoreChromiumSessionPages(_ pages: [ChromiumSessionPage]) {}
@@ -60,7 +65,7 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func pageText() async throws -> String { throw ValidationError("This engine cannot read page text.") }
     func selectedText() async throws -> String { throw ValidationError("This engine cannot read selected text.") }
     func fillCredential(_ credential: LocalCredential) async throws { throw ValidationError("Autofill is unavailable in this engine.") }
-    func focus() { nativeView.window?.makeFirstResponder(nativeView) }
+    func focus() { if !interfaceEditing { nativeView.window?.makeFirstResponder(nativeView) } }
     func find(_ text: String, backwards: Bool = false) { preconditionFailure("An engine must implement find") }
     func pageHTML() async throws -> String { throw ValidationError("This engine cannot capture page HTML.") }
     func capturePNG() async throws -> Data { throw ValidationError("This engine cannot capture the page.") }

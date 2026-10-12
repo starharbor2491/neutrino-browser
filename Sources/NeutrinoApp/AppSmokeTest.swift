@@ -35,7 +35,7 @@ enum AppSmokeTest {
             }
             trace("Browser window opened")
             try await measureIdle("initial-shell-onboarding")
-            if let view = window.contentView { try capture(view, to: output.appendingPathComponent("Neutrino-first-launch.png")) }
+            await captureWindow(window, to: output.appendingPathComponent("Neutrino-first-launch.png"))
             try await captureOnboarding(app: app, output: output)
             window.makeKeyAndOrderFront(nil)
             app.library.preferences.completedOnboarding = true
@@ -73,8 +73,7 @@ enum AppSmokeTest {
                 guard browser.webTab(pair.first) !== browser.webTab(pair.second), browser.session.split?.first == pair.first else { throw ValidationError("Browsing panes were not independent.") }
                 _ = browser.session.setParent(pair.second, to: pair.first)
                 try await Task.sleep(for: .milliseconds(500))
-                guard let view = window.contentView else { throw ValidationError("Cannot capture split panes.") }
-                try capture(view, to: output.appendingPathComponent("Neutrino-split.png"))
+                await captureWindow(window, to: output.appendingPathComponent("Neutrino-split.png"))
                 browser.selectOtherPane()
                 guard browser.session.selectedTabID == pair.first else { throw ValidationError("Switching panes did not update the address context.") }
                 if ProcessInfo.processInfo.environment["NEUTRINO_CHROMIUM_PACKAGE"] != nil {
@@ -181,8 +180,8 @@ enum AppSmokeTest {
                             throw ValidationError("Chromium HTTPS reader did not return the loaded page's body (\(httpsReader.count) characters).")
                         }
                         try await Task.sleep(for: .milliseconds(500))
-                        guard let view = window.contentView else { throw ValidationError("Cannot capture embedded Chromium.") }
-                        try capture(view, to: output.appendingPathComponent("Neutrino-chromium.png"))
+                        try await RustShellAcceptance.verifyPageGeometry(window:window,model:browser,output:output)
+                        await captureWindow(window, to: output.appendingPathComponent("Neutrino-chromium.png"))
                         // WindowServer capture includes GPU-backed layers omitted by Cocoa bitmap caching.
                         await captureWindow(window, to: output.appendingPathComponent("Neutrino-chromium-window.png"))
                         if let chromeWindow = chromium.chromeWindow { await captureWindow(chromeWindow, to: output.appendingPathComponent("Neutrino-chromium-toolbar-window.png")) }
@@ -244,17 +243,6 @@ enum AppSmokeTest {
         }
         CFRunLoopWakeUp(runLoop)
     }
-    private static func moduleSectionPicker(in root: NSView) -> NSSegmentedControl? {
-        if let picker = root as? NSSegmentedControl, !picker.isHidden,
-           (0..<picker.segmentCount).contains(where: { picker.label(forSegment: $0) == "Updates" }) { return picker }
-        for child in root.subviews { if let picker = moduleSectionPicker(in: child) { return picker } }
-        return nil
-    }
-    private static func layoutRegion(_ identifier: String, in root: NSView) -> NSView? {
-        if root.identifier?.rawValue == identifier, !root.isHidden, root.bounds.width > 0, root.bounds.height > 0 { return root }
-        for child in root.subviews { if let match = layoutRegion(identifier, in: child) { return match } }
-        return nil
-    }
     private static func captureOnboarding(app: AppState, output: URL) async throws {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1100, height: 780), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -284,12 +272,6 @@ enum AppSmokeTest {
         trace("Captured seven distinct native WebKit setup screens")
     }
 
-    private static func capture(_ view: NSView, to url: URL) throws {
-        guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw ValidationError("Cannot capture \(url.lastPathComponent).") }
-        view.cacheDisplay(in: view.bounds, to: image)
-        guard let png = image.representation(using: .png, properties: [:]), png.count > 1000 else { throw ValidationError("The \(url.lastPathComponent) screenshot was empty.") }
-        try png.write(to: url)
-    }
     static func captureWindow(_ window: NSWindow, to url: URL) async {
         window.makeKeyAndOrderFront(nil)
         let process = Process()

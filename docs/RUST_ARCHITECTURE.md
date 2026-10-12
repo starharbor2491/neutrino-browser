@@ -8,7 +8,7 @@ The C ABI exchanges bounded JSON and opaque handles. Rust owns and frees its ret
 
 Rust also owns address/search resolution, AI endpoint validation/canonicalization, organization proposal validation, reader-feed parsing, blocking rules, bookmark HTML import/export, SQLite transactions/revision ordering/checkpoints, and SVG icon rasterization. The database schema and external data directory remain compatible with the updater. Bookmark export failures propagate rather than producing empty files.
 
-Swift remains in the AppKit/WebKit/CEF view adapters, application lifecycle, Keychain, native file/default-browser/permission dialogs, downloads, account networking, and signed distribution services. Existing Swift Codable models and module/worker infrastructure are retained, so this is not a claim that all portable Swift has been eliminated. The rendering and interaction code no longer relies on the previous SwiftUI screen collection. CEF integration remains Objective-C++ against upstream CEF, with ABI 6 custom browser chrome and ordinary-tab close requests.
+Swift remains in the AppKit/WebKit/CEF view adapters, application lifecycle, Keychain, native file/default-browser/permission dialogs, downloads, account networking, and signed distribution services. Existing Swift Codable models and module/worker infrastructure are retained, so this is not a claim that all portable Swift has been eliminated. The rendering and interaction code no longer relies on the previous SwiftUI screen collection. CEF integration remains Objective-C++ against upstream CEF, with ABI 7 custom browser chrome and ordinary-tab close requests.
 
 ## Build
 

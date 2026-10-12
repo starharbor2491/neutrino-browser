@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // DOM/platform adapter only. Rust owns rendering, validation and interaction state.
 (()=>{'use strict';
-const root=document.getElementById('app');let chain=Promise.resolve(),currentOverlay=false,currentEditing=false,generation=0,drag=null,resize=null,geometryFrame=0,returnFocus=null,composition=false,currentContext=null;
+const root=document.getElementById('app');let chain=Promise.resolve(),currentOverlay=false,currentEditing=false,generation=0,drag=null,resize=null,adjustment=null,geometryFrame=0,returnFocus=null,composition=false,currentContext=null;
 const native=()=>window.webkit?.messageHandlers?.neutrino;
 const textInputSelector='textarea,input:not([type=range]):not([type=checkbox]):not([type=radio])';
 async function transport(message){if(native())return await native().postMessage(message);const r=await fetch('/dispatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});if(!r.ok)throw Error('Connection unavailable');return await r.json();}
@@ -37,7 +37,8 @@ function reconcile(parent, incoming, preserveEditing) {
   if (!current) { parent.insertBefore(fresh.cloneNode(true), cursor); continue; }
   if (current !== cursor) parent.insertBefore(current, cursor);
   if (current.nodeType === Node.ELEMENT_NODE) {
-   const editing = preserveEditing && current.matches(textInputSelector+',select') &&
+   const adjusting = adjustment && current === adjustment.element;
+   const editing = adjusting || preserveEditing && current.matches(textInputSelector+',select') &&
     (current === document.activeElement || current.closest('form[data-form]'));
    for (const attr of [...current.attributes]) {
     if (!fresh.hasAttribute(attr.name) && !(editing && attr.name === 'value')) current.removeAttribute(attr.name);
@@ -47,7 +48,7 @@ function reconcile(parent, incoming, preserveEditing) {
     if (drag && attr.name === 'class') value += ' ' + [...current.classList].filter(c => ['drop-hover','drop-before','drag-source','valid'].includes(c)).join(' ');
     if (!(editing && attr.name === 'value') && current.getAttribute(attr.name) !== value) current.setAttribute(attr.name, value);
    }
-   if (editing && current.matches('select')) {
+   if (adjusting) { current.value = adjustment.value; } else if (editing && current.matches('select')) {
     const selected = current.value;
     reconcile(current, fresh, preserveEditing);
     const usable = [...current.options].find(option => option.value === selected && !option.disabled);
@@ -112,10 +113,10 @@ document.addEventListener('click',e=>{if(e.target.closest('.editing-preview'))re
 document.addEventListener('dblclick',e=>{if(e.target.closest('[data-window-drag]'))native()?.postMessage({kind:'zoom'});});
 document.addEventListener('compositionstart',()=>{composition=true;});
 document.addEventListener('compositionend',()=>{composition=false;});
-document.addEventListener('input',e=>{const el=e.target;if(el.dataset.note)transport({kind:'action',request:{op:'native',action:'saveNote',id:el.dataset.note,value:{field:el.dataset.noteField,text:el.value}}}).then(result=>patch({...result,passive:true})).catch(e=>announce('Could not save note. '+e.message));else if(el.id==='command-input')send({op:'query',value:el.value});else if(el.dataset.setup)send({op:'setup-field',key:el.dataset.setup,value:el.value});else if(el.dataset.name!==undefined)send({op:'name',value:el.value});});
-document.addEventListener('change',e=>{const el=e.target;if(el.dataset.scope)send({op:'editor-scope',value:el.value==='true'});if(el.dataset.editor)send({op:'editor-value',key:el.dataset.editor,value:Number(el.value)});if(el.name==='provider'){const input=el.form.elements.endpoint;input.value=el.value==='local'?'http://localhost:1234/v1':el.value==='xAI'?'https://api.x.ai/v1':'https://api.openai.com/v1';el.form.elements.key.value='';}});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.editor && el.type==='range'){if(!adjustment||adjustment.element!==el)adjustment={element:el,id:crypto.randomUUID(),value:el.value};adjustment.value=el.value;send({op:'editor-value',key:el.dataset.editor,value:Number(el.value),gesture:adjustment.id});}else if(el.dataset.note)transport({kind:'action',request:{op:'native',action:'saveNote',id:el.dataset.note,value:{field:el.dataset.noteField,text:el.value}}}).then(result=>patch({...result,passive:true})).catch(e=>announce('Could not save note. '+e.message));else if(el.id==='command-input')send({op:'query',value:el.value});else if(el.dataset.setup)send({op:'setup-field',key:el.dataset.setup,value:el.value});else if(el.dataset.name!==undefined)send({op:'name',value:el.value});});
+document.addEventListener('change',e=>{const el=e.target;if(el.dataset.scope)send({op:'editor-scope',value:el.value==='true'});if(el.dataset.editor)finishAdjustment();if(el.name==='provider'){const input=el.form.elements.endpoint;input.value=el.value==='local'?'http://localhost:1234/v1':el.value==='xAI'?'https://api.x.ai/v1':'https://api.openai.com/v1';el.form.elements.key.value='';}});
 document.addEventListener('submit',e=>{e.preventDefault();const form=e.target;if(form.dataset.form==='credential'){const f=new FormData(form);const request={op:'saveCredential',origin:f.get('origin'),username:f.get('username'),password:f.get('password')};form.elements.password.value='';send(request);}else if(form.dataset.form==='find'){send({op:'find',value:new FormData(form).get('find')});send({op:'escape'});}else if(form.dataset.form==='ai'){const f=new FormData(form);const request={op:'saveAI',provider:f.get('provider'),endpoint:f.get('endpoint'),model:f.get('model'),key:f.get('key'),useAccount:f.get('useAccount')==='account'};form.elements.key.value='';send(request);}else if(form.dataset.form==='assistant')send({op:'assistant',value:new FormData(form).get('prompt')});});
-document.addEventListener('keydown',e=>{const typing=e.target.matches(textInputSelector+',select'),command=e.metaKey||e.ctrlKey;
+document.addEventListener('keydown',e=>{const typing=e.target.matches(textInputSelector)||e.target.matches('select')&&!currentEditing,command=e.metaKey||e.ctrlKey;
  if(e.key==='Escape'){e.preventDefault();if(resize){finishResize(false);return;}send({op:'escape'});return;}
  if(e.key==='Tab'){const modal=topDialog();if(modal){const list=[...modal.querySelectorAll('button:not(:disabled),input,textarea,select,[tabindex="0"]')].filter(x=>x.getClientRects().length);if(list.length){const first=list[0],last=list[list.length-1];if(e.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}return;}
  if(e.target.id==='command-input'){if(['ArrowDown','ArrowUp','Enter'].includes(e.key)){e.preventDefault();send({op:e.key==='Enter'?'activate-result':e.key==='ArrowDown'?'result-next':'result-previous'});}return;}
@@ -131,7 +132,10 @@ function cleanupDrag(){drag=null;document.body.classList.remove('dragging-tab','
 document.addEventListener('dragend',cleanupDrag);
 document.addEventListener('pointerdown',e=>{const handle=e.target.closest('[data-resize]');if(handle){const shell=handle.closest('.browser-shell'),start=Number(handle.getAttribute('aria-valuenow'));resize={handle,shell,start,x:e.clientX,value:start,trailing:shell.classList.contains('placement-trailing')};handle.setPointerCapture(e.pointerId);e.preventDefault();}});
 document.addEventListener('pointermove',e=>{if(!resize)return;resize.value=Math.max(200,Math.min(340,resize.start+(e.clientX-resize.x)*(resize.trailing?-1:1)));resize.shell.style.setProperty('--rail-width',resize.value+'px');resize.handle.setAttribute('aria-valuenow',Math.round(resize.value));scheduleGeometry();});
+function finishAdjustment(){if(!adjustment||adjustment.ending)return;const active=adjustment;active.ending=true;send({op:'editor-end-adjustment'}).then(()=>{if(adjustment===active)adjustment=null;});}
 function finishResize(commit){if(!resize)return;const r=resize;resize=null;if(commit)send({op:'sidebar-width',value:r.value});else{r.shell.style.setProperty('--rail-width',r.start+'px');r.handle.setAttribute('aria-valuenow',r.start);scheduleGeometry();}}
-document.addEventListener('pointerup',()=>finishResize(true));document.addEventListener('pointercancel',()=>finishResize(false));
+document.addEventListener('pointerup',()=>{finishResize(true);finishAdjustment();});document.addEventListener('pointercancel',()=>{finishResize(false);finishAdjustment();});
+// Preview controls remain inert; wheel input only changes inspection scroll position.
+document.addEventListener('wheel',e=>{const frame=e.target.closest('.editor-preview');if(!frame||drag)return;const candidates=[...frame.querySelectorAll('.tabs-scroll,.library-content,.note-list,.horizontal-tabs,.start-surface')].filter(el=>{const r=el.getBoundingClientRect();return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;});for(const el of candidates.reverse()){const vertical=el.scrollHeight>el.clientHeight,horizontal=el.scrollWidth>el.clientWidth;if(vertical||horizontal){e.preventDefault();el.scrollTop+=e.deltaY;el.scrollLeft+=e.deltaX||(vertical?0:e.deltaY);break;}}},{passive:false});
 transport({kind:'ready'}).then(patch).catch(e=>announce(e.message));
 })();

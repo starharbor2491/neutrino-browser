@@ -19,6 +19,7 @@ fn icon(name: &str) -> Markup {
         "undo"=>"M4 5v6h6M4 11a8 8 0 1 1 2 7", "arrow"=>"M5 12h14m-5-5 5 5-5 5", "user"=>"M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 21v-3a6 6 0 0 1 6-5h4a6 6 0 0 1 6 5v3",
         "grid"=>"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z", "external"=>"M14 3h7v7M21 3 10 14M10 3H3v18h18v-7",
         "grip"=>"M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01", "key"=>"M14 3a7 7 0 1 0 7 7 7 7 0 0 0-7-7M9 15l-6 6H1v-3l6-6M17 7h.01",
+        "book"=>"M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3V4zM12 6v16", "activity"=>"M2 12h5l3-8 4 16 3-8h5", "camera"=>"M3 7h5l2-3h4l2 3h5v14H3V7zM8 14a4 4 0 1 0 8 0 4 4 0 0 0-8 0",
         _=>"M5 5h14v14H5z"
     };
     html! {svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {path d=(path);}}
@@ -146,7 +147,7 @@ fn rail(s: &Shell, preview: bool) -> Markup {
         @if horizontal {div class="horizontal-guide"{p{"Tabs live "(if text(&s.config()["layout"],"tabs")=="top"{"above your page."}else{"below your page."})}button class="new-tab" data-op="newTab"{(icon("plus"))"New tab"}button class="new-tab" data-op="screen" data-value="library" data-section="archive"{(icon("folder"))"Archived tabs"}}}
         @else {div class="tabs-scroll"{(tab_groups(s,preview))}}
         @if bottom && !horizontal {div class="rail-bottom-nav"{(location(s))(rail_navigation(s))}}
-        div class="rail-footer"{(spaces(s))div class="rail-tools"{button data-op="screen" data-value="library" data-section="bookmarks" title="Library" aria-label="Library"{(icon("grid"))"Library"}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("edit"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(text(&s.snapshot,"profileName").chars().next().unwrap_or('P'))}}}
+        div class="rail-footer"{(spaces(s))div class="rail-tools"{button data-op="screen" data-value="library" data-section="bookmarks" title="Library" aria-label="Library"{(icon("grid"))"Library"}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("edit"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(icon("user"))}}}
     }}
 }
 
@@ -215,7 +216,7 @@ fn browser(s: &Shell, preview: bool) -> Markup {
         @if panel {aside class="library-panel" aria-label="Library" {header{h2{"Library"}(button("Close library","escape","close"))}(library(s))}}
         @if !horizontal && !s.sidebar_hidden {div class="rail-resizer" role="separator" tabindex="0" aria-label="Sidebar width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="340" aria-valuenow=(width) data-resize="rail" {}}
         main class="browser-main" {header class="page-toolbar" {
-            @if s.sidebar_hidden || horizontal || panel || placement=="trailing" { (button(if panel{"Return to tabs"}else{"Show sidebar"},if panel{"reveal-workspace"}else{"sidebar"},"sidebar"))(button("Back","back","back"))(button("Forward","forward","forward"))(button("Reload page","reload","reload")) }
+            @if s.sidebar_hidden || horizontal || panel { (button(if panel{"Return to tabs"}else{"Show sidebar"},if panel{"reveal-workspace"}else{"sidebar"},"sidebar"))(button("Back","back","back"))(button("Forward","forward","forward"))(button("Reload page","reload","reload")) }
             button class="page-identity" data-op="palette" data-value=(text(s.active(),"url")) title=(text(s.active(),"url")){(icon(if text(s.active(),"url").starts_with("https:"){"lock"}else{"globe"}))span{(if text(s.active(),"url").is_empty(){"New tab".into()}else{host(text(s.active(),"url"))})}}
             div class="page-actions"{(button("Save bookmark","bookmark","bookmark"))(button("Split view","split","split"))button class="icon-button" data-op="screen" data-value="assistant" aria-label="Page assistant"{(icon("spark"))}}
         }
@@ -387,16 +388,23 @@ fn empty(title: &str, detail: &str, glyph: &str) -> Markup {
     html! {div class="empty-state"{(icon(glyph))h3{(title)}p{(detail)}}}
 }
 fn library(s: &Shell) -> Markup {
+    let section = if ["bookmarks", "history", "downloads", "notes", "archive"]
+        .contains(&s.section.as_str())
+    {
+        s.section.as_str()
+    } else {
+        "bookmarks"
+    };
     let page = s.snapshot["libraryPage"].as_u64().unwrap_or(0);
     let count = s.snapshot["libraryCount"].as_u64().unwrap_or(0);
     html! {div class="library-content" {
         @if !flag(&s.snapshot,"downloadsWindow") {nav class="library-tabs" aria-label="Library sections" {
             @for (key,label,glyph) in [("bookmarks","Bookmarks","bookmark"),("history","History","history"),("downloads","Downloads","download"),("notes","Notes","edit"),("archive","Archived","folder")] {
-                button class=(if s.section==key{"selected"}else{""}) data-op="section" data-value=(key) title=(label) aria-label=(label) aria-pressed=((s.section==key).to_string()){(icon(glyph))span{(label)}}
+                button class=(if section==key{"selected"}else{""}) data-op="section" data-value=(key) title=(label) aria-label=(label) aria-pressed=((section==key).to_string()){(icon(glyph))span{(label)}}
             }
         }
         }
-        @match s.section.as_str() {
+        @match section {
             "history" => {
                 @if array(&s.snapshot["history"]).is_empty(){(empty("A fresh start","Pages you visit in regular windows appear here.","history"))}
                 @for h in array(&s.snapshot["history"]) {button class="history-row" data-op="navigate" data-value=(text(h,"url")){(site(h))span{strong{(text(h,"title"))}small{(host(text(h,"url")))}}(icon("arrow"))}}
@@ -461,14 +469,40 @@ fn ai_form(s: &Shell) -> Markup {
 fn assistant(s: &Shell) -> Markup {
     html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect your intelligence","Use an API key or a local model. You choose what to share.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Choose a provider"}} @else {p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider."}div class="assistant-response"{(text(&s.snapshot,"assistantResponse"))}form data-form="assistant"{label class="field"{span{"Your question"}textarea name="prompt" placeholder="What would you like to know?" required{}}button class="button primary" type="submit" disabled[flag(&s.snapshot,"assistantBusy")]{(if flag(&s.snapshot,"assistantBusy"){"Thinking…"}else{"Share page and ask"})}}}}}
 }
+fn module_glyph(id: &str) -> &str {
+    if id.contains("theme") {
+        "spark"
+    } else if id.contains("tabs") || id.contains("layout") {
+        "sidebar"
+    } else if id.contains("notes") {
+        "edit"
+    } else if id.contains("reader") {
+        "book"
+    } else if id.contains("monitor") {
+        "activity"
+    } else if id.contains("screenshot") {
+        "camera"
+    } else if id.contains("focus") {
+        "shield"
+    } else {
+        "grid"
+    }
+}
+fn module_description(module: &Value) -> &str {
+    match text(module, "id") {
+        "org.neutrino.resource-monitor" => "See CPU and memory use while you browse.",
+        "org.neutrino.memory-monitor" => "See how your Mac’s memory is being used.",
+        _ => text(module, "description"),
+    }
+}
 fn modules(s: &Shell) -> Markup {
-    html! {div class="modules-content"{p class="section-description"{"Built-in tools, kept on your Mac. Add a local module package whenever you need more."}(action("Import module","importModule",false))div class="module-grid"{@for m in array(&s.snapshot["modules"]){article class="module-card"{(icon("grid"))h2{(text(m,"name"))}p{(text(m,"description"))}button class="button" data-op="native" data-action="toggleModule" data-id=(text(m,"id")){(if flag(m,"enabled"){"Disable"}else{"Enable"})}}}}}}
+    html! {div class="modules-content"{p class="section-description"{"Built-in tools, kept on your Mac. Add a local module package whenever you need more."}(action("Import module","importModule",false))div class="module-grid"{@for m in array(&s.snapshot["modules"]){article class="module-card"{(icon(module_glyph(text(m,"id"))))h2{(text(m,"name"))}p{(module_description(m))}button class="button" data-op="native" data-action="toggleModule" data-id=(text(m,"id")){(if flag(m,"enabled"){"Disable"}else{"Enable"})}}}}}}
 }
 fn extensions(s: &Shell) -> Markup {
     html! {div class="extensions-content"{
-        p class="section-description"{"Chrome extensions run in Blink. Manage installation, permissions and removal in the extension manager."}
+        p class="section-description"{"Add Chrome extensions, review their permissions, and remove them whenever you like."}
         div class="button-row"{button class="button primary" data-op="installExtension" disabled[!flag(&s.snapshot,"blinkAvailable")]{"Open extension manager"}button class="button" data-op="webStore" disabled[!flag(&s.snapshot,"blinkAvailable")]{"Chrome Web Store"}}
-        @if !flag(&s.snapshot,"blinkAvailable"){(empty("Blink is required","Use the complete Neutrino installer to manage Chrome extensions.","grid"))}
+        @if !flag(&s.snapshot,"blinkAvailable"){(empty("Extensions aren’t included in this build","Download the full Neutrino app to use Chrome extensions.","grid"))button class="button primary" data-op="navigate" data-value="https://github.com/starharbor2491/neutrino-browser/releases/latest"{"Get the full app"}}
         @else {p class="field-help"{"The manager opens in a Neutrino tab. Enable developer mode there to load a local extension folder."}}
     }}
 }

@@ -42,6 +42,7 @@
 @property(nonatomic, assign) BOOL chromeStyle;
 @property(nonatomic, assign) BOOL navigationChrome;
 @property(nonatomic, assign) BOOL activeContentKnown;
+@property(nonatomic, assign) BOOL inputSuspended;
 - (void)synchronizeBrowserWindow;
 @end
 @implementation NeutrinoChromiumHostView
@@ -51,6 +52,11 @@
 @synthesize chromeStyle;
 @synthesize navigationChrome;
 @synthesize activeContentKnown;
+@synthesize inputSuspended;
+- (void)setInputSuspended:(BOOL)value {
+  inputSuspended=value;
+  [self synchronizeBrowserWindow];
+}
 - (void)synchronizeBrowserWindow {
   if (self.auxiliary) return;
   NSWindow* child = self.browserWindow;
@@ -64,6 +70,12 @@
   child.collectionBehavior=NSWindowCollectionBehaviorFullScreenAuxiliary |
       NSWindowCollectionBehaviorFullScreenDisallowsTiling;
   NSWindow* parent = self.window;
+  child.ignoresMouseEvents=self.inputSuspended;
+  [child setAccessibilityHidden:self.inputSuspended];
+  if (self.inputSuspended && child.keyWindow) {
+    [child resignKeyWindow];
+    [parent makeKeyWindow];
+  }
   // On macOS 14 an unclipped NSView's visibleRect may extend beyond its own
   // bounds. The Chrome child must never cover Neutrino's surrounding controls.
   NSRect visible = NSIntersectionRect(self.bounds, self.visibleRect);
@@ -94,8 +106,9 @@
 - (void)viewDidMoveToWindow { [super viewDidMoveToWindow]; [self synchronizeBrowserWindow]; }
 - (void)setFrame:(NSRect)frame { [super setFrame:frame]; [self synchronizeBrowserWindow]; }
 - (void)setHidden:(BOOL)hidden { [super setHidden:hidden]; [self synchronizeBrowserWindow]; }
-- (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)acceptsFirstResponder { return !self.inputSuspended; }
 - (BOOL)becomeFirstResponder {
+  if (self.inputSuspended) return NO;
   if (self.browserWindow.visible) [self.browserWindow makeKeyWindow];
   return YES;
 }
@@ -445,8 +458,17 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (auto client=ForBrowser(browser); client && client!=this) return client->OnGotFocus(browser);
     if (!page_) return;
     auto owner=Group(page_);
+    if (owner->view.inputSuspended) {
+      browser->GetHost()->SetFocus(false);
+      [owner->view synchronizeBrowserWindow];
+      return;
+    }
     RefreshActive(owner);
     if (owner->view.browserWindow.keyWindow) Message(page_,NEUTRINO_CEF_ACTIVATE,"");
+  }
+  bool OnSetFocus(CefRefPtr<CefBrowser> browser,FocusSource source) override {
+    if (auto client=ForBrowser(browser); client && client!=this) return client->OnSetFocus(browser,source);
+    return page_ && Group(page_)->view.inputSuspended;
   }
   bool OnChromeCommand(CefRefPtr<CefBrowser> browser,int id,cef_window_open_disposition_t disposition) override {
     if (auto client = ForBrowser(browser); client && client != this) return client->OnChromeCommand(browser,id,disposition);
@@ -1313,6 +1335,11 @@ void Command(void* opaque,int command,const char* text,double value) {
     for (const auto& client : clients) client->CancelNativeDownloads(owner);
     return;
   }
+  if (command==NEUTRINO_CEF_SUSPEND_INPUT) {
+    owner->view.inputSuspended=value!=0;
+    for (Page* member : Members(owner)) if (value!=0 && member->browser) member->browser->GetHost()->SetFocus(false);
+    return;
+  }
   if (final_quit_frozen && command!=NEUTRINO_CEF_SYNC_ACTIVE) return;
   if (command==NEUTRINO_CEF_POPUPS) { owner->popups=value!=0; return; }
   if (command==NEUTRINO_CEF_SET_BLOCKING) {
@@ -1576,6 +1603,6 @@ int Shutdown() {
 }
 const char* Error() { return last_error.c_str(); }
 void SetFinalQuitFrozen(int frozen) { final_quit_frozen=frozen!=0; }
-const neutrino_cef_api api={6,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
+const neutrino_cef_api api={7,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
 }
 extern "C" __attribute__((visibility("default"))) const neutrino_cef_api* neutrino_cef_get_api() { return &api; }

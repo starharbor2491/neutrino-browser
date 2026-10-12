@@ -19,7 +19,7 @@ Swift syntax parsing checks grammar, not macOS type checking or execution. Nativ
 
 The native `RustShellNativeTests` suite uses an actual WKWebView to exercise a large library, immediate note dismissal, live security/error updates during note editing, native text Undo, auxiliary Downloads isolation, canonical AI endpoints and view ownership. Installed smoke also checks editor draft isolation and live-document identity/geometry. These checks must pass on the final compiled revision.
 
-`0ccc58d` [macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38230973377) built and installed the Rust shell, but its black setup captures are invalid visual evidence. Subsequent native compilation failures were fixed, not reported as passes. Current native evidence is pending the final revision below.
+`0ccc58d` [macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38230973377) built and installed the Rust shell, but its black setup captures are invalid visual evidence. Subsequent native compilation failures were fixed, not reported as passes. [c4aa34b native CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38237647239) passed portable, debug/release native, package and installed-shell checks. Its seven setup images are distinct WKWebView snapshots. The new live-page editor is being verified on its own subsequent revision.
 
 ## Historical release CI evidence
 

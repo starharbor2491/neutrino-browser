@@ -360,7 +360,8 @@ enum ChromiumAcceptance {
             for child in view.subviews { if let found = region(identifier, in: child) { return found } }
             return nil
         }
-        guard let root = ownerWindow.contentView, let page = region("neutrino.page", in: root) else {
+        guard let root = ownerWindow.contentView, let page = tab.nativeView.superview as? EngineViewContainer,
+              page.window === ownerWindow, !page.isHidden else {
             throw ValidationError("Neutrino's independent native page layout region is unavailable.")
         }
         let pageRect = ownerWindow.convertToScreen(page.convert(page.bounds, to: nil))

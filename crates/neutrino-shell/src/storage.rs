@@ -150,7 +150,12 @@ pub unsafe extern "C" fn neutrino_database_load(
             .map_err(|_| "Library lock failed")?;
         db.load()?
             .map(|bytes| {
-                if bytes.contains(&0) { return Err("The library contains invalid JSON bytes. Its data has not been changed.".into()); }
+                if bytes.contains(&0) {
+                    return Err(
+                        "The library contains invalid JSON bytes. Its data has not been changed."
+                            .into(),
+                    );
+                }
                 String::from_utf8(bytes).map_err(|e| e.to_string())
             })
             .transpose()

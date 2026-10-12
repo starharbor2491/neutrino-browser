@@ -40,6 +40,7 @@ pub struct Shell {
     pub edit_component: String,
     pub apply_space: bool,
     pub setup_busy: bool,
+    adjustment: String,
 }
 impl Default for Shell {
     fn default() -> Self {
@@ -65,6 +66,7 @@ impl Default for Shell {
             edit_component: "tabs".into(),
             apply_space: true,
             setup_busy: false,
+            adjustment: String::new(),
         }
     }
 }
@@ -92,6 +94,9 @@ impl Shell {
     }
     pub fn dispatch(&mut self, request: Value) -> Value {
         let op = text(&request, "op");
+        if !["sync", "editor-value"].contains(&op) {
+            self.adjustment.clear();
+        }
         // Every route out of editing shares the same save/discard boundary.
         if self.screen == "editor"
             && !["sync", "escape", "menu", "dock"].contains(&op)
@@ -197,9 +202,14 @@ impl Shell {
                         }
                         if let Some(section) = request["section"].as_str() {
                             self.section = section.into();
-                            if screen == "library" {
-                                commands.push(json!({"op":"projectLibrary","section":section}));
+                        }
+                        if screen == "library" {
+                            if !["bookmarks", "history", "downloads", "notes", "archive"]
+                                .contains(&self.section.as_str())
+                            {
+                                self.section = "bookmarks".into();
                             }
+                            commands.push(json!({"op":"projectLibrary","section":self.section}));
                         }
                     }
                 }
@@ -394,6 +404,7 @@ impl Shell {
                     self.apply_space = request["value"].as_bool().unwrap_or(true);
                 }
                 "editor-value" => self.edit_value(&request),
+                "editor-end-adjustment" => {}
                 "dock" => self.dock(&request),
                 "editor-undo" => {
                     if let Some(value) = self.undo.pop() {
@@ -589,8 +600,12 @@ impl Shell {
                 .unwrap_or(false),
             _ => v.is_boolean(),
         };
-        if valid {
-            self.push_undo();
+        if valid && self.draft.as_ref().unwrap()[target][key] != *v {
+            let gesture = bound(text(r, "gesture"), 80);
+            if gesture.is_empty() || gesture != self.adjustment {
+                self.push_undo();
+            }
+            self.adjustment = gesture;
             self.draft.as_mut().unwrap()[target][key] = v.clone();
         }
     }

@@ -78,6 +78,10 @@ final class ResourceWorker: ObservableObject {
             process.terminate()
             let deadline = DispatchWorkItem { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.25, execute: deadline)
+            // Foundation's waitUntilExit does not consistently service the main
+            // run loop across macOS versions. Keep UI/reentrant requests moving
+            // during the bounded shutdown; AppState guards worker mutations.
+            while process.isRunning { RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01)) }
             process.waitUntilExit()
             deadline.cancel()
         }
