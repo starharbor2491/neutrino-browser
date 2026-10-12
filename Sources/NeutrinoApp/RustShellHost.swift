@@ -141,14 +141,16 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         super.init()
         chrome.navigationDelegate = self
         editingInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            MainActor.assumeIsolated {
+            let windowID = event.window.map(ObjectIdentifier.init)
+            let blocked = MainActor.assumeIsolated {
                 guard let self, !self.editingEngines.isEmpty,
-                      event.window === self.container.window,
-                      let responder = event.window?.firstResponder as? NSView,
-                      self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) else { return event }
+                      windowID == self.container.window.map(ObjectIdentifier.init),
+                      let responder = self.container.window?.firstResponder as? NSView,
+                      self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) else { return false }
                 self.container.window?.makeFirstResponder(self.container.chrome)
-                return nil
+                return true
             }
+            return blocked ? nil : event
         }
         chrome.setValue(false, forKey: "drawsBackground")
         configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "neutrino")

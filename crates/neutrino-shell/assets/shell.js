@@ -73,7 +73,7 @@ function patch(result) {
  const active = document.activeElement, key = selector(active);
  const selection = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
  const preserved = sameContext && key && active.matches(textInputSelector) ? active.value : null;
- const scrolls = [...root.querySelectorAll('.tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list')].map(e => [e.className,e.scrollTop]);
+ const scrolls = [...root.querySelectorAll('.tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list,.start-surface,.horizontal-tabs')].map(e => [e.className,e.scrollTop,e.scrollLeft]);
  const openDetails = [...root.querySelectorAll('details[open]')].map(e => e.className);
  const hadDialog = !!topDialog();
  const template = document.createElement('template');
@@ -86,7 +86,7 @@ function patch(result) {
  for (const el of root.querySelectorAll('.browser-shell,.editor,.utility-screen,.command-palette')) el.inert = !!dialog && !el.contains(dialog) && el !== dialog;
  if (dialog && !hadDialog) returnFocus = key;
  for (const cls of openDetails) { const el = root.getElementsByClassName(cls)[0]; if (el) el.open = true; }
- for (const [cls,top] of scrolls) { const el = root.getElementsByClassName(cls)[0]; if (el) el.scrollTop = top; }
+ for (const [cls,top,left] of scrolls) { const el = root.getElementsByClassName(cls)[0]; if (el) { el.scrollTop = top; el.scrollLeft = left; } }
  const next = key ? root.querySelector(key) : null;
  if (result.focus && (!next || next.id !== result.focus)) {
   const focus = document.getElementById(result.focus); focus?.focus({preventScroll:true}); focus?.select?.();
@@ -137,6 +137,19 @@ function finishAdjustment(){if(!adjustment||adjustment.ending)return;const activ
 function finishResize(commit){if(!resize)return;const r=resize;resize=null;if(commit)send({op:'sidebar-width',value:r.value});else{r.shell.style.setProperty('--rail-width',r.start+'px');r.handle.setAttribute('aria-valuenow',r.start);scheduleGeometry();}}
 document.addEventListener('pointerup',()=>{finishResize(true);finishAdjustment();});document.addEventListener('pointercancel',()=>{finishResize(false);finishAdjustment();});
 // Preview controls remain inert; wheel input only changes inspection scroll position.
-document.addEventListener('wheel',e=>{const frame=e.target.closest('.editor-preview');if(!frame||drag)return;const candidates=[...frame.querySelectorAll('.tabs-scroll,.library-content,.note-list,.horizontal-tabs,.start-surface')].filter(el=>{const r=el.getBoundingClientRect();return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;});for(const el of candidates.reverse()){const vertical=el.scrollHeight>el.clientHeight,horizontal=el.scrollWidth>el.clientWidth;if(vertical||horizontal){e.preventDefault();el.scrollTop+=e.deltaY;el.scrollLeft+=e.deltaX||(vertical?0:e.deltaY);break;}}},{passive:false});
+document.addEventListener('wheel',e=>{
+ const frame=e.target.closest('.editor-preview');if(!frame||drag)return;
+ const candidates=[...frame.querySelectorAll('.tabs-scroll,.library-content,.note-list,.horizontal-tabs,.start-surface')].filter(el=>{const r=el.getBoundingClientRect();return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;});
+ let dy=e.deltaY,dx=e.deltaX,handled=false;
+ for(const el of candidates.reverse()){
+  const top=el.scrollTop,left=el.scrollLeft,vertical=el.scrollHeight>el.clientHeight;
+  el.scrollTop+=dy;el.scrollLeft+=dx||(vertical?0:dy);
+  const y=el.scrollTop-top,x=el.scrollLeft-left;
+  if(x||y)handled=true;
+  dy-=y||(!vertical&&!dx?x:0);if(dx)dx-=x;
+  if(!dy&&!dx)break;
+ }
+ if(handled)e.preventDefault();
+},{passive:false});
 transport({kind:'ready'}).then(patch).catch(e=>announce(e.message));
 })();
