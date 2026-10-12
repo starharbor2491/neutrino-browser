@@ -307,11 +307,18 @@
       resize.shell.style.setProperty("--rail-width", resize.value + "px");
       resize.handle.setAttribute("aria-valuenow", Math.round(resize.value));
     }
-    const feedback = root.querySelector('.rail-feedback[data-transient="true"]');
-    const message = feedback?.querySelector('span')?.textContent || '';
+    const feedback = root.querySelector(
+      '.rail-feedback[data-transient="true"]',
+    );
+    const message = feedback?.querySelector("span")?.textContent || "";
     if (message !== feedbackMessage) {
-      clearTimeout(feedbackTimer); feedbackMessage = message;
-      if (message) feedbackTimer = setTimeout(() => { feedbackMessage=''; send({op:'transient-dismiss'}); },7000);
+      clearTimeout(feedbackTimer);
+      feedbackMessage = message;
+      if (message)
+        feedbackTimer = setTimeout(() => {
+          feedbackMessage = "";
+          send({ op: "transient-dismiss" });
+        }, 7000);
     }
     positionMenu();
     positionDialog();
@@ -624,15 +631,29 @@
         (e.target.matches("select") && !currentEditing),
       command = e.metaKey || e.ctrlKey;
     if (e.isComposing) return;
-    if (command && ["l","k","t"].includes(e.key.toLowerCase())) {
+    if (command && ["l", "k", "t"].includes(e.key.toLowerCase())) {
       e.preventDefault();
-      const key=e.key.toLowerCase();
-      send({op:key==="l"?"focus-address":key==="k"?"palette":e.shiftKey?"reopenTab":"newTab"});
+      const key = e.key.toLowerCase();
+      send({
+        op:
+          key === "l"
+            ? "focus-address"
+            : key === "k"
+              ? "palette"
+              : e.shiftKey
+                ? "reopenTab"
+                : "newTab",
+      });
       return;
     }
-    if (e.key==="Enter" && e.target.matches('input[data-name]')) {
-      const action=e.target.closest('.popover-menu')?.querySelector('button.primary[data-op]');
-      if (action && e.target.value.trim()) { e.preventDefault();send({...action.dataset}); }
+    if (e.key === "Enter" && e.target.matches("input[data-name]")) {
+      const action = e.target
+        .closest(".popover-menu")
+        ?.querySelector("button.primary[data-op]");
+      if (action && e.target.value.trim()) {
+        e.preventDefault();
+        send({ ...action.dataset });
+      }
       return;
     }
     const moving = e.target.closest("[data-drag-dialog]");

@@ -19,7 +19,7 @@ fn icon_path(name: &str) -> &'static str {
         "undo"=>"M4 5v6h6M4 11a8 8 0 1 1 2 7", "arrow"=>"M5 12h14m-5-5 5 5-5 5", "user"=>"M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 21v-3a6 6 0 0 1 6-5h4a6 6 0 0 1 6 5v3",
         "grid"=>"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z", "external"=>"M14 3h7v7M21 3 10 14M10 3H3v18h18v-7",
         "grip"=>"M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01", "key"=>"M14 3a7 7 0 1 0 7 7 7 7 0 0 0-7-7M9 15l-6 6H1v-3l6-6M17 7h.01",
-        "book"=>"M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3V4zM12 6v16", "activity"=>"M2 12h5l3-8 4 16 3-8h5", "camera"=>"M3 7h5l2-3h4l2 3h5v14H3V7zM8 14a4 4 0 1 0 8 0 4 4 0 0 0-8 0",
+        "book"=>"M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3V4zM12 6v16", "activity"=>"M2 12h5l3-8 4 16 3-8h5", "camera"=>"M3 7h5l2-3h4l2 3h5v14H3V7zM8 14a4 4 0 1 0 8 0 4 4 0 0 0-8 0", "plug"=>"M8 3v5M16 3v5M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v4",
         _=>"M5 5h14v14H5z"
     }
 }
@@ -31,7 +31,7 @@ fn icon_definitions(s: &Shell) -> Markup {
         "back", "forward", "down", "close", "plus", "search", "reload", "check", "more", "sidebar",
         "split", "folder", "bookmark", "history", "download", "settings", "globe", "lock",
         "shield", "pin", "edit", "sun", "moon", "spark", "undo", "arrow", "user", "grid",
-        "external", "grip", "key", "book", "activity", "camera",
+        "external", "grip", "key", "book", "activity", "camera", "plug",
     ];
     html! {svg class="icon-definitions" aria-hidden="true"{defs{@for name in names{
         @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules",v=>v};
@@ -213,7 +213,7 @@ fn rail(s: &Shell, preview: bool) -> Markup {
         @else {div class="tabs-scroll"{(tab_groups(s,preview))}}
         @if bottom && !horizontal {div class="rail-bottom-nav"{(location(s))(rail_navigation(s))}}
         div class="rail-footer"{(spaces(s))nav class="rail-destinations" aria-label="Browser tools"{button class=(if s.screen=="library"{"selected"}else{""}) data-op="screen" data-value="library" data-section="bookmarks"{(icon("bookmark"))"Library"}button class=(if s.screen=="modules"{"selected"}else{""}) data-op="screen" data-value="modules"{(icon("grid"))"Modules"}}
-            div class="rail-tools"{button class="icon-button" data-op="screen" data-value="settings" aria-label="Settings"{(icon("settings"))}button class="icon-button" data-op="screen" data-value="extensions" aria-label="Extensions"{(icon("grid"))}span class="spacer"{}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("edit"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(icon("user"))}}
+            div class="rail-tools"{button class="icon-button" data-op="screen" data-value="settings" aria-label="Settings"{(icon("settings"))}button class="icon-button" data-op="screen" data-value="extensions" title="Extensions" aria-label="Extensions"{(icon("plug"))}span class="spacer"{}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("edit"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(icon("user"))}}
         }
     }}
 }
@@ -685,7 +685,7 @@ fn menu(s: &Shell) -> Markup {
                 "modules"|"settings"|"recovery"=>{(menu_item(text(item,"title"),"screen",text(item,"action"),"grid"))}
                 "customize"=>{(menu_item(text(item,"title"),"screen","editor","edit"))}
                 _=>{}
-            }}(menu_item("Resources","screen","resources","activity"))(menu_item("Save bookmark","bookmark","","bookmark"))(menu_item("Split view","split","","split"))(menu_item("Page assistant","screen","assistant","spark"))(menu_item("Find on page","menu","find","search"))(menu_item("New window","newWindow","","plus"))(menu_item("New private window","privateWindow","","shield"))(menu_item("Appearance","screen","editor","edit"))(menu_item("Settings","screen","settings","settings"))(menu_item("Extensions","screen","extensions","grid"))(menu_item("Modules","screen","modules","grid"))(menu_item("Reader","reader","","bookmark"))(menu_item("Capture page","capture","","download"))}
+            }}(menu_item("Resources","screen","resources","activity"))(menu_item("Save bookmark","bookmark","","bookmark"))(menu_item("Split view","split","","split"))(menu_item("Page assistant","screen","assistant","spark"))(menu_item("Find on page","menu","find","search"))(menu_item("New window","newWindow","","plus"))(menu_item("New private window","privateWindow","","shield"))(menu_item("Appearance","screen","editor","edit"))(menu_item("Settings","screen","settings","settings"))(menu_item("Extensions","screen","extensions","plug"))(menu_item("Modules","screen","modules","grid"))(menu_item("Reader","reader","","bookmark"))(menu_item("Capture page","capture","","download"))}
             "space"=>{(menu_item("Rename Space","menu","rename-space","edit"))(menu_item("New folder","menu","new-folder","folder"))(menu_item("New Space","menu","new-space","plus"))(menu_item("Edit this Space","screen","editor","edit"))button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))"Archived tabs"}}
             "rename-space"=>{label class="field"{span{"Space name"}input id="name-input" data-name="true" value=(s.name.as_str()) maxlength="80";}button class="button primary" data-op="renameSpace" data-id=(text(&s.snapshot["session"],"spaceID")) disabled[s.name.is_empty()]{"Save name"}}
             "find"=>{form data-form="find"{label class="field"{span{"Find on this page"}input name="find" id="find-input" type="search" autocomplete="off";}button class="button primary" type="submit"{"Find next"}}p class="field-help"{"Matches are highlighted on the page."}}
