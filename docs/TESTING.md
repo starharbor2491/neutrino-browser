@@ -73,3 +73,11 @@ The installed driver verifies receipt bytes, sealed code, read-only mounting, pa
 - Verify a complete offline signed/notarized DMG on a clean Mac with normal Gatekeeper behavior, engine/helper payloads, first-run setup, trusted update/restart, and rollback.
 
 Record tested source/binary and actual outcomes. A skipped gate, parser pass, or historical receipt cannot certify the core release. See [PARITY.md](PARITY.md).
+
+## Violet native acceptance
+
+Source `2d97d23` / PR merge checkout `04bd0e65` passed [macOS and portable CI 38274338963](https://github.com/starharbor2491/neutrino-browser/actions/runs/38274338963): 27 Rust shell workflows, portable tests, native debug/release integration, all 18 module packages, upstream archive-integrity regressions, real updater replacement and installed WebKit-shell acceptance. New native checks prove module settings reach Notes behavior and Focus restores navigation. OS-composited captures replace the previous README images.
+
+[Embedded runtime CI 38274338953](https://github.com/starharbor2491/neutrino-browser/actions/runs/38274338953) compiled/sealed the complete Blink bundle, passed native tests and reached the independent full-browser gate. Actual Chromium checks passed inline Command-L, Command-K, Escape recovery from Focus while the site owned keyboard focus, retained live document identity, Reader/Capture, live Chrome Web Store installation and regular/private cookie lifetime handling. Full MV3 acceptance still fails at `action.openPopup`: “Browser window has no toolbar.” This is a failed parity gate, not a passing core receipt.
+
+Rendered-fixture acceptance separately covers direct Space/folder/tab dragging, horizontal sidebar gestures, Undo, setup choice retention, module search/settings, inventory entry, keyboard focus, movable quick navigation, 1024px containment and OS reduced motion. No JavaScript errors were observed. Fixture interactions do not establish native engine behavior.

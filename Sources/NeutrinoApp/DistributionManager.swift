@@ -235,7 +235,7 @@ final class DistributionManager: ObservableObject {
         do {
             try await Self.background {
                 let hash = try ReleaseTrust.verifyCodeIntegrity(bundledHelper, identifier: "org.neutrino.updater")
-                if case .developerID(let team) = authority { try ReleaseTrust.verifySignature(bundledHelper, team: team, identifier: "org.neutrino.updater", notarized: false) }
+                if case .developerID(let team,_) = authority { try ReleaseTrust.verifySignature(bundledHelper, team: team, identifier: "org.neutrino.updater", notarized: false) }
                 try FileManager.default.copyItem(at: bundledHelper, to: helper)
                 guard try ReleaseTrust.verifyCodeIntegrity(helper, identifier: "org.neutrino.updater") == hash else { throw ValidationError("The copied updater changed.") }
             }
@@ -350,7 +350,7 @@ final class DistributionManager: ObservableObject {
                 try await Self.background {
                     try ReleaseTrust.verifyBundleTree(installDestination)
                     switch authority {
-                    case .developerID(let team): try ReleaseTrust.verifySignature(installDestination, team: team, identifier: "org.neutrino.browser", notarized: true)
+                    case .developerID(let team,_): try ReleaseTrust.verifySignature(installDestination, team: team, identifier: "org.neutrino.browser", notarized: true)
                     case .githubPreview: _ = try ReleaseTrust.verifyCodeIntegrity(installDestination, identifier: "org.neutrino.browser")
                     }
                     let installed = try ReleaseTrust.metadata(of: installDestination, requireCompatibleArchitecture: false)

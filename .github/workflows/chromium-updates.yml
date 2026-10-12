@@ -1,0 +1,134 @@
+name: Refresh verified Chromium updates
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: neutrino-chromium-refresh
+  cancel-in-progress: false
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      changed: ${{ steps.candidate.outputs.changed }}
+      head: ${{ steps.candidate.outputs.head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Retry an unpublished accepted preview before checking upstream
+        id: retry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/retry-preview-publication.py
+      - name: Verify stable upstream candidate archives
+        if: steps.retry.outputs.published == 'true'
+        id: candidate
+        run: |
+          python3 scripts/check-chromium-update.py --verify-archives
+          python3 - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          candidate=json.loads(Path('cef-candidate.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('changed='+str(candidate['changed']).lower()+'\nhead='+subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: steps.candidate.outputs.changed == 'true'
+        with:
+          name: verified-cef-pin
+          path: cef-candidate.json
+  verify:
+    needs: discover
+    if: needs.discover.outputs.changed == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      NEUTRINO_BUILD_NUMBER: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover.outputs.head }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-cef-pin
+      - name: Apply verified candidate pin
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          candidate=json.loads(Path('cef-candidate.json').read_text())
+          Path('ChromiumRuntime/cef-version.json').write_text(json.dumps(candidate['pin'],indent=2)+'\n')
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('NEUTRINO_VERSION='+Path('PREVIEW_VERSION').read_text().strip()+'\n')
+          PY
+      - run: ./scripts/test.sh
+      - name: Compile upstream engine with Neutrino integration
+        run: python3 scripts/chromium-runtime.py --arch arm64 --work-dir "$RUNNER_TEMP/neutrino-cef-candidate"
+      - name: Build complete candidate application
+        env:
+          NEUTRINO_UPDATE_CHANNEL: preview
+          NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-candidate/Chromium-arm64.neutrinoengine
+        run: ./scripts/build-app.sh
+      - name: Package the complete candidate for installed acceptance
+        run: python3 scripts/package-release.py --development
+      - name: Verify updater, launch, data save and ordinary quit
+        env:
+          NEUTRINO_DISTRIBUTION_TEST_APP: ${{ github.workspace }}/dist/Neutrino.app
+        run: |
+          python3 scripts/native-tests.py -c release --filter DistributionNativeTests
+          python3 scripts/installed-smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chromium-candidate-acceptance
+          path: |
+            dist/installed-smoke.json
+            dist/*.log
+          if-no-files-found: warn
+  publish:
+    needs: [discover,verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover.outputs.head }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-cef-pin
+      - name: Commit accepted pin and publish complete app update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          candidate=json.loads(Path('cef-candidate.json').read_text())
+          Path('ChromiumRuntime/cef-version.json').write_text(json.dumps(candidate['pin'],indent=2)+'\n')
+          old=Path('PREVIEW_VERSION').read_text().strip()
+          match=re.fullmatch(r'(\d+\.\d+\.\d+)-preview\.(\d+)',old)
+          if not match: raise SystemExit('Invalid preview version')
+          Path('PREVIEW_VERSION').write_text(match[1]+'-preview.'+str(int(match[2])+1)+'\n')
+          Path('PREVIEW_NAME').write_text('Neutrino — Chromium '+candidate['version'].split('chromium-')[1]+'\n')
+          PY
+          git config user.name 'Neutrino release automation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ChromiumRuntime/cef-version.json PREVIEW_VERSION PREVIEW_NAME
+          git commit -m 'Update verified upstream Chromium runtime'
+          # A fast-forward-only push rejects concurrent main changes.
+          git push origin HEAD:main
+          # Workflow-token pushes do not trigger another workflow automatically.
+          gh workflow run development-release.yml --ref main -f version="$(cat PREVIEW_VERSION)" -f publish=true

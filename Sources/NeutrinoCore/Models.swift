@@ -270,12 +270,12 @@ public struct ToolbarComponent: Identifiable, Codable, Equatable, Sendable {
     public init(id: UUID = UUID(), command: ToolbarCommand, region: ToolbarRegion) { self.id = id; self.command = command; self.region = region }
 }
 public struct Theme: Codable, Equatable, Sendable {
-    public var design: DesignSystem = .native
-    public var colorMode: ColorMode = .system
-    public var accent: Accent = .rose
+    public var design: DesignSystem = .graphite
+    public var colorMode: ColorMode = .dark
+    public var accent: Accent = .purple
     public var density: Density = .comfortable
-    public var cornerRadius: Double = 10
-    public var transparency: Bool = true
+    public var cornerRadius: Double = 6
+    public var transparency: Bool = false
     public var reducedMotion: Bool = false
     // Optional fields preserve decoding of existing user configurations and setup packs.
     public var typography: InterfaceTypeface?
@@ -292,7 +292,7 @@ public struct Theme: Codable, Equatable, Sendable {
     public var sidebarAppearance: ComponentAppearance?
     public init() {}
     public mutating func normalize() {
-        cornerRadius = cornerRadius.isFinite ? min(24, max(0, cornerRadius)) : 10
+        cornerRadius = cornerRadius.isFinite ? min(24, max(0, cornerRadius)) : 6
         if let value = fontScale { fontScale = value.isFinite ? min(1.4, max(0.85, value)) : 1 }
         if let value = spacingScale { spacingScale = value.isFinite ? min(1.5, max(0.75, value)) : 1 }
         if let value = borderWidth { borderWidth = value.isFinite ? min(2, max(0, value)) : 1 }

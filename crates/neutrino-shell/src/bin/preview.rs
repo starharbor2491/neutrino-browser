@@ -11,26 +11,151 @@ use std::{
 fn fixture() -> Value {
     json!({
      "completedOnboarding":true,"private":false,"spaceName":"Everyday","profileName":"Personal","blinkAvailable":true,
-     "configuration":{"theme":{"accent":"rose","colorMode":"light","density":"comfortable"},"layout":{"tabs":"leading","tabsWidth":240,"navigation":"top","sidebar":"leading"}},
+     "configuration":{"theme":{"design":"graphite","accent":"purple","colorMode":"dark","density":"comfortable","cornerRadius":6},"layout":{"tabs":"leading","tabsWidth":256,"navigation":"top","sidebar":"leading"}},
      "preferences":{"search":"duckDuckGo","restoreSession":true,"blockTrackers":true,"blockPopups":true},
      "session":{"id":"window1","profileID":"profile1","spaceID":"space1","selectedTabID":"tab4","tabs":[
-      {"id":"tab1","title":"Are.na","url":"https://www.are.na/","pinned":true},
+      {"id":"tab1","title":"GitHub","url":"https://github.com/","pinned":true},
       {"id":"tab2","title":"Calendar","url":"https://calendar.google.com/","pinned":true},
-      {"id":"tab3","title":"A collection of good things","url":"https://example.com/","pinned":false,"folderID":"folder1"},
+      {"id":"tab3","title":"Project board","url":"https://example.com/","pinned":false,"folderID":"folder1"},
       {"id":"tab4","title":"New tab","pinned":false},
-      {"id":"tab5","title":"The Creative Independent","url":"https://thecreativeindependent.com/","pinned":false},
-      {"id":"tab6","title":"A field guide to the everyday","url":"https://example.org/","pinned":false}
+      {"id":"tab5","title":"Proton Mail","url":"https://mail.proton.me/","pinned":false},
+      {"id":"tab6","title":"Documentation","url":"https://example.org/","pinned":false}
      ]},
-     "folders":[{"id":"folder1","name":"Inspiration","collapsed":false}],
+     "folders":[{"id":"folder1","name":"Projects","collapsed":false}],
      "spaces":[{"id":"space1","name":"Everyday","profileID":"profile1"},{"id":"space2","name":"Work","profileID":"profile1"}],
      "profiles":[{"id":"profile1","name":"Personal"}],"bookmarks":[],"history":[],"downloads":[],"notes":[],
-     "updates":{"version":"Neutrino · interface development","automatic":true,"message":"Automatic updates preserve your browsing data."},"modules":[],"extensions":[]
+     "updates":{"version":"Neutrino · interface development","automatic":true,"message":"Automatic updates preserve your browsing data."},"modules":fixture_modules(),"moduleCatalogs":[],"extensions":[]
     })
+}
+fn fixture_modules() -> Vec<Value> {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../Sources/NeutrinoApp/Resources/Modules");
+    let mut modules = vec![];
+    if let Ok(entries) = std::fs::read_dir(directory) {
+        for entry in entries.flatten() {
+            let Ok(data) = std::fs::read(entry.path().join("manifest.json")) else {
+                continue;
+            };
+            let Ok(m) = serde_json::from_slice::<Value>(&data) else {
+                continue;
+            };
+            let settings: Vec<_> = m["settings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|s| {
+                    let mut s = s.clone();
+                    s["value"] = s["defaultValue"].clone();
+                    s
+                })
+                .collect();
+            modules.push(json!({"id":m["id"],"name":m["name"],"description":m["summary"],"publisher":m["publisher"],"version":m["version"],"availableVersion":m["version"],"capability":m["capability"],"installed":m["defaultInstalled"],"enabled":m["defaultInstalled"],"available":true,"bundled":true,"settings":settings,"dependencies":m["dependencies"],"permission":"","providerName":""}));
+        }
+    }
+    modules.sort_by_key(|m| m["name"].as_str().unwrap_or("").to_string());
+    modules
+}
+fn contributions(shell: &mut Shell) {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../Sources/NeutrinoApp/Resources/Modules");
+    let modules = shell.snapshot["modules"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut widgets = vec![];
+    shell.snapshot["icons"] = json!({});
+    shell.snapshot["menuItems"] = json!([]);
+    for m in modules.iter().filter(|m| m["enabled"] == true) {
+        if let Ok(bytes) = std::fs::read(
+            directory
+                .join(m["id"].as_str().unwrap_or(""))
+                .join("definition.json"),
+        ) {
+            if let Ok(d) = serde_json::from_slice::<Value>(&bytes) {
+                if d["icons"].is_object() {
+                    shell.snapshot["icons"] = d["icons"].clone();
+                }
+                if d["menu"].is_array() {
+                    shell.snapshot["menuItems"] = d["menu"].clone();
+                }
+                if d["widgetTitle"].is_string() {
+                    widgets.push(d);
+                }
+            }
+        }
+    }
+    shell.snapshot["startWidgets"] = json!(widgets);
 }
 fn effects(shell: &mut Shell, commands: &[Value]) {
     for c in commands {
         let snapshot = &mut shell.snapshot;
         match c["op"].as_str().unwrap_or("") {
+            "newTab" => {
+                let tabs = snapshot["session"]["tabs"].as_array_mut().unwrap();
+                let id = format!(
+                    "new-tab-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                );
+                tabs.push(json!({"id":id,"title":"New tab","pinned":false}));
+                snapshot["session"]["selectedTabID"] = json!(id);
+            }
+            "switchSpace" => {
+                if let Some(space) = snapshot["spaces"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["id"] == c["id"])
+                    .cloned()
+                {
+                    snapshot["session"]["spaceID"] = c["id"].clone();
+                    snapshot["spaceName"] = space["name"].clone();
+                }
+            }
+            "reorderSpaces" | "reorderFolders" => {
+                let key = if c["op"] == "reorderSpaces" {
+                    "spaces"
+                } else {
+                    "folders"
+                };
+                let list = snapshot[key].as_array().unwrap().clone();
+                snapshot[key] = json!(c["ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|id| list.iter().find(|v| v["id"] == *id).cloned())
+                    .collect::<Vec<_>>());
+            }
+            "toggleModule" | "installModule" | "uninstallModule" => {
+                if let Some(m) = snapshot["modules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|m| m["id"] == c["id"])
+                {
+                    if c["op"] == "toggleModule" {
+                        m["enabled"] = json!(!m["enabled"].as_bool().unwrap_or(false));
+                    } else {
+                        let installed = c["op"] == "installModule";
+                        m["installed"] = json!(installed);
+                        m["enabled"] = json!(installed);
+                    }
+                }
+            }
+            "setModuleSetting" => {
+                if let Some(setting) = snapshot["modules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|m| m["id"] == c["id"])
+                    .and_then(|m| m["settings"].as_array_mut())
+                    .and_then(|s| s.iter_mut().find(|s| s["id"] == c["key"]))
+                {
+                    setting["value"] = c["value"].clone();
+                }
+            }
             "replaceTabs" => snapshot["session"]["tabs"] = c["tabs"].clone(),
             "selectTab" => snapshot["session"]["selectedTabID"] = c["id"].clone(),
             "closeTab" => {
@@ -137,6 +262,7 @@ fn serve(mut stream: TcpStream, shell: &mut Shell) -> std::io::Result<()> {
                     result
                 } else {
                     effects(shell, &commands);
+                    contributions(shell);
                     let snapshot = shell.snapshot.clone();
                     shell.dispatch(json!({"op":"sync","snapshot":snapshot}))
                 }
@@ -150,6 +276,7 @@ fn serve(mut stream: TcpStream, shell: &mut Shell) -> std::io::Result<()> {
         }
         "/" => {
             shell.snapshot = fixture();
+            contributions(shell);
             shell.screen = "browse".into();
             shell.palette = false;
             ("text/html", neutrino_shell::document())
@@ -162,6 +289,7 @@ fn serve(mut stream: TcpStream, shell: &mut Shell) -> std::io::Result<()> {
 fn main() -> std::io::Result<()> {
     let mut shell = Shell::default();
     shell.snapshot = fixture();
+    contributions(&mut shell);
     let listener = TcpListener::bind("127.0.0.1:4317")?;
     eprintln!("Rust interface harness: http://127.0.0.1:4317 (fixture data)");
     for stream in listener.incoming() {

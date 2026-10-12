@@ -41,6 +41,12 @@ pub struct Shell {
     pub expanded_preview: bool,
     pub apply_space: bool,
     pub setup_busy: bool,
+    pub selected_module: String,
+    pub module_filter: String,
+    pub module_query: String,
+    pub focus: String,
+    pub focus_serial: u64,
+    order_undo: Vec<Value>,
     adjustment: String,
 }
 impl Default for Shell {
@@ -50,7 +56,7 @@ impl Default for Shell {
             screen: "browse".into(),
             section: "general".into(),
             step: 0,
-            setup: json!({"profile":"Personal","space":"Everyday","search":"duckDuckGo","blockTrackers":true,"blockPopups":true,"restoreSession":true,"appearance":"system","accent":"rose","layout":"leading","imported":false}),
+            setup: json!({"profile":"Personal","space":"Everyday","search":"duckDuckGo","blockTrackers":true,"blockPopups":true,"restoreSession":true,"appearance":"dark","accent":"purple","layout":"leading","imported":false}),
             draft: None,
             undo: vec![],
             redo: vec![],
@@ -68,6 +74,12 @@ impl Default for Shell {
             expanded_preview: false,
             apply_space: true,
             setup_busy: false,
+            selected_module: String::new(),
+            module_filter: "installed".into(),
+            module_query: String::new(),
+            focus: String::new(),
+            focus_serial: 0,
+            order_undo: vec![],
             adjustment: String::new(),
         }
     }
@@ -96,6 +108,10 @@ impl Shell {
     }
     pub fn dispatch(&mut self, request: Value) -> Value {
         let op = text(&request, "op");
+        if op != "sync" {
+            self.focus.clear();
+            self.focus_serial = self.focus_serial.wrapping_add(1);
+        }
         if !["sync", "editor-value"].contains(&op) {
             self.adjustment.clear();
         }
@@ -134,6 +150,7 @@ impl Shell {
             }
             if previous != self.snapshot["session"]["spaceID"] {
                 self.tab_undo.clear();
+                self.order_undo.clear();
                 self.menu.clear();
                 self.palette = false;
             }
@@ -145,6 +162,18 @@ impl Shell {
         } else {
             match op {
                 "noop" => {}
+                "dismiss-notice" => {
+                    self.notice.clear();
+                    commands.push(json!({"op":"clearNotice"}));
+                }
+                "transient-dismiss" => self.notice.clear(),
+                "focus-address" => {
+                    self.sidebar_hidden = false;
+                    self.focus = "address-input".into();
+                    if flag(&self.snapshot, "focusMode") {
+                        commands.push(json!({"op":"exitFocus"}));
+                    }
+                }
                 "palette" => {
                     self.palette = true;
                     self.menu.clear();
@@ -174,12 +203,18 @@ impl Shell {
                         && self.draft.as_ref() != Some(&self.snapshot["configuration"])
                     {
                         self.menu = "discard-editor".into();
+                    } else if flag(&self.snapshot, "focusMode") {
+                        commands.push(json!({"op":"exitFocus"}));
+                        self.close_screen();
                     } else {
                         self.close_screen();
                     }
                 }
                 "screen" => {
                     let screen = text(&request, "value");
+                    if screen == "modules" {
+                        self.selected_module.clear();
+                    }
                     if [
                         "browse",
                         "settings",
@@ -189,6 +224,7 @@ impl Shell {
                         "extensions",
                         "assistant",
                         "reader",
+                        "resources",
                         "recovery",
                     ]
                     .contains(&screen)
@@ -248,6 +284,9 @@ impl Shell {
                         commands.push(json!({"op":"selectTab","id":value["id"]}));
                         self.palette = false;
                         self.close_screen();
+                    } else if text(&value, "kind") == "command" {
+                        self.palette = false;
+                        return self.dispatch(json!({"op":"screen","value":value["value"]}));
                     } else if let Some(url) = resolve_address(
                         text(&value, "value"),
                         text(&self.snapshot["preferences"], "search"),
@@ -265,10 +304,11 @@ impl Shell {
                 }
                 "newTab" => {
                     commands.push(json!({"op":"newTab"}));
-                    self.palette = true;
+                    self.palette = false;
                     self.query.clear();
                     self.selected_result = 0;
                     self.screen = "browse".into();
+                    self.focus = "start-input".into();
                 }
                 "selectTab" | "closeTab" | "duplicateTab" | "pinTab" | "toggleBranch" => {
                     if let Some(tab) = self
@@ -286,9 +326,10 @@ impl Shell {
                 }
                 "switchSpace" => {
                     if !self.private()
-                        && array(&self.snapshot["spaces"])
-                            .iter()
-                            .any(|s| s["id"] == request["id"])
+                        && array(&self.snapshot["spaces"]).iter().any(|s| {
+                            s["id"] == request["id"]
+                                && s["profileID"] == self.snapshot["session"]["profileID"]
+                        })
                     {
                         commands.push(json!({"op":op,"id":request["id"]}));
                         self.menu.clear();
@@ -296,7 +337,58 @@ impl Shell {
                     }
                 }
                 "move-tab" => self.move_tab(&request, &mut commands),
+                "space-step" => {
+                    if !self.private() {
+                        let spaces: Vec<_> = array(&self.snapshot["spaces"])
+                            .iter()
+                            .filter(|v| v["profileID"] == self.snapshot["session"]["profileID"])
+                            .collect();
+                        if let Some(i) = spaces
+                            .iter()
+                            .position(|s| s["id"] == self.snapshot["session"]["spaceID"])
+                        {
+                            let step = request["value"].as_i64().unwrap_or(0).signum();
+                            let next = (i as i64 + step)
+                                .clamp(0, spaces.len().saturating_sub(1) as i64)
+                                as usize;
+                            if next != i {
+                                commands.push(json!({"op":"switchSpace","id":spaces[next]["id"]}));
+                                self.screen = "browse".into();
+                                self.menu.clear();
+                                self.palette = false;
+                            }
+                        }
+                    }
+                }
+                "reorder-spaces" | "reorder-folders" => self.reorder(&request, &mut commands),
                 "undo-tabs" => {
+                    if let Some(change) = self.order_undo.pop() {
+                        let key = if change["op"] == "reorderSpaces" {
+                            "spaces"
+                        } else {
+                            "folders"
+                        };
+                        let current: HashSet<_> = array(&self.snapshot[key])
+                            .iter()
+                            .filter(|v| {
+                                key != "spaces"
+                                    || v["profileID"] == self.snapshot["session"]["profileID"]
+                            })
+                            .map(|v| text(v, "id"))
+                            .collect();
+                        let previous: HashSet<_> = array(&change["ids"])
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect();
+                        if current == previous {
+                            commands.push(change);
+                            self.notice = "Order restored.".into();
+                        } else {
+                            self.notice =
+                                "The list changed; that move can no longer be undone.".into();
+                        }
+                        return self.response(commands);
+                    }
                     if let Some(tabs) = self.tab_undo.pop() {
                         let current: HashSet<_> =
                             self.tabs().iter().map(|t| text(t, "id")).collect();
@@ -530,6 +622,11 @@ impl Shell {
                         "removeBookmark",
                         "restoreArchived",
                         "toggleModule",
+                        "installModule",
+                        "repairModule",
+                        "uninstallModule",
+                        "importCatalog",
+                        "removeCatalog",
                         "removeExtension",
                         "extensionAction",
                         "openExtensionOptions",
@@ -543,6 +640,8 @@ impl Shell {
                         "libraryPage",
                         "useWebKit",
                         "reloadTab",
+                        "toggleFocus",
+                        "retryResources",
                     ]
                     .contains(&action)
                         && !(self.private()
@@ -551,9 +650,42 @@ impl Shell {
                     {
                         commands
                             .push(json!({"op":action,"id":request["id"],"value":request["value"]}));
+                        if action == "toggleFocus" {
+                            self.screen = "browse".into();
+                            self.menu.clear();
+                        }
                         if action == "deleteNote" || action == "credentialDelete" {
                             self.menu.clear();
                         }
+                    }
+                }
+                "module-select" => {
+                    let id = text(&request, "value");
+                    if id.is_empty()
+                        || array(&self.snapshot["modules"])
+                            .iter()
+                            .any(|m| text(m, "id") == id)
+                    {
+                        self.selected_module = id.into();
+                    }
+                }
+                "module-filter" => {
+                    let value = text(&request, "value");
+                    if ["installed", "available", "all"].contains(&value) {
+                        self.module_filter = value.into();
+                    }
+                }
+                "module-query" => self.module_query = bound(text(&request, "value"), 200),
+                "module-recovery" => self.screen = "recovery".into(),
+                "module-setting" => {
+                    let id = text(&request, "id");
+                    let key = text(&request, "key");
+                    if array(&self.snapshot["modules"]).iter().any(|m| {
+                        text(m, "id") == id
+                            && flag(m, "installed")
+                            && array(&m["settings"]).iter().any(|s| text(s, "id") == key)
+                    }) {
+                        commands.push(json!({"op":"setModuleSetting","id":id,"key":key,"value":request["value"]}));
                     }
                 }
                 _ => {
@@ -564,7 +696,55 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"overlay":self.onboarding() || self.palette || !["browse","library","editor"].contains(&self.screen.as_str()) || !self.menu.is_empty(),"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { "" }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+    }
+    pub fn modal_menu(&self) -> bool {
+        ["discard-editor", "clear-history", "reset-modules"].contains(&self.menu.as_str())
+            || self.menu.starts_with("delete-")
+    }
+    fn reorder(&mut self, r: &Value, commands: &mut Vec<Value>) {
+        if self.private() {
+            return;
+        }
+        let spaces = text(r, "op") == "reorder-spaces";
+        let key = if spaces { "spaces" } else { "folders" };
+        let items: Vec<_> = array(&self.snapshot[key])
+            .iter()
+            .filter(|v| !spaces || v["profileID"] == self.snapshot["session"]["profileID"])
+            .collect();
+        let id = text(r, "id");
+        let before = text(r, "before");
+        let mut ids: Vec<_> = items.iter().map(|v| text(v, "id").to_string()).collect();
+        let Some(index) = ids.iter().position(|v| v == id) else {
+            return;
+        };
+        if before == id || !before.is_empty() && !ids.iter().any(|v| v == before) {
+            return;
+        }
+        let previous = ids.clone();
+        let value = ids.remove(index);
+        let target = ids.iter().position(|v| v == before).unwrap_or(ids.len());
+        ids.insert(target, value);
+        if ids == previous {
+            return;
+        }
+        let op = if spaces {
+            "reorderSpaces"
+        } else {
+            "reorderFolders"
+        };
+        self.order_undo.push(json!({"op":op,"ids":previous}));
+        if self.order_undo.len() > 30 {
+            self.order_undo.remove(0);
+        }
+        commands.push(json!({"op":op,"ids":ids}));
+        self.notice = if spaces {
+            "Space order updated."
+        } else {
+            "Folder order updated."
+        }
+        .into();
+        self.menu.clear();
     }
     fn close_screen(&mut self) {
         self.screen = "browse".into();
@@ -590,14 +770,13 @@ impl Shell {
         let key = text(r, "key");
         let v = &r["value"];
         let target = match key {
-            "accent" | "colorMode" | "density" => "theme",
+            "accent" | "colorMode" | "density" | "reducedMotion" => "theme",
             "tabsWidth" | "treeTabs" | "bookmarksBar" => "layout",
             _ => return,
         };
         let valid = match key {
-            "accent" => {
-                ["rose", "purple", "teal", "blue", "orange"].contains(&v.as_str().unwrap_or(""))
-            }
+            "accent" => ["rose", "purple", "teal", "blue", "orange", "pink"]
+                .contains(&v.as_str().unwrap_or("")),
             "colorMode" => ["system", "light", "dark"].contains(&v.as_str().unwrap_or("")),
             "density" => ["compact", "comfortable"].contains(&v.as_str().unwrap_or("")),
             "tabsWidth" => v
@@ -685,6 +864,7 @@ impl Shell {
         if !before.is_empty() && !tabs.iter().any(|t| text(t, "id") == before) {
             return;
         }
+        self.order_undo.clear();
         let original = json!(tabs);
         let mut item = tabs.remove(index);
         item["pinned"] = json!(group == "pinned");
@@ -735,13 +915,25 @@ impl Shell {
     pub fn results(&self) -> Vec<Value> {
         let query = self.query.to_lowercase();
         let mut out = vec![];
+        for (screen, title) in [
+            ("modules", "Modules"),
+            ("settings", "Settings"),
+            ("extensions", "Extensions"),
+            ("editor", "Customize"),
+            ("library", "Library"),
+            ("recovery", "Recovery"),
+        ] {
+            if !query.is_empty() && title.to_lowercase().contains(&query) {
+                out.push(json!({"kind":"command","title":title,"detail":"Open","value":screen}));
+            }
+        }
         for tab in self.tabs() {
             if query.is_empty()
                 || text(tab, "title").to_lowercase().contains(&query)
                 || text(tab, "url").to_lowercase().contains(&query)
             {
                 out.push(json!({"kind":"tab","id":tab["id"],"title":tab["title"],"detail":text(tab,"url"),"value":""}));
-                if out.len() == 5 {
+                if out.iter().filter(|v| v["kind"] == "tab").count() == 5 {
                     break;
                 }
             }
@@ -760,7 +952,7 @@ fn return_focus(field: &str) -> &str {
     }
 }
 pub fn default_configuration() -> Value {
-    json!({"theme":{"design":"native","accent":"rose","colorMode":"system","density":"comfortable","cornerRadius":12,"transparency":false,"reducedMotion":false,"iconStyle":"outline"},"layout":{"tabs":"leading","navigation":"top","sidebar":"leading","sidebarWidth":260,"bookmarksBar":false,"statusBar":false,"tabsWidth":240}})
+    json!({"theme":{"design":"graphite","accent":"purple","colorMode":"dark","density":"comfortable","cornerRadius":6,"transparency":false,"reducedMotion":false,"iconStyle":"outline"},"layout":{"tabs":"leading","navigation":"top","sidebar":"leading","sidebarWidth":260,"bookmarksBar":false,"statusBar":false,"tabsWidth":256}})
 }
 pub fn resolve_address(input: &str, search: &str) -> Option<String> {
     let value = input.trim();

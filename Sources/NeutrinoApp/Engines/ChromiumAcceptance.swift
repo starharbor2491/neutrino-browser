@@ -70,9 +70,9 @@ enum ChromiumAcceptance {
             browser.shellAction?(["op":"screen","value":"browse"])
             if let i = browser.app.library.profiles.firstIndex(where: { $0.id == browser.profile.id }) { browser.app.library.profiles[i].engineID = oldEngine }
         }
-        func wait(_ label:String,_ condition: () -> Bool) async throws {
+        func wait(_ label:String,_ condition: () async throws -> Bool) async throws {
             let deadline = ContinuousClock.now.advanced(by: .seconds(15))
-            while !condition() { guard ContinuousClock.now < deadline else { throw ValidationError("Neutrino keyboard routing timed out: \(label), tabs=\(browser.session.tabs.count), visible=\(ownerWindow.isVisible), closed=\(browser.isClosed).") }; try await Task.sleep(for: .milliseconds(50)) }
+            while !(try await condition()) { guard ContinuousClock.now < deadline else { throw ValidationError("Neutrino keyboard routing timed out: \(label), tabs=\(browser.session.tabs.count), visible=\(ownerWindow.isVisible), closed=\(browser.isClosed).") }; try await Task.sleep(for: .milliseconds(50)) }
         }
         browser.newTab(url: url, engine: .chromium)
         let probe = browser.session.selectedTabID
@@ -96,21 +96,30 @@ enum ChromiumAcceptance {
         while true {
             let responder = ownerWindow.firstResponder as? NSView
             let nativeFocus = ownerWindow.isKeyWindow && (responder === shell || responder?.isDescendant(of:shell) == true)
-            let addressFocus = (try await shell.evaluateJavaScript("document.activeElement?.id === 'command-input'")) as? Bool == true
+            let addressFocus = (try await shell.evaluateJavaScript("document.activeElement?.id === 'address-input'")) as? Bool == true
             if nativeFocus && addressFocus { break }
             guard ContinuousClock.now < addressDeadline else { throw ValidationError("Command-L did not focus Neutrino’s address field in its native Rust shell.") }
             try await Task.sleep(for:.milliseconds(50))
         }
         guard !page.hasNativeNavigationChrome else { throw ValidationError("Chrome's native toolbar remains active.") }
-        // The address palette intentionally hides native page windows. Dismiss
-        // it through AppKit before testing commands with the page focused.
-        try key("\u{1b}", code:53, window:ownerWindow)
-        let dismissDeadline = ContinuousClock.now.advanced(by:.seconds(5))
-        while (try await shell.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true {
-            guard ContinuousClock.now < dismissDeadline else { throw ValidationError("Escape did not dismiss the address palette.") }
-            try await Task.sleep(for:.milliseconds(30))
+        // Location stays inline. Quick navigation is the explicit popup command.
+        page.focus()
+        try key("k",code:40,modifiers:.command,window:page.chromeWindow!)
+        try await wait("Command-K quick navigation") {
+            (try await shell.evaluateJavaScript("document.activeElement?.id==='command-input' && !!document.querySelector('.command-palette')")) as? Bool == true
         }
-        try await wait("page remount after address palette") { page.chromeWindow?.parent === ownerWindow && page.chromeWindow?.isVisible == true }
+        try key("\u{1b}",code:53,window:ownerWindow)
+        try await wait("quick navigation dismissal") {
+            (try await shell.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true
+        }
+        try await wait("page remount after quick navigation") { page.chromeWindow?.parent === ownerWindow && page.chromeWindow?.isVisible == true }
+        try await RustShellAcceptance.action(["op":"native","action":"toggleFocus"],web:shell)
+        guard browser.focusMode else { throw ValidationError("Focus provider did not enter Focus mode.") }
+        page.focus()
+        try await wait("website focus during Focus mode") { page.chromeWindow?.isKeyWindow == true }
+        try key("\u{1b}",code:53,window:page.chromeWindow!)
+        try await wait("Escape restores Focus from the website") { !browser.focusMode }
+        guard try await evaluate(page,"String(window.neutrinoLiveMarker)")=="73" else { throw ValidationError("Focus changed the live document.") }
         func performMenuItem(_ title: String, in menu: NSMenu) -> Bool {
             menu.update()
             for (index, item) in menu.items.enumerated() {

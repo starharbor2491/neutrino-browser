@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import Darwin
-import SwiftUI
+import Foundation
+import Combine
 import NeutrinoCore
 
 /// Only curated, byte-verified first-party executables reach start(). Native workers have
@@ -106,50 +107,3 @@ private final class WeakResourceWorker {
     init(_ value: ResourceWorker) { self.value = value }
 }
 
-struct ResourcePanel: View {
-    @EnvironmentObject private var app: AppState
-    @Environment(\.browserTheme) private var theme
-    @StateObject private var worker = ResourceWorker()
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                if let frame = worker.frame {
-                    Text(frame.title).font(.headline)
-                    ForEach(Array(frame.metrics.enumerated()), id: \.offset) { _, metric in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(metric.name).font(.caption).foregroundStyle(.secondary)
-                            Text(metric.value).font(.system(size: 25, weight: .medium, design: .rounded)).monospacedDigit()
-                            if metric.samples.count > 1 {
-                                Sparkline(values: metric.samples).stroke(theme.tint, lineWidth: 2).frame(height: 52)
-                                    .accessibilityLabel("Recent " + metric.name + " samples")
-                            }
-                            if let fraction = metric.fraction { ProgressView(value: fraction) }
-                            if !metric.detail.isEmpty { Text(metric.detail).font(.caption).foregroundStyle(.secondary) }
-                        }
-                    }
-                    Text(frame.detail).font(.caption).foregroundStyle(.secondary)
-                } else if worker.failure == nil { ProgressView("Starting resource provider…") }
-                if let failure = worker.failure { Label(failure, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.primary) }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-        }
-        .task(id: app.resourceWorkerGeneration) {
-            do {
-                let package = try app.resourceWorkerPackage()
-                try worker.start(executable: package.url, moduleID: package.id)
-            } catch { worker.showFailure(error) }
-        }
-        .onDisappear { worker.stop() }
-    }
-}
-struct Sparkline: Shape {
-    var values: [Double]
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard values.count > 1 else { return path }
-        for (index, value) in values.enumerated() {
-            let point = CGPoint(x: rect.width * Double(index) / Double(values.count - 1), y: rect.height * (1 - value))
-            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
-        }
-        return path
-    }
-}

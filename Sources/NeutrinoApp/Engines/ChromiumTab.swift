@@ -156,6 +156,7 @@ final class ChromiumTab: BrowserEngineTab {
                 if !self.hasNativeNavigationChrome {
                     let command: String
                     if modifiers == NSEvent.ModifierFlags.command.rawValue, key == "l" { command = "focusAddress" }
+                    else if modifiers == NSEvent.ModifierFlags.command.rawValue, key == "k" { command = "quickNavigation" }
                     else if modifiers == NSEvent.ModifierFlags.command.rawValue, key == "t" { command = "newTab" }
                     else if modifiers == NSEvent.ModifierFlags.command.rawValue, key == "w" { command = "closeTab" }
                     else if modifiers == NSEvent.ModifierFlags.command.union(.shift).rawValue, key == "t" { command = "reopenTab" }

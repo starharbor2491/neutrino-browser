@@ -57,3 +57,13 @@ No signing credentials or licensed CDM are configured in this workspace. macOS b
 The publishing job requires the repository variable `NEUTRINO_CORE_ACCEPTANCE_JSON` after manual testing of the uploaded candidate. It identifies format `1`, `sourceCheckout`, `installerSHA256`, `testedBy`, and `checks`: one `{ "id": "...", "result": "passed", "evidence": "actual test outcome and evidence location" }` for each of `onboarding`, `workspaces`, `editor`, `dailyBrowsing`, `passwordsAutofill`, `blocking`, `extensions`, `protectedStreaming`, `offlineInstaller`, and `accessibility`.
 
 The validator binds that record to the exact signed/notarized DMG and successful installed/restart receipt. Configure the variable after testing, then rerun the failed publishing job without rebuilding the candidate. The record is a publisher attestation; the validator does not perform those manual tests. Missing/skipped/stale checks cannot publish. No passing record is supplied in this checkout.
+
+## Complete app and engine updates
+
+The published Apple Silicon ZIP expands into one `Neutrino.app`; the DMG contains that same app. CEF's sandbox/helper executables are private background components inside the app, not separate installations or user-facing applications. Chromium requires these subprocesses for rendering and isolation.
+
+The updater downloads a digest-checked complete release and replaces the app after normal quit. Chromium updates travel in the same sealed bundle; Profiles, website data, passwords, module data and layouts stay in Application Support/Keychain. The runtime never loads a downloaded, unverified engine outside the app.
+
+`chromium-updates.yml` checks the trusted upstream stable CEF index daily, verifies both SDK archive sizes/digests, and emits a SHA-256 pin candidate. A macOS job must compile the integration, pass native tests and real updater checks, and pass installed launch/save/quit before a fast-forward-only source update and a new preview release are dispatched. Incompatible upstream builds or concurrent main changes stop publication. Full browser parity remains a separate consumer gate.
+
+Preview packaging checks the configured Developer ID and App Store Connect secret bindings. Complete credentials enable signing, notarization, stapling and Gatekeeper assessment even for previews. Missing credentials produce an explicit ad-hoc preview with a `signing-status.json` receipt; this does not remove macOS's first-launch warning. No quarantine or Gatekeeper bypass is embedded in the app.

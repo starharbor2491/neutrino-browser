@@ -26,3 +26,9 @@ Outstanding gates:
 See [TESTING.md](TESTING.md) and [PARITY.md](PARITY.md). [AUDIT.md](AUDIT.md) and [1.0.0 notes](RELEASE_NOTES_1.0.0.md) are historical predecessor records; they do not validate Neutrino.
 
 Consumer publishing requires exact-installer installed acceptance and publisher-recorded core checks, including protected streaming. Preview publishing requires native/updater and independent installed-shell acceptance, and attaches the full Blink result without treating a failure as core acceptance. No passing Neutrino core receipt is supplied.
+
+## Violet preview
+
+Neutrino Violet uses the supplied icon unchanged, a charcoal/violet Rust interface, inline browsing fields, anchored menus, a directly accessible module manager, larger controls and restrained motion. Module settings and selected providers reach the shell; Resources and Focus have visible entry/recovery paths. Setup is animated, retains choices and offers built-in module configuration.
+
+The 1.0.3 preview is packaged as one Apple Silicon app ZIP plus a complete offline DMG. Whole-app updates carry the pinned Chromium engine and retain external data. Daily upstream refresh must compile/test/package a candidate and pass installed acceptance before publication; failed publication is retried and incomplete assets stay in drafts. Signing availability is recorded separately. Finished parity, DRM, extension action popups and clean-Mac notarized consumer acceptance remain unverified gates.

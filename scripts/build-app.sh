@@ -36,6 +36,7 @@ for worker in NeutrinoResourceMonitor NeutrinoMemoryMonitor NeutrinoReaderWorker
   codesign --verify --strict "$payload"
 done
 cp Resources/Info.plist "$app_directory/Contents/Info.plist"
+cp ChromiumRuntime/cef-version.json "$app_directory/Contents/Resources/CEF-Version.json"
 rm -rf "$app_directory/Contents/Resources/Updater"
 mkdir -p "$app_directory/Contents/Resources/Updater/arm64"
 cp "$arm_binary_directory/NeutrinoUpdater" "$app_directory/Contents/Resources/Updater/arm64/NeutrinoUpdater"

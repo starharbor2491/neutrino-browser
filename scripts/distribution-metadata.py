@@ -65,7 +65,8 @@ info_path = app / 'Contents/Info.plist'
 info = plistlib.loads(info_path.read_bytes())
 build = int(os.environ.get('NEUTRINO_BUILD_NUMBER', info['CFBundleVersion']))
 version = os.environ.get('NEUTRINO_VERSION', info['CFBundleShortVersionString'])
-epoch = int(os.environ.get('NEUTRINO_SECURITY_EPOCH', '154'))
+cef_pin=json.loads((Path(__file__).resolve().parents[1] / 'ChromiumRuntime/cef-version.json').read_text())
+epoch = int(os.environ.get('NEUTRINO_SECURITY_EPOCH', cef_pin['version'].split('.')[0]))
 if not 1 <= build <= 2**63 - 1 or not 154 <= epoch <= 2**63 - 1 or len(version) > 64 or not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?', version):
     raise ValueError('Invalid release version, build number, or security epoch')
 manifest_path = app / 'Contents/Frameworks/Chromium.neutrinoengine/Contents/Resources/manifest.json'

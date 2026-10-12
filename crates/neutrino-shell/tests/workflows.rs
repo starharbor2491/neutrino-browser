@@ -275,7 +275,7 @@ fn provider_endpoint_cannot_change_host_between_parsers() {
     assert_eq!(endpoint, "https://api.openai.com/v1");
 }
 #[test]
-fn undo_toast_is_attached_only_to_the_tab_move() {
+fn undo_feedback_is_attached_only_to_the_tab_move() {
     let mut s = shell();
     s.dispatch(json!({"op":"move-tab","id":"a","group":"pinned"}));
     s.dispatch(json!({"op":"screen","value":"editor"}));
@@ -284,7 +284,7 @@ fn undo_toast_is_attached_only_to_the_tab_move() {
     assert!(!r["html"]
         .as_str()
         .unwrap()
-        .contains("Appearance saved.</span><button"));
+        .contains("Appearance saved.</span><button data-op=\"undo-tabs\""));
 }
 #[test]
 fn split_error_keeps_the_healthy_pane_visible() {
@@ -378,4 +378,101 @@ fn continuous_width_drag_is_one_undo_step_despite_passive_updates() {
     s.dispatch(json!({"op":"editor-end-adjustment"}));
     s.dispatch(json!({"op":"editor-undo"}));
     assert_eq!(s.config()["layout"]["tabsWidth"], 310);
+}
+
+#[test]
+fn new_tab_uses_inline_search_and_palette_commands_are_explicit() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"newTab"}));
+    assert_eq!(commands(&r)[0]["op"], "newTab");
+    assert!(!s.palette);
+    assert_eq!(r["focus"], "start-input");
+    s.dispatch(json!({"op":"palette","value":"Modules"}));
+    let results = s.results();
+    assert_eq!(results[0]["kind"], "command");
+    assert_eq!(results[0]["value"], "modules");
+    s.dispatch(json!({"op":"activate-result"}));
+    assert_eq!(s.screen, "modules");
+    assert!(!s.palette);
+}
+
+#[test]
+fn space_gestures_and_reordering_stay_within_the_current_profile() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"space-step","value":1}));
+    assert_eq!(commands(&r)[0]["id"], "s2");
+    s.snapshot["session"]["spaceID"] = json!("s2");
+    assert!(commands(&s.dispatch(json!({"op":"space-step","value":1}))).is_empty());
+    let r = s.dispatch(json!({"op":"reorder-spaces","id":"s2","before":"s1"}));
+    assert_eq!(commands(&r)[0]["ids"], json!(["s2", "s1"]));
+    assert!(
+        commands(&s.dispatch(json!({"op":"reorder-spaces","id":"secret","before":"s1"})))
+            .is_empty()
+    );
+    let r = s.dispatch(json!({"op":"undo-tabs"}));
+    assert_eq!(commands(&r)[0]["ids"], json!(["s1", "s2"]));
+    s.snapshot["private"] = json!(true);
+    assert!(commands(&s.dispatch(json!({"op":"space-step","value":-1}))).is_empty());
+    assert!(
+        commands(&s.dispatch(json!({"op":"reorder-spaces","id":"s2","before":"s1"}))).is_empty()
+    );
+}
+
+#[test]
+fn module_settings_require_a_real_installed_module_and_declared_field() {
+    let mut s = shell();
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.notes","name":"Notes","installed":true,"enabled":true,"settings":[{"id":"defaultTitle","kind":"text","value":"Untitled"}]}]);
+    let r=s.dispatch(json!({"op":"module-setting","id":"org.neutrino.notes","key":"defaultTitle","value":"Project notes"}));
+    assert_eq!(commands(&r)[0]["op"], "setModuleSetting");
+    assert_eq!(commands(&r)[0]["value"], "Project notes");
+    assert!(commands(&s.dispatch(
+        json!({"op":"module-setting","id":"unknown","key":"defaultTitle","value":"bad"})
+    ))
+    .is_empty());
+    assert!(commands(&s.dispatch(
+        json!({"op":"module-setting","id":"org.neutrino.notes","key":"undeclared","value":"bad"})
+    ))
+    .is_empty());
+    s.snapshot["modules"][0]["installed"] = json!(false);
+    assert!(commands(&s.dispatch(
+        json!({"op":"module-setting","id":"org.neutrino.notes","key":"defaultTitle","value":"bad"})
+    ))
+    .is_empty());
+}
+
+#[test]
+fn utility_pages_preserve_browser_tools_and_routine_menus_are_nonmodal() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"screen","value":"modules"}));
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("rail-destinations"));
+    assert!(html.contains("data-screen=\"modules\""));
+    assert!(!html.contains("screen-scrim"));
+    s.dispatch(json!({"op":"screen","value":"browse"}));
+    let r = s.dispatch(json!({"op":"menu","value":"browser"}));
+    assert_eq!(r["overlay"], false);
+    assert!(r["html"].as_str().unwrap().contains("aria-modal=\"false\""));
+    let r = s.dispatch(json!({"op":"menu","value":"clear-history"}));
+    assert_eq!(r["overlay"], true);
+}
+
+#[test]
+fn focus_recovers_after_overlays_and_address_focus_and_spaces_stay_in_profile() {
+    let mut s = shell();
+    s.snapshot["focusMode"] = json!(true);
+    s.screen = "modules".into();
+    s.dispatch(json!({"op":"palette"}));
+    assert!(commands(&s.dispatch(json!({"op":"escape"}))).is_empty());
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"escape"})))[0]["op"],
+        "exitFocus"
+    );
+    let address = s.dispatch(json!({"op":"focus-address"}));
+    assert_eq!(address["focus"], "address-input");
+    assert_eq!(commands(&address)[0]["op"], "exitFocus");
+    assert!(commands(&s.dispatch(json!({"op":"switchSpace","id":"secret"}))).is_empty());
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"switchSpace","id":"s2"})))[0]["id"],
+        "s2"
+    );
 }

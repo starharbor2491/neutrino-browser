@@ -41,6 +41,8 @@ import NeutrinoCore
         // address palette. SwiftPM's test runner does not own that event loop.
         let originalTab = model.session.selectedTabID, tabCount = model.session.tabs.count
         try await action(["op":"newTab"],web:web)
+        guard (try await web.evaluateJavaScript("!!document.querySelector('#start-input') && !document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("New tab did not open its inline search surface.") }
+        try await action(["op":"palette"],web:web)
         guard model.session.tabs.count == tabCount + 1,
               (try await web.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("New tab did not create a browser tab with its address palette.") }
         window.makeKey(); window.makeFirstResponder(web)
@@ -59,9 +61,9 @@ import NeutrinoCore
               (try await web.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("Command-W did not close the address-palette tab while retaining its browser window.") }
         print("Neutrino Rust shell acceptance: Command-W closed the palette tab and retained its window")
         // Drive actual DOM buttons through WebKit and the Rust/native command bridge.
-        _ = try await web.evaluateJavaScript("document.querySelector('.start-search').focus(); document.querySelector('.start-search').click()")
+        _ = try await web.evaluateJavaScript("document.querySelector('#start-input').focus()")
         try await Task.sleep(for:.milliseconds(100))
-        guard (try await web.evaluateJavaScript("document.activeElement.id === 'command-input'")) as? Bool == true else { throw ValidationError("Search did not receive keyboard focus.") }
+        guard (try await web.evaluateJavaScript("document.activeElement.id === 'start-input'")) as? Bool == true else { throw ValidationError("Search did not receive keyboard focus.") }
         try await action(["op":"escape"], web:web)
         try await action(["op":"screen","value":"editor"],web:web)
         let original = model.configuration
@@ -73,7 +75,7 @@ import NeutrinoCore
         guard model.configuration.layout.tabs == original.layout.tabs else { throw ValidationError("Editor undo was not applied before Save.") }
         for screen in ["settings","modules","extensions","library"] {
             try await action(["op":"screen","value":screen,"section":"general"],web:web)
-            guard (try await web.evaluateJavaScript(screen == "library" ? "!!document.querySelector('.library-panel')" : "!!document.querySelector('.utility-screen')")) as? Bool == true else { throw ValidationError("The \(screen) interface did not render.") }
+            guard (try await web.evaluateJavaScript(screen == "library" ? "!!document.querySelector('.library-content')" : "!!document.querySelector('.utility-screen')")) as? Bool == true else { throw ValidationError("The \(screen) interface did not render.") }
             try await recordScrollGeometry(web, label:screen)
             await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-\(screen).png"))
             try await action(["op":"escape"],web:web)

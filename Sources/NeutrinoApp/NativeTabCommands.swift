@@ -7,11 +7,16 @@ import AppKit
 final class NativeTabCommands: NSObject, NSMenuItemValidation {
     private var items: [NSMenuItem] = []
     private let locationItem: NSMenuItem
+    private let quickNavigationItem: NSMenuItem
     private var installing = false
 
     override init() {
         locationItem = NSMenuItem(title: "Open location…", action: #selector(openLocation(_:)), keyEquivalent: "l")
+        quickNavigationItem = NSMenuItem(title:"Quick navigation…",action:#selector(openQuickNavigation(_:)),keyEquivalent:"k")
         super.init()
+        quickNavigationItem.identifier = NSUserInterfaceItemIdentifier("neutrino.quickNavigation")
+        quickNavigationItem.keyEquivalentModifierMask = .command
+        quickNavigationItem.target = self
         locationItem.identifier = NSUserInterfaceItemIdentifier("neutrino.location")
         locationItem.keyEquivalentModifierMask = .command
         locationItem.target = self
@@ -60,6 +65,7 @@ final class NativeTabCommands: NSObject, NSMenuItemValidation {
                 place(locationItem, in: browse, before: previousLocation)
                 browse.removeItem(previousLocation)
             }
+            place(quickNavigationItem, in: browse, after: locationItem)
             place(items[4], in: browse, before: switchPane)
             place(items[3], in: browse, before: items[4])
             browse.autoenablesItems = true
@@ -80,7 +86,7 @@ final class NativeTabCommands: NSObject, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard let app = AppDelegate.state, !app.finalQuitDataFrozen,
               !ChromiumRuntime.shared.finalQuitFrozen else { return false }
-        if menuItem === locationItem {
+        if menuItem === locationItem || menuItem === quickNavigationItem {
             return ChromiumRuntime.shared.focusedNativeTab != nil || focusedBrowser?.app === app
         }
         guard let command = command(for: menuItem) else { return false }
@@ -106,6 +112,12 @@ final class NativeTabCommands: NSObject, NSMenuItemValidation {
                 action(["op":"selectTab","id":tabs[next].id.uuidString])
             }
         } else { browser.performTabCommand(command) }
+    }
+
+    @objc private func openQuickNavigation(_ sender:NSMenuItem) {
+        guard sender===quickNavigationItem, validateMenuItem(sender) else { return }
+        if let native=ChromiumRuntime.shared.focusedNativeTab { native.onBrowserCommand?("quickNavigation") }
+        else { focusedBrowser?.shellAction?(["op":"palette"]) }
     }
 
     @objc private func openLocation(_ sender: NSMenuItem) {

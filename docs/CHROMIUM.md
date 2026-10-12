@@ -8,7 +8,7 @@ The bridge uses upstream CEF Chrome-style Views: a `CefBrowserView` in a framele
 
 One Neutrino tab owns one live engine adapter. Spaces share descriptors across windows; selecting elsewhere transfers the existing adapter/native surface rather than creating a second document. Background Space adapters retain their original Profile and callbacks. Popups must preserve original POST/opener state while becoming Neutrino tabs. These are source implementations requiring macOS acceptance.
 
-The bridge ABI is **5**, manifest format **2**, and `runtimeStyle` is **chromeViews**. Old normal-Chrome-window packages are rejected. The pinned upstream CEF distribution is `154.0.34+g14c5a08+chromium-154.0.8037.98`, [commit 14c5a08](https://github.com/chromiumembedded/cef/commit/14c5a089e8452874cb1a556dc3fde26ed2d87723).
+The bridge ABI is **7**, manifest format **2**, and `runtimeStyle` is **chromeViews**. Old normal-Chrome-window packages are rejected. The pinned upstream CEF distribution is `154.0.34+g14c5a08+chromium-154.0.8037.98`, [commit 14c5a08](https://github.com/chromiumembedded/cef/commit/14c5a089e8452874cb1a556dc3fde26ed2d87723).
 
 ## Compatibility gates
 

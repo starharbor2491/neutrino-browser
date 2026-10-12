@@ -45,3 +45,15 @@ The current editor keeps the original native page mounted while its frame follow
 6. Compiled-app identity, actual screenshots, installed acceptance and independent final findings.
 
 Full Arc-equivalent, accessibility, extension and protected-streaming acceptance remain separate from a source or fixture pass. Record unresolved findings rather than treating a critic’s withheld preference as approval.
+
+## Violet review loop
+
+The 1.0.3 preview uses one implementer and three **GPT-6 Luna / xhigh** read-only critics. REA/CDP captures and Playwright interactions review the exact Rust renderer with clearly identified fixture data; separate macOS CI checks exercise the compiled shell and adapters.
+
+The baseline criticism identified the cream/serif promotional palette, excessive command dialogs, small contextual targets, hidden module management and disconnected providers. Violet uses charcoal/neutral surfaces, violet selection, direct address/search inputs, persistent Library/Modules destinations and anchored menus. Spaces/folders support dragging and keyboard reordering; horizontal sidebar scrolling switches Spaces. Setup has step transitions, reduced-motion behavior, live layout illustration and module defaults.
+
+The first revised code critique found Focus Escape/address recovery, incomplete icon symbol resolution and a cross-Profile Space boundary. These were corrected at the reducer/host boundaries; validated SF Symbols are rasterized by AppKit and used as inert masks in Rust controls. UI criticism led to opt-in start tips, prominent module-use actions, larger tab/folder targets and a simpler setup scene. UX checks verified retained setup choices and module settings; setup toggles now expose switch semantics and the review includes enabled tools. Resource workers run only while their Rust monitor screen is open, and stop on module replacement or shell teardown.
+
+Mac compilation, native tests, installed acceptance, signing availability and independent full Blink results remain separate evidence. A visually improved fixture does not establish full Arc parity or a notarized distribution.
+
+The final Violet screenshot review found no P0/P1 visual defect. A duplicated Modules/Extensions glyph was replaced with a separate Extensions symbol. Final rendered interaction checks passed inline Command-L, explicit Command-K, palette dragging/Escape, hover options, inventory entry, setup switch semantics, 1024px containment and reduced motion without JavaScript errors. REA capture `ev_06d9871cbe34da67a047915427e44364412de45cdd86a746089dc750baf5040b` records the fixture at 1240×820; it is not native release evidence.

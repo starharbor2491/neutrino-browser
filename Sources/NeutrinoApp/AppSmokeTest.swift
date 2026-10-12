@@ -253,6 +253,7 @@ enum AppSmokeTest {
         for step in 0..<7 {
             if step > 0 { try await RustShellAcceptance.action(["op":"setup-next"],web:web) }
             guard (try await web.evaluateJavaScript("!!document.querySelector('.onboarding.step-\(step)')")) as? Bool == true else { throw ValidationError("Setup did not render step \(step+1).") }
+            try await Task.sleep(for:.milliseconds(800))
             // WebKit renders out of process; NSView.cacheDisplay produces black frames.
             let png: Data = try await withCheckedThrowingContinuation { continuation in
                 web.takeSnapshot(with: nil) { image, error in

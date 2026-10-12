@@ -128,7 +128,7 @@ import Testing
         ToolbarComponent(command: .back, region: .afterAddress)] +
         (0..<40).map { _ in ToolbarComponent(command: .separator, region: .top) }
     config.normalize()
-    #expect(config.theme.cornerRadius == 10 && config.theme.fontScale == 1 && config.theme.spacingScale == 0.75)
+    #expect(config.theme.cornerRadius == 6 && config.theme.fontScale == 1 && config.theme.spacingScale == 0.75)
     #expect(config.theme.borderWidth == 2 && config.theme.shadowStrength == 0)
     #expect(config.theme.accentHex == nil && config.theme.textHex == nil && config.theme.surfaceHex == nil)
     #expect(config.theme.navigationAppearance?.cornerRadius == 10 && config.theme.navigationAppearance?.fontScale == 1.4)

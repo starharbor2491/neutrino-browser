@@ -7,13 +7,15 @@ import NeutrinoCore
 
 public enum ReleaseTrust {
     public enum UpdateAuthority: Equatable, Sendable {
-        case developerID(String)
+        case developerID(String, previews: Bool = false)
         case githubPreview
-        public var includesPreviews: Bool { self == .githubPreview }
+        public var includesPreviews: Bool {
+            switch self { case .githubPreview: true; case .developerID(_,let previews): previews }
+        }
     }
     public static func updateAuthority(of app: URL) throws -> UpdateAuthority {
-        if let team = try? publisherTeam(of: app) { return .developerID(team) }
         let info = try PropertyListSerialization.propertyList(from: boundedData(at: app.appendingPathComponent("Contents/Info.plist"), maximum: 65_536), format: nil) as? [String: Any]
+        if let team = try? publisherTeam(of: app) { return .developerID(team,previews:info?["NeutrinoUpdateChannel"] as? String == "preview") }
         guard info?["NeutrinoUpdateChannel"] as? String == "preview" else {
             throw ValidationError("Local builds do not subscribe to GitHub updates. Install a published Neutrino release.")
         }
@@ -26,7 +28,7 @@ public enum ReleaseTrust {
     public static func verifyUpdate(_ app: URL, authority: UpdateAuthority, codeDirectoryHash: String?) throws {
         try verifyBundleTree(app)
         switch authority {
-        case .developerID(let team):
+        case .developerID(let team,_):
             try verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
         case .githubPreview:
             guard let codeDirectoryHash, codeDirectoryHash.count == 40,
