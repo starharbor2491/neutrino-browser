@@ -224,6 +224,7 @@ struct Page {
   std::string title;
   bool navigation_failed = false;
   bool closing = false;
+  bool requested_close = false;
   bool navigated = false;
   bool popups = false;
   bool awaiting_context = true;
@@ -525,6 +526,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
       owner->awaiting_restore_browser=false; page_->navigated=true;
     }
     if (owner->closing) browser->GetHost()->CloseBrowser(true);
+    else if (owner->requested_close) browser->GetHost()->CloseBrowser(false);
     else if (!restoring_browser && !page_->pending_url.empty()) browser->GetMainFrame()->LoadURL(page_->pending_url);
     if (auto active=Active(owner)) State(active);
   }
@@ -1369,6 +1371,7 @@ void Command(void* opaque,int command,const char* text,double value) {
     page->browser->GetMainFrame()->LoadURL(target);
     return;
   }
+  if (command==NEUTRINO_CEF_REQUEST_CLOSE && (!page || !page->browser)) { owner->requested_close=true; return; }
   if (!page || !page->browser) return;
   auto browser=page->browser; auto host=browser->GetHost();
   switch (command) {
@@ -1573,6 +1576,6 @@ int Shutdown() {
 }
 const char* Error() { return last_error.c_str(); }
 void SetFinalQuitFrozen(int frozen) { final_quit_frozen=frozen!=0; }
-const neutrino_cef_api api={5,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
+const neutrino_cef_api api={6,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
 }
 extern "C" __attribute__((visibility("default"))) const neutrino_cef_api* neutrino_cef_get_api() { return &api; }

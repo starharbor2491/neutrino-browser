@@ -30,7 +30,7 @@ import NeutrinoCore
         let initialFrame = window.frame
         defer { window.setFrame(initialFrame, display: true) }
         for width in [1240,760] {
-            window.setContentSize(NSSize(width: width, height: width == 760 ? 520 : 820))
+            window.setContentSize(NSSize(width: CGFloat(width), height: width == 760 ? 520 : 820))
             try await Task.sleep(for: .milliseconds(160))
             let fits = try await web.evaluateJavaScript("document.documentElement.scrollWidth <= innerWidth && !!document.querySelector('.start-search') && document.querySelector('.start-search').getBoundingClientRect().right <= innerWidth") as? Bool
             guard fits == true else { throw ValidationError("The Rust start surface overflows the supported window size.") }
@@ -38,7 +38,7 @@ import NeutrinoCore
         }
         window.setContentSize(NSSize(width:1240,height:820))
         // Drive actual DOM buttons through WebKit and the Rust/native command bridge.
-        _ = try await web.evaluateJavaScript("document.querySelector('.start-search').click()")
+        _ = try await web.evaluateJavaScript("document.querySelector('.start-search').focus(); document.querySelector('.start-search').click()")
         try await Task.sleep(for:.milliseconds(100))
         guard (try await web.evaluateJavaScript("document.activeElement.id === 'command-input'")) as? Bool == true else { throw ValidationError("Search did not receive keyboard focus.") }
         try await action(["op":"escape"], web:web)
@@ -52,7 +52,7 @@ import NeutrinoCore
         guard model.configuration.layout.tabs == original.layout.tabs else { throw ValidationError("Editor undo was not applied before Save.") }
         for screen in ["settings","modules","extensions","library"] {
             try await action(["op":"screen","value":screen,"section":"general"],web:web)
-            guard (try await web.evaluateJavaScript("!!document.querySelector('.utility-screen')")) as? Bool == true else { throw ValidationError("The \(screen) interface did not render.") }
+            guard (try await web.evaluateJavaScript(screen == "library" ? "!!document.querySelector('.library-panel')" : "!!document.querySelector('.utility-screen')")) as? Bool == true else { throw ValidationError("The \(screen) interface did not render.") }
             await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-\(screen).png"))
             try await action(["op":"escape"],web:web)
         }

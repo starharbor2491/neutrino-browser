@@ -85,7 +85,7 @@ def build(work, arch):
         proof.checked(["codesign", "--verify", "--strict", helper])
     proof.checked(["codesign", "--force", "--sign", "-", packaged_framework])
     proof.checked(["lipo", binaries / "NeutrinoChromiumBridge.dylib", "-verify_arch", arch])
-    manifest = {"format": 2, "abi": 5, "runtimeStyle": "chromeViews", "architecture": arch, "cefVersion": proof.VERSION}
+    manifest = {"format": 2, "abi": 6, "runtimeStyle": "chromeViews", "architecture": arch, "cefVersion": proof.VERSION}
     (package / "Contents/Resources/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     proof.checked(["codesign", "--force", "--sign", "-", package])
     proof.checked(["codesign", "--verify", "--deep", "--strict", package])
@@ -115,7 +115,7 @@ def embed(package, app):
     if manifest_path.stat().st_size > 4096 or not manifest_path.is_file():
         raise ValueError("Invalid Chromium package manifest")
     manifest = json.loads(manifest_path.read_text())
-    if (manifest.get("format") != 2 or manifest.get("abi") != 5 or manifest.get("runtimeStyle") != "chromeViews" or
+    if (manifest.get("format") != 2 or manifest.get("abi") != 6 or manifest.get("runtimeStyle") != "chromeViews" or
             manifest.get("cefVersion") != proof.VERSION or manifest.get("architecture") not in proof.ARCHIVES):
         raise ValueError("Incompatible Chromium development package")
     for path in package.rglob("*"):

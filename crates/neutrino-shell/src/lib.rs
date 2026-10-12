@@ -2,6 +2,7 @@
 //! The application-owned interface. macOS supplies engine views and platform services;
 //! this crate owns presentation, interaction state, editing and workspace transforms.
 mod core;
+pub use core::request as core_request;
 mod render;
 mod state;
 pub use state::{Shell, Snapshot};
@@ -44,7 +45,7 @@ pub unsafe extern "C" fn neutrino_shell_dispatch(
             return Err("Missing shell request");
         }
         let bytes = CStr::from_ptr(input).to_bytes();
-        if bytes.len() > 2_097_152 {
+        if bytes.len() > 8_388_608 {
             return Err("Shell request is too large");
         }
         let request = serde_json::from_slice(bytes).map_err(|_| "Invalid shell request")?;

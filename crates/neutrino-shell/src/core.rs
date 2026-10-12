@@ -33,7 +33,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
             if !validate_ai(text(&r,"provider"),text(&r,"endpoint"),text(&r,"model")) {
                 return Err("Enter a model and a valid provider endpoint. Remote models require HTTPS; provider keys stay on their provider’s host.");
             }
-            json!(text(&r,"endpoint"))
+            json!(Url::parse(text(&r,"endpoint")).map_err(|_| "Invalid endpoint")?.to_string())
         }
         "blockingDomains" => json!(BLOCKED_DOMAINS),
         "blocks" => json!(!flag(&r,"topLevel") && Url::parse(text(&r,"url")).ok().and_then(|u|u.host_str().map(str::to_owned)).is_some_and(|h| BLOCKED_DOMAINS.iter().any(|d| h == *d || h.ends_with(&format!(".{d}"))))),

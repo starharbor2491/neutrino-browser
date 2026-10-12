@@ -29,8 +29,8 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
     self.model = model
   }
   public func validatedEndpoint() throws -> URL {
-    _ = try RustCore.request(["op": "validateAI", "provider": provider.rawValue, "endpoint": endpoint, "model": model])
-    guard let url = URL(string: endpoint) else { throw ValidationError("Invalid AI endpoint.") }
+    let canonical = try RustCore.request(["op": "validateAI", "provider": provider.rawValue, "endpoint": endpoint, "model": model]) as? String
+    guard let canonical, let url = URL(string: canonical) else { throw ValidationError("Invalid AI endpoint.") }
     return url
   }
 }

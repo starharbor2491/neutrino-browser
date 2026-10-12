@@ -11,9 +11,10 @@ import SwiftUI
 struct RustShellView: NSViewRepresentable {
     @ObservedObject var app: AppState
     var model: BrowserModel?
+    var downloadCenter: DownloadCenter? = nil
     var previewStep: Int? = nil
     var openWindow: ((Bool) -> Void)?
-    func makeCoordinator() -> RustShellCoordinator { RustShellCoordinator(app: app, model: model, previewStep: previewStep, openWindow: openWindow) }
+    func makeCoordinator() -> RustShellCoordinator { RustShellCoordinator(app: app, model: model, downloadCenter: downloadCenter, previewStep: previewStep, openWindow: openWindow) }
     func makeNSView(context: Context) -> RustShellContainer { context.coordinator.container }
     func updateNSView(_ view: RustShellContainer, context: Context) { context.coordinator.scheduleSync() }
     static func dismantleNSView(_ view: RustShellContainer, coordinator: RustShellCoordinator) { coordinator.stop() }
@@ -24,7 +25,7 @@ private final class RustShellHandle {
     init() { value = neutrino_shell_new()! }
     deinit { neutrino_shell_free(value) }
     func dispatch(_ request: [String: Any]) -> [String: Any] {
-        guard let data = try? JSONSerialization.data(withJSONObject: request), data.count <= 2_097_152,
+        guard let data = try? JSONSerialization.data(withJSONObject: request), data.count <= 8_388_608,
               let input = String(data: data, encoding: .utf8),
               let result = input.withCString({ neutrino_shell_dispatch(value, $0) }) else { return ["error": "The interface request could not be encoded."] }
         defer { neutrino_string_free(result) }
@@ -36,6 +37,7 @@ private final class RustShellHandle {
 final class RustShellContainer: NSView {
     let chrome: WKWebView
     var mounted: [UUID: EngineViewContainer] = [:]
+    private var dragRegions: [WindowDragRegion] = []
     override var isFlipped: Bool { true }
     init(chrome: WKWebView) {
         self.chrome = chrome
@@ -47,9 +49,28 @@ final class RustShellContainer: NSView {
         identifier = NSUserInterfaceItemIdentifier("neutrino.browserLayout")
     }
     required init?(coder: NSCoder) { fatalError("Not used") }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.titlebarAppearsTransparent = true
+        window?.titleVisibility = .hidden
+        window?.styleMask.insert(.fullSizeContentView)
+    }
+    func setDragRegions(_ rectangles: [NSRect]) {
+        dragRegions.forEach { $0.removeFromSuperview() }; dragRegions = rectangles.map { rectangle in
+            let view = WindowDragRegion(frame: rectangle.intersection(bounds)); addSubview(view); return view
+        }
+    }
     override func layout() { super.layout(); chrome.frame = bounds }
     func hidePages() { for page in mounted.values { page.isHidden = true } }
     func unmount() { for page in mounted.values { page.unmount(); page.removeFromSuperview() }; mounted.removeAll() }
+}
+
+@MainActor private final class WindowDragRegion: NSView {
+    override var isOpaque: Bool { false }
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { window?.performZoom(nil) }
+        else { window?.performDrag(with: event) }
+    }
 }
 
 @MainActor
@@ -74,10 +95,17 @@ private final class ShellAssets: NSObject, WKURLSchemeHandler {
 final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDelegate {
     let app: AppState
     let model: BrowserModel?
+    let downloadCenter: DownloadCenter?
     let container: RustShellContainer
     private let handle = RustShellHandle()
     private let assets = ShellAssets()
     private var subscriptions = Set<AnyCancellable>()
+    private var downloadObservations = Set<AnyCancellable>()
+    private weak var observedDownloads: DownloadCenter?
+    private var observedDownloadIDs: [UUID] = []
+    private var selectedNoteID: UUID?
+    private var librarySection = "bookmarks"
+    private var libraryPage = 0
     private var engineObservation: AnyCancellable?
     private var observedEngine: BrowserEngineTab?
     private var pendingSync: Task<Void, Never>?
@@ -86,6 +114,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var credentialMetadata: [[String: String]] = []
     private var ready = false
     private var stopped = false
+    private var projectedProfileID: UUID?
+    private var downloadScreenOpened = false
     private var imported = false
     private var defaultStatus = ""
     private var assistantResponse = ""
@@ -95,8 +125,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var lastSheet: BrowserSheet?
     private var lastPanel: BrowserPanel?
     private let openWindow: ((Bool) -> Void)?
-    init(app: AppState, model: BrowserModel?, previewStep: Int?, openWindow: ((Bool) -> Void)?) {
-        self.app = app; self.model = model; self.previewStep = previewStep; self.isPreview = previewStep != nil; self.openWindow = openWindow
+    init(app: AppState, model: BrowserModel?, downloadCenter: DownloadCenter?, previewStep: Int?, openWindow: ((Bool) -> Void)?) {
+        self.app = app; self.model = model; self.downloadCenter = downloadCenter; self.previewStep = previewStep; self.isPreview = previewStep != nil; self.openWindow = openWindow
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -111,6 +141,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         model?.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         DistributionManager.shared.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         ChatGPTAccount.shared.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
+        downloadCenter?.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         if let model {
             model.downloads.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
             NotificationCenter.default.publisher(for: .neutrinoFocusAddress).sink { [weak self] notification in
@@ -131,7 +162,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     func stop() {
         guard !stopped else { return }; stopped = true
-        pendingSync?.cancel(); assistantTask?.cancel(); subscriptions.removeAll(); engineObservation = nil
+        pendingSync?.cancel(); assistantTask?.cancel(); subscriptions.removeAll(); downloadObservations.removeAll(); engineObservation = nil
         container.chrome.configuration.userContentController.removeScriptMessageHandler(forName: "neutrino", contentWorld: .page)
         container.chrome.navigationDelegate = nil
         container.unmount()
@@ -145,11 +176,31 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             self.push(self.synchronize())
         }
     }
+    private func observeDownloads(_ center: DownloadCenter?) {
+        let ids = center?.items.map(\.id) ?? []
+        guard observedDownloads !== center || observedDownloadIDs != ids else { return }
+        observedDownloads = center; observedDownloadIDs = ids; downloadObservations.removeAll()
+        center?.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &downloadObservations)
+        for item in center?.items ?? [] { item.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &downloadObservations) }
+    }
     private func encoded<T: Encodable>(_ value: T) -> Any { (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)) ?? NSNull() }
     private func synchronize() -> [String: Any] {
         let update = DistributionManager.shared
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
+        if projectedProfileID != profileID {
+            projectedProfileID = profileID; assistantTask?.cancel(); assistantTask = nil
+            assistantResponse = ""; credentialMetadata = []; selectedNoteID = nil; libraryPage = 0
+        }
         let space = model?.space
+        observeDownloads(downloadCenter ?? model?.downloads)
+        let regular = model?.isPrivate != true
+        let bookmarks = regular ? app.library.bookmarks.filter { $0.profileID == profileID } : []
+        let notes = regular ? app.library.notes.filter { $0.profileID == profileID } : []
+        let history = regular ? Array(app.library.history.filter { $0.profileID == profileID }.reversed()) : []
+        let count = librarySection == "notes" ? notes.count : librarySection == "history" ? history.count : bookmarks.count
+        libraryPage = min(libraryPage, max(0, (count - 1) / 40))
+        let offset = libraryPage * 40
+        let selectedNote = notes.first { $0.id == selectedNoteID }
         var snapshot: [String: Any] = [
             "completedOnboarding": !isPreview && app.library.preferences.completedOnboarding,
             "smoke": model != nil && CommandLine.arguments.contains("--smoke-test"),
@@ -160,10 +211,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "configuration": encoded(model?.configuration ?? app.library.preferences.configuration),
             "profiles": encoded(app.library.profiles),
             "spaces": encoded((app.library.spaces ?? []).map { SpaceIdentity(id: $0.id, name: $0.name, profileID: $0.profileID) }),
-            "folders": encoded(space?.folders ?? []), "archived": encoded(space?.archivedTabs ?? []),
-            "bookmarks": encoded(model?.isPrivate == true ? [] : app.library.bookmarks.filter { $0.profileID == profileID }),
-            "history": encoded(model?.isPrivate == true ? [] : Array(app.library.history.filter { $0.profileID == profileID }.suffix(100))),
-            "notes": encoded(model?.isPrivate == true ? [] : app.library.notes.filter { $0.profileID == profileID }),
+            "folders": encoded(space?.folders ?? []), "archived": (space?.archivedTabs ?? []).prefix(200).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String(($0.url?.absoluteString ?? "").prefix(8192))] },
+            "bookmarks": bookmarks.dropFirst(librarySection == "bookmarks" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
+            "history": history.dropFirst(librarySection == "history" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
+            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100))] },
+            "selectedNote": selectedNote.map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100)), "text": String($0.text.prefix(200_000))] } as Any? ?? NSNull(),
+            "libraryPage": libraryPage, "libraryCount": count,
+            "account": ["connected": ChatGPTAccount.shared.connected, "busy": ChatGPTAccount.shared.busy, "status": ChatGPTAccount.shared.status ?? "", "models": ChatGPTAccount.shared.models],
             "notice": app.notice ?? "", "defaultStatus": defaultStatus, "imported": imported,
             "blinkAvailable": ChromiumRuntime.shared.isInstalled(in: app.dataDirectory),
             "assistantResponse": assistantResponse, "assistantBusy": assistantTask != nil,
@@ -172,7 +226,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "modules": app.installedModules.map { ["id": $0.id, "name": $0.manifest.name, "description": $0.manifest.summary, "enabled": $0.enabled] as [String: Any] },
         ]
         if let model, !model.isClosed {
-            snapshot["session"] = encoded(model.session)
+            var projectedSession = model.session
+            for i in projectedSession.tabs.indices {
+                projectedSession.tabs[i].chromiumPages = nil
+                projectedSession.tabs[i].title = String(projectedSession.tabs[i].title.prefix(512))
+                if let url = projectedSession.tabs[i].url, url.absoluteString.utf8.count > 8192 { projectedSession.tabs[i].url = nil }
+                if (projectedSession.tabs[i].faviconDataURL?.utf8.count ?? 0) > 12_000 { projectedSession.tabs[i].faviconDataURL = nil }
+            }
+            snapshot["session"] = encoded(projectedSession)
             let tab = model.activeWebTab
             snapshot["loading"] = tab.loading
             if let error = tab.errorMessage { snapshot["pageError"] = error }
@@ -184,11 +245,15 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 engineObservation = tab.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }
             }
         }
+        if let center = downloadCenter {
+            snapshot["downloads"] = center.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
+        }
         var result = handle.dispatch(["op": "sync", "snapshot": snapshot])
+        if downloadCenter != nil && !downloadScreenOpened { downloadScreenOpened = true; result = handle.dispatch(["op": "screen", "value": "library", "section": "downloads"]) }
         if let step = previewStep { result = handle.dispatch(["op": "setup-step", "value": step]); previewStep = nil }
         if let sheet = model?.sheet, sheet != lastSheet {
             lastSheet = sheet
-            let screen: String = switch sheet { case .customize: "editor"; case .modules: "modules"; case .extensions: "extensions"; case .assistant: "assistant"; default: "settings" }
+            let screen: String = switch sheet { case .customize: "editor"; case .modules: "modules"; case .extensions: "extensions"; case .assistant: "assistant"; case .recovery: "recovery"; default: "settings" }
             result = handle.dispatch(["op": "screen", "value": screen, "section": sheet == .engines ? "updates" : "general"])
         }
         if model?.sheet == nil { lastSheet = nil }
@@ -210,7 +275,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         if result["overlay"] as? Bool == true { container.hidePages() }
         container.chrome.evaluateJavaScript("window.neutrino.receive(\(json))", completionHandler: nil)
     }
-    private func sendAction(_ request: [String: Any]) { push(stamped(handle.dispatch(request))) }
+    private func sendAction(_ request: [String: Any]) {
+        let result = handle.dispatch(request)
+        if let commands = result["commands"] as? [[String: Any]], !commands.isEmpty { for command in commands { perform(command) }; push(synchronize()) }
+        else { push(stamped(result)) }
+    }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard !stopped, message.webView === container.chrome, message.frameInfo.isMainFrame,
@@ -224,9 +293,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "zoom": container.window?.performZoom(nil); replyHandler([:], nil)
         case "action":
             guard let request = body["request"] as? [String: Any] else { replyHandler(nil, "Invalid action"); return }
-            if request["op"] as? String == "section", request["value"] as? String == "passwords" {
+            if downloadCenter != nil && request["op"] as? String == "escape" { container.window?.performClose(nil); replyHandler([:], nil); return }
+            if (request["op"] as? String == "section" && request["value"] as? String == "passwords") || (request["op"] as? String == "screen" && request["section"] as? String == "passwords") {
                 let profileID = model?.session.profileID ?? app.library.profiles[0].id
-                credentialMetadata = ((try? LocalCredential.list(profile: profileID)) ?? []).map { ["id": $0.id, "origin": $0.origin, "username": $0.username] }
+                refreshCredentialMetadata(profileID: profileID)
                 _ = synchronize()
             }
             if request["op"] as? String == "escape" || request["op"] as? String == "screen" {
@@ -242,7 +312,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         }
     }
     private func updateGeometry(_ body: [String: Any]) {
-        guard ready, !showingOverlay, body["generation"] as? Int == renderGeneration, let model, !model.isClosed, body["overlay"] as? Bool == false,
+        guard ready, body["generation"] as? Int == renderGeneration else { return }
+        if let rectangles = body["dragRegions"] as? [[String: Double]], rectangles.count <= 10 {
+            container.setDragRegions(rectangles.compactMap { r in
+                guard let x=r["x"], let y=r["y"], let width=r["width"], let height=r["height"], [x,y,width,height].allSatisfy(\.isFinite), width>0, height>0, height<=48 else { return nil }
+                return NSRect(x:x,y:y,width:width,height:height)
+            })
+        }
+        guard !showingOverlay, let model, !model.isClosed, body["overlay"] as? Bool == false,
               let pages = body["pages"] as? [[String: Any]], pages.count <= 2 else { container.hidePages(); return }
         var visible = Set<UUID>()
         let allowed = model.session.split.map { Set([$0.first, $0.second]) } ?? Set([model.session.selectedTabID])
@@ -364,8 +441,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "newWindow": openWindow?(false)
         case "privateWindow": openWindow?(true)
         case "downloadCancel", "downloadReveal", "downloadOpen":
-            guard let model, let item = model.downloads.items.first(where: { $0.id == id }) else { return }
-            if operation == "downloadCancel" { model.downloads.cancel(item) }
+            guard let center = downloadCenter ?? model?.downloads, let item = center.items.first(where: { $0.id == id }) else { return }
+            if operation == "downloadCancel" { center.cancel(item) }
             else if let url = item.destination, !item.active { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         case "toggleModule":
             if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.toggleModule(module) }
@@ -379,43 +456,87 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             sendAction(["op": "screen", "value": "browse"])
         case "useWebKit": if let model { model.reopenTab(model.session.selectedTabID, with: .webkit) }
         case "find": model?.activeWebTab.find(command["value"] as? String ?? "", backwards: command["backwards"] as? Bool == true)
-        case "createNote": app.perform { _ = try app.createModuleNote(profileID: profileID) }
+        case "projectLibrary":
+            if let section = command["section"] as? String { librarySection = section; libraryPage = 0 }
+        case "libraryPage":
+            libraryPage = max(0, min(100_000, (command["value"] as? String).flatMap(Int.init) ?? 0))
+        case "selectNote":
+            if model?.isPrivate != true, app.library.notes.contains(where: { $0.id == id && $0.profileID == profileID }) { selectedNoteID = id }
+        case "createNote":
+            guard model?.isPrivate != true else { return }
+            app.perform { selectedNoteID = try app.createModuleNote(profileID: profileID) }
         case "saveNote":
-            guard let id, let index = app.library.notes.firstIndex(where: { $0.id == id && $0.profileID == profileID }),
-                  let value = command["value"] as? [String: String], let content = value["text"] else { return }
-            if value["field"] == "title" { app.library.notes[index].title = String(content.prefix(200)) }
-            if value["field"] == "body" { app.library.notes[index].text = String(content.prefix(100_000)) }
-        case "deleteNote": if let id { app.library.notes.removeAll { $0.id == id && $0.profileID == profileID } }
+            guard model?.isPrivate != true, let id,
+                  let value = command["value"] as? [String: String], let content = value["text"], let field = value["field"] else { return }
+            app.perform { try app.updateModuleNote(id: id, profileID: profileID, field: field == "body" ? "text" : field, value: content) }
+        case "deleteNote":
+            guard model?.isPrivate != true, let id else { return }
+            app.perform { try app.deleteModuleNote(id: id, profileID: profileID) }
+            if selectedNoteID == id { selectedNoteID = nil }
         case "credentialFill":
             guard let model, let key = command["id"] as? String else { return }
             Task { @MainActor in
                 do {
-                    guard let credential = try LocalCredential.list(profile: profileID).first(where: { $0.id == key }), model.session.profileID == profileID else { return }
+                    guard let data = try SecureVault.get(account: key, service: LocalCredential.service(profileID)), model.session.profileID == profileID else { return }
+                    let credential = try JSONDecoder().decode(LocalCredential.self, from: data)
                     try await model.activeWebTab.fillCredential(credential); app.notice = "Login filled on the matching website."
                 } catch { app.notice = error.localizedDescription }
+            }
+        case "saveCredential":
+            do {
+                guard model?.isPrivate != true, let origin = command["origin"] as? String, let url = URL(string: origin),
+                      let username = command["username"] as? String, let password = command["password"] as? String else { return }
+                let credential = LocalCredential(origin: try LocalCredential.origin(for: url), username: username, password: password)
+                try credential.save(profile: profileID); refreshCredentialMetadata(profileID: profileID); app.notice = "Login saved in Keychain."
+            } catch { app.notice = error.localizedDescription }
+        case "credentialDelete":
+            if let key = command["id"] as? String, model?.isPrivate != true {
+                app.perform { try SecureVault.delete(account: key, service: LocalCredential.service(profileID)) }
+                refreshCredentialMetadata(profileID: profileID)
             }
         case "saveAI": saveAI(command)
         case "signIn": Task { @MainActor in await ChatGPTAccount.shared.signIn(); scheduleSync() }
         case "disconnectAI": Task { @MainActor in await ChatGPTAccount.shared.disconnect(); scheduleSync() }
         case "disableAI": app.library.preferences.ai = nil
+        case "cancelAI": ChatGPTAccount.shared.cancelSignIn(); assistantTask?.cancel(); assistantTask = nil
+        case "restoreLayout": app.applyConfiguration(Configuration(), to: model?.session.spaceID); app.applyConfiguration(Configuration()); app.notice = "Default appearance restored."
+        case "resetModules": app.resetModules()
+        case "retrySave": Task { @MainActor in if await app.flush() { app.notice = "Browser data saved." } }
+        case "showDataFolder": NSWorkspace.shared.open(app.dataDirectory)
         case "assistant": askAssistant(command)
         case "reader":
             guard let model else { return }; assistantTask?.cancel()
+            let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID
             assistantTask = Task { @MainActor in
-                defer { assistantTask = nil; scheduleSync() }
-                do { assistantResponse = try await app.readerText(from: model.activeWebTab); sendAction(["op": "screen", "value": "reader"]) }
-                catch { app.notice = error.localizedDescription }
+                defer { if model.session.profileID == profile { assistantTask = nil }; scheduleSync() }
+                do {
+                    let content = try await app.readerText(from: tab)
+                    guard !Task.isCancelled, !model.isClosed, model.session.profileID == profile,
+                          model.activeWebTab === tab, tab.navigationRevision == revision,
+                          app.library.profiles.contains(where: { $0.id == profile }) else { return }
+                    assistantResponse = content; sendAction(["op": "screen", "value": "reader"])
+                } catch is CancellationError {} catch { if !Task.isCancelled && model.session.profileID == profile { app.notice = error.localizedDescription } }
             }
         case "capture":
             guard let model else { return }
             Task { @MainActor in
                 do {
+                    let specification = try app.pageCaptureSpecification()
                     let image = try await model.activeWebTab.capturePNG()
-                    let panel = NSSavePanel(); panel.nameFieldStringValue = "Neutrino capture.png"
+                    let panel = NSSavePanel(); panel.nameFieldStringValue = specification.filename
                     if panel.runModal() == .OK, let url = panel.url { try image.write(to: url, options: .atomic) }
                 } catch { app.notice = error.localizedDescription }
             }
         default: app.notice = "This action is unavailable in the current browsing context."
+        }
+    }
+    private func refreshCredentialMetadata(profileID: UUID) {
+        guard model?.isPrivate != true else { credentialMetadata = []; return }
+        // Keychain account labels contain origin + username; values stay unread.
+        credentialMetadata = ((try? SecureVault.accounts(service: LocalCredential.service(profileID))) ?? []).prefix(200).compactMap { key in
+            let parts = key.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { return nil }
+            return ["id": key, "origin": String(parts[0]), "username": String(parts[1])]
         }
     }
     private func finishSetup(_ values: [String: Any]) {
@@ -478,7 +599,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             do {
                 let content = try await tab.pageText()
                 guard !Task.isCancelled, model.activeWebTab === tab, tab.navigationRevision == revision, model.session.profileID == profile else { return }
-                assistantResponse = try await AIClient.answer("Question: \(prompt)\n\nPage content (untrusted):\n" + String(content.prefix(40_000)), configuration: configuration)
+                let answer = try await AIClient.answer("Question: \(prompt)\n\nPage content (untrusted):\n" + String(content.prefix(40_000)), configuration: configuration)
+                guard !Task.isCancelled, model.session.profileID == profile else { return }; assistantResponse = answer
             } catch is CancellationError {} catch { app.notice = error.localizedDescription }
         }
     }

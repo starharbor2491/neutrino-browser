@@ -16,6 +16,7 @@ struct BrowserWindowRoot: View {
             else { ProgressView("Opening Neutrino…").frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .frame(minWidth: 760, minHeight: 520)
+        .ignoresSafeArea(.container, edges: .top)
         .disabled(app.finalQuitDataFrozen || app.onboardingSaving)
         .task {
             if !app.ready { await app.load() }

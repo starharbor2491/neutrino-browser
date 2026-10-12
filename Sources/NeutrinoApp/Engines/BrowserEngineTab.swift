@@ -8,6 +8,19 @@ enum NativeTabCommand { case new, close, reopen, previous, next }
 /// Native browser controls observe this state; engines own their website context.
 @MainActor
 class BrowserEngineTab: NSObject, ObservableObject {
+    @Published var faviconDataURL: String?
+    private var faviconOrigin: String?
+    private var faviconTask: Task<Void, Never>?
+    func updateSiteIcon(for url: URL) {
+        let origin = url.scheme.map { $0 + "://" + (url.host ?? "") + ":" + String(url.port ?? 0) }
+        guard origin != faviconOrigin else { return }
+        faviconOrigin = origin; faviconDataURL = nil; faviconTask?.cancel()
+        faviconTask = Task { @MainActor [weak self] in
+            let icon = await SiteIcon.load(for: url)
+            guard !Task.isCancelled, let self, self.faviconOrigin == origin else { return }
+            self.faviconDataURL = icon; self.onChange?(false)
+        }
+    }
     @Published var loading = false
     @Published var progress = 0.0
     @Published var canGoBack = false
@@ -53,5 +66,5 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func capturePNG() async throws -> Data { throw ValidationError("This engine cannot capture the page.") }
     var hasActiveDownloads: Bool { false }
     func requestClose() { onClose?() }
-    func dispose() { onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil }
+    func dispose() { faviconTask?.cancel(); faviconTask = nil; onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil }
 }

@@ -42,7 +42,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/neutrino-cef-runtime
-          key: neutrino-cef154-views-5-arm64
+          key: neutrino-cef154-views-6-arm64
       - name: Test native application and portable core
         run: ./scripts/test.sh
       - name: Build pinned Blink package

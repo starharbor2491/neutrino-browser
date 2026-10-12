@@ -27,7 +27,7 @@ jobs:
       - name: Verify native integration in release configuration
         env:
           NEUTRINO_DISTRIBUTION_TEST_APP: ${{ github.workspace }}/dist/Neutrino.app
-        run: python3 scripts/native-tests.py -c release --filter 'BrowserIntegrationTests|WorkspaceIntegrationTests|ResourceModuleTests|ReaderModuleTests|BehaviorModuleTests|DistributionNativeTests|DownloadsTests|ProfilesIntegrationTests|ChromiumProfileDataTests'
+        run: python3 scripts/native-tests.py -c release --filter 'RustShellNativeTests|BrowserIntegrationTests|WorkspaceIntegrationTests|ResourceModuleTests|ReaderModuleTests|BehaviorModuleTests|DistributionNativeTests|DownloadsTests|ProfilesIntegrationTests|ChromiumProfileDataTests'
       - name: Package graphical development installer
         run: python3 scripts/package-release.py --development --allow-webkit-development
       - name: Launch packaged app and capture native screens

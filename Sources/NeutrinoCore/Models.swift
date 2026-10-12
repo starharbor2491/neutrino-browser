@@ -65,6 +65,7 @@ public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
     public var parentID: UUID?
     public var collapsed: Bool?
     public var engineID: BrowserEngineID?
+    public var faviconDataURL: String?
     public var chromiumPages: [ChromiumSessionPage]?
     public var folderID: UUID?
     public var lastUsedAt: Date?

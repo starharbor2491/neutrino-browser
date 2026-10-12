@@ -313,7 +313,7 @@ final class EngineViewContainer: NSView {
     init(page: NSView) { super.init(frame: .zero); mount(page) }
     required init?(coder: NSCoder) { fatalError("Not used") }
     func mount(_ page: NSView) {
-        guard self.page !== page else { return }
+        guard self.page !== page || page.superview !== self else { return }
         unmount()
         self.page = page
         if page.superview !== self {

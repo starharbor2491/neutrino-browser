@@ -143,6 +143,8 @@ final class BrowserModel: ObservableObject {
             }
             if let url = tab.url, AddressResolver.isWebURL(url) || url.scheme == "blob" || url.absoluteString == "about:blank" ||
                 (tab.engineID == .chromium && ["chrome", "chrome-extension"].contains(url.scheme ?? "")) {
+                if finished { tab.updateSiteIcon(for: url) }
+                self.session.tabs[index].faviconDataURL = tab.faviconDataURL
                 self.session.tabs[index].url = url
                 self.session.tabs[index].title = boundedPageTitle(tab.title ?? url.host ?? "Website")
                 if self.session.selectedTabID == id && !self.addressEditing { self.address = url.absoluteString }

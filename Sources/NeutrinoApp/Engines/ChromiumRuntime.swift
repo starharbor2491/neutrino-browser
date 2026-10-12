@@ -153,7 +153,7 @@ final class ChromiumRuntime: ObservableObject {
         library = handle
         guard let symbol = dlsym(handle, "neutrino_cef_get_api") else { throw ValidationError("This runtime has no Neutrino engine API.") }
         let getter = unsafeBitCast(symbol, to: neutrino_cef_get_api_function.self)
-        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 5 else {
+        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 6 else {
             throw ValidationError("This runtime uses an incompatible Neutrino engine API.")
         }
         let loadedAPI = pointer.pointee
@@ -224,7 +224,7 @@ private enum ChromiumPackage {
         #else
         let architecture = "x86_64"
         #endif
-        guard manifest.format == 2, manifest.abi == 5, manifest.runtimeStyle == "chromeViews",
+        guard manifest.format == 2, manifest.abi == 6, manifest.runtimeStyle == "chromeViews",
               manifest.architecture == architecture, manifest.cefVersion == ChromiumRuntime.cefVersion else {
             throw ValidationError("This Chromium package is incompatible with this Neutrino build or Mac architecture.")
         }
