@@ -75,7 +75,10 @@ final class ResourceWorker: ObservableObject {
         generation = UUID(); watchdog?.cancel(); watchdog = nil; frame = nil
         try? input?.fileHandleForWriting.close()
         if let process, process.isRunning {
-            process.terminate()
+            // Signal the owned process without resuming a paused worker. Foundation
+            // may also send SIGCONT; the deadline below handles workers that
+            // cannot process SIGTERM.
+            kill(process.processIdentifier, SIGTERM)
             let deadline = DispatchWorkItem { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.25, execute: deadline)
             // Foundation's waitUntilExit does not consistently service the main

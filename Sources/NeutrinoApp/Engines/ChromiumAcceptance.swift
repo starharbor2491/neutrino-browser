@@ -129,7 +129,16 @@ enum ChromiumAcceptance {
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("Creating and closing a tab replaced the existing document.") }
         page.focus()
         try key("l", code: 37, modifiers: .command, window: page.chromeWindow!)
-        try await wait { ownerWindow.isKeyWindow && ownerWindow.firstResponder is NSTextView }
+        let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
+        let addressDeadline = ContinuousClock.now.advanced(by:.seconds(15))
+        while true {
+            let responder = ownerWindow.firstResponder as? NSView
+            let nativeFocus = ownerWindow.isKeyWindow && (responder === shell || responder?.isDescendant(of:shell) == true)
+            let addressFocus = (try await shell.evaluateJavaScript("document.activeElement?.id === 'command-input'")) as? Bool == true
+            if nativeFocus && addressFocus { break }
+            guard ContinuousClock.now < addressDeadline else { throw ValidationError("Command-L did not focus Neutrino’s address field in its native Rust shell.") }
+            try await Task.sleep(for:.milliseconds(50))
+        }
         guard !page.hasNativeNavigationChrome else { throw ValidationError("Chrome's native toolbar remains active.") }
         func performMenuItem(_ title: String, in menu: NSMenu) -> Bool {
             menu.update()

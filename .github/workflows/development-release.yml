@@ -132,6 +132,7 @@ jobs:
           (root / 'RELEASE.md').write_text(
               'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
+              'This preview replaces the old SwiftUI browser screens with a Rust-rendered interface: custom controls, draggable tabs, a live docking editor, command search, and seven-step setup. The supplied SVG is now the app icon. SQLite storage and bookmark import/export also run in Rust.\n\n'
               'Automatic updates download from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
               'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
