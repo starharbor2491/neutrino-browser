@@ -156,10 +156,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             var eventWindow = event.window
             while let window = eventWindow {
                 windowIDs.append(ObjectIdentifier(window))
-                if !mouseDown { break }; eventWindow = window.parent
+                eventWindow = window.parent
             }
             let ownedWindowIDs = windowIDs
             let screenPoint = mouseDown ? event.window?.convertPoint(toScreen:event.locationInWindow) : nil
+            let originWindowID = event.window.map(ObjectIdentifier.init)
+            let escape = event.type == .keyDown && event.keyCode == 53
             let closeTab = event.type == .keyDown && event.charactersIgnoringModifiers?.lowercased() == "w" &&
                 event.modifierFlags.intersection([.command,.shift,.option,.control]) == .command
             let blocked = MainActor.assumeIsolated {
@@ -172,6 +174,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                     }
                     return false
                 }
+                if escape, self.ready, self.model?.focusMode == true, window.attachedSheet==nil, NSApp.modalWindow==nil {
+                    self.sendAction(["op":"escape"]); return true
+                }
+                guard originWindowID==ObjectIdentifier(window) else { return false }
                 if !self.editingEngines.isEmpty,
                    let responder = self.container.window?.firstResponder as? NSView,
                    self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) {

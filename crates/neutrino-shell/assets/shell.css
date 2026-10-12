@@ -5021,3 +5021,5 @@ h2 {
 .setup-scene .mini-rail { font-size:13px; }
 .setup-scene .mini-address,.setup-scene .mini-search { font-size:11px; }
 .setup-scene .mini-page h2 { margin-top:28px; }
+
+.app-shell .tab-row:hover .tab-menu,.app-shell .tab-row:focus-within .tab-menu { display:grid; opacity:1; }

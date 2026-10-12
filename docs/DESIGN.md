@@ -1,6 +1,6 @@
 # Neutrino interface
 
-The default uses a warm rose workspace, a quiet sidebar, persistent pins/folders, and a rounded page area. Arc informs the composition and keyboard flow; Vivaldi/Shift inform customization, and Helium/Safari inform restraint. The supplied Neutrino SVG is used unchanged.
+The default uses charcoal surfaces, violet selection, a compact sidebar, persistent pins/folders, and a framed page area. Arc informs the composition and keyboard flow; Vivaldi/Shift inform customization, and Helium/Safari inform restraint. The supplied Neutrino SVG is used unchanged.
 
 Rust renders custom buttons, segmented choices, switches, menus, tab rows, the command palette, setup, settings, and the editor. Native file pickers, Keychain, default-browser approval, and website permission dialogs retain macOS behavior. See [the implementation boundary](RUST_ARCHITECTURE.md).
 

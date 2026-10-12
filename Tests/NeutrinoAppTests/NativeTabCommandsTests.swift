@@ -138,8 +138,8 @@ extension NativeIntegrationTests.BrowserIntegrationTests {
         #expect(dictation.target === NSApp && emoji.target == nil)
         let originals = menu.items.prefix(2).flatMap { $0.submenu?.items ?? [] }
         let owned = originals.filter { $0.target === commands }
-        #expect(owned.count == 6)
-        #expect(Set(owned.compactMap { $0.identifier?.rawValue }).count == 6)
+        #expect(owned.count == 7)
+        #expect(Set(owned.compactMap { $0.identifier?.rawValue }).count == 7)
         #expect(owned.allSatisfy { $0.action != nil })
         commands.install(in: menu)
         #expect(menu.items.prefix(2).flatMap { $0.submenu?.items ?? [] } == originals)
@@ -150,8 +150,8 @@ extension NativeIntegrationTests.BrowserIntegrationTests {
         let restored = replacement.items.flatMap { $0.submenu?.items ?? [] }.filter { $0.target === commands }
         #expect(restored == owned)
         #expect(menu.items.prefix(2).flatMap { $0.submenu?.items ?? [] }.allSatisfy { $0.target !== commands })
-        #expect(restored.map(\.keyEquivalent) == ["t", "t", "w", "l", "[", "]"])
-        #expect(restored.map(\.keyEquivalentModifierMask) == [.command, [.command, .shift], .command, .command, [.command, .shift], [.command, .shift]])
+        #expect(restored.map(\.keyEquivalent) == ["t", "t", "w", "l", "k", "[", "]"])
+        #expect(restored.map(\.keyEquivalentModifierMask) == [.command, [.command, .shift], .command, .command, .command, [.command, .shift], [.command, .shift]])
     }
 
     private func focusCommandWindow(_ window: NSWindow) async throws {

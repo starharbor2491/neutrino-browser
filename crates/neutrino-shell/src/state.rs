@@ -650,7 +650,10 @@ impl Shell {
                     {
                         commands
                             .push(json!({"op":action,"id":request["id"],"value":request["value"]}));
-                        if action=="toggleFocus" { self.screen="browse".into();self.menu.clear(); }
+                        if action == "toggleFocus" {
+                            self.screen = "browse".into();
+                            self.menu.clear();
+                        }
                         if action == "deleteNote" || action == "credentialDelete" {
                             self.menu.clear();
                         }
@@ -693,7 +696,7 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","library","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
     }
     pub fn modal_menu(&self) -> bool {
         ["discard-editor", "clear-history", "reset-modules"].contains(&self.menu.as_str())
