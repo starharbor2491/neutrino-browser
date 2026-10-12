@@ -93,7 +93,19 @@ final class NativeTabCommands: NSObject, NSMenuItemValidation {
     @objc private func performTabCommand(_ sender: NSMenuItem) {
         guard validateMenuItem(sender), let command = command(for: sender) else { return }
         if let tab = ChromiumRuntime.shared.focusedNativeTab, tab.performNativeTabCommand(command) { return }
-        focusedBrowser?.performTabCommand(command)
+        guard let browser = focusedBrowser else { return }
+        if let action = browser.shellAction {
+            switch command {
+            case .new: action(["op":"newTab"])
+            case .reopen: action(["op":"reopenTab"])
+            case .close: action(["op":"closeTab","id":browser.session.selectedTabID.uuidString])
+            case .previous, .next:
+                let tabs = browser.session.tabs
+                guard let index = tabs.firstIndex(where: { $0.id == browser.session.selectedTabID }), !tabs.isEmpty else { return }
+                let next = (index + (command == .next ? 1 : tabs.count - 1)) % tabs.count
+                action(["op":"selectTab","id":tabs[next].id.uuidString])
+            }
+        } else { browser.performTabCommand(command) }
     }
 
     @objc private func openLocation(_ sender: NSMenuItem) {

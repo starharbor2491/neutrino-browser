@@ -80,7 +80,8 @@ impl Shell {
     }
     pub fn config(&self) -> &Value {
         self.draft
-            .as_ref().filter(|_| self.screen == "editor")
+            .as_ref()
+            .filter(|_| self.screen == "editor")
             .unwrap_or(&self.snapshot["configuration"])
     }
     pub fn private(&self) -> bool {
@@ -92,14 +93,20 @@ impl Shell {
     pub fn dispatch(&mut self, request: Value) -> Value {
         let op = text(&request, "op");
         // Every route out of editing shares the same save/discard boundary.
-        if self.screen == "editor" && !["sync", "escape", "menu", "dock"].contains(&op)
-            && !op.starts_with("editor-") && op != "name" {
+        if self.screen == "editor"
+            && !["sync", "escape", "menu", "dock"].contains(&op)
+            && !op.starts_with("editor-")
+            && op != "name"
+        {
             if self.draft.as_ref() != Some(&self.snapshot["configuration"]) {
                 self.pending_exit = Some(request);
                 self.menu = "discard-editor".into();
                 return self.response(vec![]);
             }
             self.close_screen();
+        }
+        if flag(&self.snapshot,"downloadsWindow") && op != "sync" && op != "escape" && !(op == "native" && ["downloadCancel","downloadReveal","downloadOpen"].contains(&text(&request,"action"))) {
+            return self.response(vec![]);
         }
         let mut commands: Vec<Value> = vec![];
         if op != "sync" {
@@ -108,6 +115,7 @@ impl Shell {
         if op == "sync" {
             let previous = self.snapshot["session"]["spaceID"].clone();
             self.snapshot = request["snapshot"].clone();
+            if flag(&self.snapshot,"downloadsWindow") { self.screen="library".into(); self.section="downloads".into(); }
             if previous != self.snapshot["session"]["spaceID"] {
                 self.tab_undo.clear();
                 self.menu.clear();
@@ -120,7 +128,7 @@ impl Shell {
             self.notice = "Neutrino is saving before closing.".into();
         } else {
             match op {
-                "noop" => {},
+                "noop" => {}
                 "palette" => {
                     self.palette = true;
                     self.menu.clear();
@@ -142,6 +150,9 @@ impl Shell {
                     if self.palette {
                         self.palette = false;
                     } else if !self.menu.is_empty() {
+                        if self.menu == "discard-editor" {
+                            self.pending_exit = None;
+                        }
                         self.menu.clear();
                     } else if self.screen == "editor"
                         && self.draft.as_ref() != Some(&self.snapshot["configuration"])
@@ -177,13 +188,17 @@ impl Shell {
                         }
                         if let Some(section) = request["section"].as_str() {
                             self.section = section.into();
-                            if screen == "library" { commands.push(json!({"op":"projectLibrary","section":section})); }
+                            if screen == "library" {
+                                commands.push(json!({"op":"projectLibrary","section":section}));
+                            }
                         }
                     }
                 }
                 "section" => {
                     self.section = bound(text(&request, "value"), 40);
-                    if self.screen == "library" { commands.push(json!({"op":"projectLibrary","section":self.section})); }
+                    if self.screen == "library" {
+                        commands.push(json!({"op":"projectLibrary","section":self.section}));
+                    }
                 }
                 "menu" => {
                     self.menu = bound(text(&request, "value"), 9000);
@@ -310,7 +325,9 @@ impl Shell {
                     .contains(&key)
                     {
                         self.setup[key] = json!(bound(text(&request, "value"), 80));
-                        if self.invalid_field == key { self.invalid_field.clear(); }
+                        if self.invalid_field == key {
+                            self.invalid_field.clear();
+                        }
                     } else if ["blockTrackers", "blockPopups", "restoreSession"].contains(&key) {
                         if let Some(v) = request["value"].as_bool() {
                             self.setup[key] = json!(v);
@@ -322,7 +339,12 @@ impl Shell {
                         && (text(&self.setup, "profile").is_empty()
                             || text(&self.setup, "space").is_empty())
                     {
-                        self.invalid_field = if text(&self.setup,"profile").is_empty(){"profile"}else{"space"}.into();
+                        self.invalid_field = if text(&self.setup, "profile").is_empty() {
+                            "profile"
+                        } else {
+                            "space"
+                        }
+                        .into();
                     } else {
                         self.step = (self.step + 1).min(6);
                     }
@@ -334,7 +356,8 @@ impl Shell {
                     self.step = (request["value"].as_u64().unwrap_or(0) as usize).min(6);
                 }
                 "setup-finish" => {
-                    if self.step == 6 && !self.setup_busy
+                    if self.step == 6
+                        && !self.setup_busy
                         && !text(&self.setup, "profile").is_empty()
                         && !text(&self.setup, "space").is_empty()
                     {
@@ -359,12 +382,16 @@ impl Shell {
                 "dock" => self.dock(&request),
                 "editor-undo" => {
                     if let Some(value) = self.undo.pop() {
-                        if let Some(current) = self.draft.replace(value) { self.redo.push(current); }
+                        if let Some(current) = self.draft.replace(value) {
+                            self.redo.push(current);
+                        }
                     }
                 }
                 "editor-redo" => {
                     if let Some(value) = self.redo.pop() {
-                        if let Some(current) = self.draft.replace(value) { self.undo.push(current); }
+                        if let Some(current) = self.draft.replace(value) {
+                            self.undo.push(current);
+                        }
                     }
                 }
                 "editor-reset" => {
@@ -374,12 +401,19 @@ impl Shell {
                 "editor-cancel" => {
                     let pending = self.pending_exit.take();
                     self.close_screen();
-                    if let Some(pending) = pending { return self.dispatch(pending); }
+                    if let Some(pending) = pending {
+                        return self.dispatch(pending);
+                    }
                 }
                 "editor-save" => {
                     if let Some(config) = self.draft.take() {
+                        let pending = self.pending_exit.take();
                         commands.push(json!({"op":"applyConfiguration","configuration":config,"space":self.apply_space}));
                         self.close_screen();
+                        if let Some(pending) = pending {
+                            let next = self.dispatch(pending);
+                            commands.extend(array(&next["commands"]).iter().cloned());
+                        }
                         self.notice = "Appearance saved.".into();
                     }
                 }
@@ -411,7 +445,8 @@ impl Shell {
                 | "unsplit" | "checkUpdates" | "restartUpdate" | "cancelUpdate" | "newWindow"
                 | "privateWindow" | "importModule" | "installExtension" | "webStore" | "reader"
                 | "capture" | "exportBookmarks" | "clearHistory" | "signIn" | "disconnectAI"
-                | "disableAI" | "cancelAI" | "restoreLayout" | "resetModules" | "retrySave" | "showDataFolder" => {
+                | "disableAI" | "cancelAI" | "restoreLayout" | "resetModules" | "retrySave"
+                | "showDataFolder" => {
                     commands.push(json!({"op":op}));
                     self.menu.clear();
                 }
@@ -419,10 +454,22 @@ impl Shell {
                     commands.push(json!({"op":"find","value":bound(text(&request,"value"),1024),"backwards":flag(&request,"backwards")}));
                 }
                 "saveCredential" => {
-                    let origin = text(&request,"origin"); let username = text(&request,"username"); let password = text(&request,"password");
-                    if !self.private() && resolve_address(origin,"").is_some_and(|v|v.starts_with("https://")||v.starts_with("http://")) && origin.contains("://") && username.chars().count()<=500 && !username.contains('\n') && !password.is_empty() && password.len()<=8192 {
+                    let origin = text(&request, "origin");
+                    let username = text(&request, "username");
+                    let password = text(&request, "password");
+                    if !self.private()
+                        && resolve_address(origin, "")
+                            .is_some_and(|v| v.starts_with("https://") || v.starts_with("http://"))
+                        && origin.contains("://")
+                        && username.chars().count() <= 500
+                        && !username.contains('\n')
+                        && !password.is_empty()
+                        && password.len() <= 8192
+                    {
                         commands.push(json!({"op":"saveCredential","origin":origin,"username":username,"password":password}));
-                    } else {self.notice="Enter a website URL, username and password.".into();}
+                    } else {
+                        self.notice = "Enter a website URL, username and password.".into();
+                    }
                 }
                 "saveAI" => {
                     // Keys pass directly to Keychain; never retain them in shell state or HTML.
@@ -463,12 +510,18 @@ impl Shell {
                         "selectNote",
                         "libraryPage",
                         "useWebKit",
+                        "reloadTab",
                     ]
-                    .contains(&action) && !(self.private() && ["saveNote","deleteNote","createNote","credentialDelete"].contains(&action))
+                    .contains(&action)
+                        && !(self.private()
+                            && ["saveNote", "deleteNote", "createNote", "credentialDelete"]
+                                .contains(&action))
                     {
                         commands
                             .push(json!({"op":action,"id":request["id"],"value":request["value"]}));
-                        if action == "deleteNote" || action == "credentialDelete" { self.menu.clear(); }
+                        if action == "deleteNote" || action == "credentialDelete" {
+                            self.menu.clear();
+                        }
                     }
                 }
                 _ => {
@@ -479,7 +532,7 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"announce":self.notice,"overlay":self.onboarding() || self.palette || !["browse","library"].contains(&self.screen.as_str()) || !self.menu.is_empty(),"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { "" }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"overlay":self.onboarding() || self.palette || !["browse","library"].contains(&self.screen.as_str()) || !self.menu.is_empty(),"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { "" }})
     }
     fn close_screen(&mut self) {
         self.screen = "browse".into();
@@ -652,7 +705,13 @@ impl Shell {
         out
     }
 }
-fn return_focus(field: &str) -> &str { if field == "profile" { "setup-profile" } else { "setup-space" } }
+fn return_focus(field: &str) -> &str {
+    if field == "profile" {
+        "setup-profile"
+    } else {
+        "setup-space"
+    }
+}
 pub fn default_configuration() -> Value {
     json!({"theme":{"design":"native","accent":"rose","colorMode":"system","density":"comfortable","cornerRadius":12,"transparency":false,"reducedMotion":false,"iconStyle":"outline"},"layout":{"tabs":"leading","navigation":"top","sidebar":"leading","sidebarWidth":260,"bookmarksBar":false,"statusBar":false,"tabsWidth":240}})
 }
@@ -701,7 +760,12 @@ pub fn resolve_address(input: &str, search: &str) -> Option<String> {
     Some(u.to_string().replace('+', "%20"))
 }
 pub fn validate_ai(provider: &str, endpoint: &str, model: &str) -> bool {
-    if endpoint.contains('\\') || endpoint.chars().any(char::is_control) || endpoint.trim() != endpoint { return false; }
+    if endpoint.contains('\\')
+        || endpoint.chars().any(char::is_control)
+        || endpoint.trim() != endpoint
+    {
+        return false;
+    }
     let Ok(url) = Url::parse(endpoint) else {
         return false;
     };

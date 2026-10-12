@@ -2,6 +2,7 @@
 //! The application-owned interface. macOS supplies engine views and platform services;
 //! this crate owns presentation, interaction state, editing and workspace transforms.
 mod core;
+mod storage;
 pub use core::request as core_request;
 mod render;
 mod state;

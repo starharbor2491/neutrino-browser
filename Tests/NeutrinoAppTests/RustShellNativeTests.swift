@@ -29,6 +29,23 @@ extension NativeIntegrationTests {
       #expect(app.library.notes.first?.text == "Kept after Escape")
       #expect((try await web.evaluateJavaScript("!document.querySelector('.library-panel')")) as? Bool == true)
     }
+    @Test func auxiliaryDownloadsNeverProjectTheDefaultLibrary() async throws {
+      _ = NSApplication.shared
+      let directory=FileManager.default.temporaryDirectory.appendingPathComponent("NeutrinoDownloadsScope-"+UUID().uuidString)
+      let app=AppState(directory:directory);await app.load()
+      app.library.preferences.completedOnboarding=true
+      app.library.notes=[Note(profileID:app.library.profiles[0].id,title:"Private sentinel",text:"must never appear")]
+      let center=DownloadCenter()
+      let coordinator=RustShellCoordinator(app:app,model:nil,downloadCenter:center,previewStep:nil,openWindow:nil)
+      let window=NSWindow(contentRect:NSRect(x:0,y:0,width:760,height:520),styleMask:[.titled],backing:.buffered,defer:false)
+      window.contentView=coordinator.container;window.makeKeyAndOrderFront(nil)
+      defer {coordinator.stop();window.orderOut(nil);try? FileManager.default.removeItem(at:directory)}
+      let web=try await RustShellAcceptance.waitForShell(in:window)
+      try await RustShellAcceptance.action(["op":"section","value":"notes"],web:web)
+      try await RustShellAcceptance.action(["op":"native","action":"createNote"],web:web)
+      #expect(app.library.notes.count==1)
+      #expect((try await web.evaluateJavaScript("!!document.querySelector('.downloads-window') && !document.body.innerText.includes('Private sentinel') && !document.querySelector('.library-tabs')")) as? Bool == true)
+    }
     @Test func cachedContainerReparentsALiveViewAfterRoundTrip() {
       let page = NSView(frame:NSRect(x:0,y:0,width:400,height:300))
       let first = EngineViewContainer(page:page)

@@ -259,15 +259,21 @@ enum AppSmokeTest {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1100, height: 780), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
+        let view = NSHostingView(rootView: OnboardingView(previewStep: 0).environmentObject(app))
+        window.contentView = view; window.makeKeyAndOrderFront(nil)
+        let web = try await RustShellAcceptance.waitForShell(in:window)
+        var previous: Data?
         for step in 0..<7 {
-            let view = NSHostingView(rootView: OnboardingView(previewStep: step).environmentObject(app))
-            window.contentView = view; window.makeKeyAndOrderFront(nil)
-            try await Task.sleep(for: .milliseconds(600))
-            view.layoutSubtreeIfNeeded()
-            try capture(view, to: output.appendingPathComponent("Neutrino-setup-\(step + 1).png"))
+            if step > 0 { try await RustShellAcceptance.action(["op":"setup-next"],web:web) }
+            guard (try await web.evaluateJavaScript("!!document.querySelector('.onboarding.step-\(step)')")) as? Bool == true else { throw ValidationError("Setup did not render step \(step+1).") }
+            // WebKit renders out of process; NSView.cacheDisplay produces black frames.
+            let image = try await web.takeSnapshot(with:nil)
+            guard let tiff=image.tiffRepresentation, let bitmap=NSBitmapImageRep(data:tiff), let png=bitmap.representation(using:.png,properties:[:]), png.count>1000, png != previous else { throw ValidationError("Setup capture did not change between steps.") }
+            try png.write(to:output.appendingPathComponent("Neutrino-setup-\(step+1).png")); previous=png
         }
-        trace("Captured all guided setup screens; interactive completion still requires manual acceptance")
+        trace("Captured seven distinct native WebKit setup screens")
     }
+
     private static func capture(_ view: NSView, to url: URL) throws {
         guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw ValidationError("Cannot capture \(url.lastPathComponent).") }
         view.cacheDisplay(in: view.bounds, to: image)

@@ -106,8 +106,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var selectedNoteID: UUID?
     private var librarySection = "bookmarks"
     private var libraryPage = 0
-    private var engineObservation: AnyCancellable?
-    private var observedEngine: BrowserEngineTab?
+    private var engineObservations = Set<AnyCancellable>()
+    private var observedEngines = Set<ObjectIdentifier>()
+    private var responseDocument: String?
     private var pendingSync: Task<Void, Never>?
     private var renderGeneration = 0
     private var showingOverlay = true
@@ -120,6 +121,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var defaultStatus = ""
     private var assistantResponse = ""
     private var assistantTask: Task<Void, Never>?
+    private var assistantGeneration = UUID()
     private var previewStep: Int?
     private let isPreview: Bool
     private var lastSheet: BrowserSheet?
@@ -158,11 +160,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 self?.openWindow?(notification.userInfo?["private"] as? Bool == true)
             }.store(in: &subscriptions)
         }
+        model?.shellAction = { [weak self] request in self?.sendAction(request) }
         chrome.load(URLRequest(url: URL(string: "neutrino-ui://shell/index.html")!))
     }
     func stop() {
         guard !stopped else { return }; stopped = true
-        pendingSync?.cancel(); assistantTask?.cancel(); subscriptions.removeAll(); downloadObservations.removeAll(); engineObservation = nil
+        pendingSync?.cancel(); assistantTask?.cancel(); model?.shellAction = nil; subscriptions.removeAll(); downloadObservations.removeAll(); engineObservations.removeAll(); observedEngines.removeAll()
         container.chrome.configuration.userContentController.removeScriptMessageHandler(forName: "neutrino", contentWorld: .page)
         container.chrome.navigationDelegate = nil
         container.unmount()
@@ -185,10 +188,19 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func encoded<T: Encodable>(_ value: T) -> Any { (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)) ?? NSNull() }
     private func synchronize() -> [String: Any] {
+        if let center = downloadCenter {
+            // Auxiliary windows receive only their own download capability. They
+            // must not inherit the default Profile when no BrowserModel exists.
+            observeDownloads(center)
+            let snapshot: [String: Any] = ["downloadsWindow":true,"completedOnboarding":true,
+                "frozen":app.finalQuitDataFrozen,"private":true,
+                "downloads":center.items.map { ["id":$0.id.uuidString,"name":$0.name,"status":$0.status,"complete":!$0.active && $0.destination != nil] as [String:Any] }]
+            return stamped(handle.dispatch(["op":"sync","snapshot":snapshot]))
+        }
         let update = DistributionManager.shared
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         if projectedProfileID != profileID {
-            projectedProfileID = profileID; assistantTask?.cancel(); assistantTask = nil
+            projectedProfileID = profileID; assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
             assistantResponse = ""; credentialMetadata = []; selectedNoteID = nil; libraryPage = 0
         }
         let space = model?.space
@@ -236,14 +248,20 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             snapshot["session"] = encoded(projectedSession)
             let tab = model.activeWebTab
             snapshot["loading"] = tab.loading
+            snapshot["pageErrors"] = model.pageErrors
             if let error = tab.errorMessage { snapshot["pageError"] = error }
             snapshot["downloads"] = model.downloads.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
             // Only account identity is projected. Password values never enter the UI snapshot.
             snapshot["credentials"] = credentialMetadata
-            if observedEngine !== tab {
-                observedEngine = tab
-                engineObservation = tab.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }
+            let engines = model.visibleEngineTabs
+            let identities = Set(engines.map(ObjectIdentifier.init))
+            if observedEngines != identities {
+                observedEngines = identities; engineObservations.removeAll()
+                for engine in engines { engine.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in:&engineObservations) }
             }
+            let document = model.session.selectedTabID.uuidString + ":" + tab.navigationRevision.uuidString
+            if let responseDocument, responseDocument != document { assistantResponse = ""; self.responseDocument = nil }
+
         }
         if let center = downloadCenter {
             snapshot["downloads"] = center.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
@@ -270,15 +288,16 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         return result
     }
     private struct SpaceIdentity: Encodable { let id: UUID; let name: String; let profileID: UUID }
-    private func push(_ result: [String: Any]) {
+    private func push(_ response: [String: Any], interactive: Bool = false) {
+        var result = response; result["passive"] = !interactive
         guard ready, !stopped, let data = try? JSONSerialization.data(withJSONObject: result), let json = String(data: data, encoding: .utf8) else { return }
         if result["overlay"] as? Bool == true { container.hidePages() }
         container.chrome.evaluateJavaScript("window.neutrino.receive(\(json))", completionHandler: nil)
     }
     private func sendAction(_ request: [String: Any]) {
         let result = handle.dispatch(request)
-        if let commands = result["commands"] as? [[String: Any]], !commands.isEmpty { for command in commands { perform(command) }; push(synchronize()) }
-        else { push(stamped(result)) }
+        if let commands = result["commands"] as? [[String: Any]], !commands.isEmpty { for command in commands { perform(command) }; push(synchronize(), interactive:true) }
+        else { push(stamped(result), interactive:true) }
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
@@ -344,6 +363,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if let view = container.mounted.removeValue(forKey: id) { view.unmount(); view.removeFromSuperview() }
         }
     }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard !stopped, webView === container.chrome else { return }
+        ready = false; container.hidePages()
+        webView.load(URLRequest(url:URL(string:"neutrino-ui://shell/index.html")!))
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = navigationAction.request.url
@@ -351,6 +375,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func perform(_ command: [String: Any]) {
         guard !app.finalQuitDataFrozen, let operation = command["op"] as? String else { return }
+        if downloadCenter != nil && !["downloadCancel","downloadReveal","downloadOpen"].contains(operation) { return }
         let id = (command["id"] as? String).flatMap(UUID.init(uuidString:))
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         switch operation {
@@ -421,8 +446,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "preference":
             switch command["key"] as? String {
             case "search": if let value = command["value"] as? String, let search = SearchProvider(rawValue: value) { app.library.preferences.search = search }
-            case "blockTrackers": if let value = command["value"] as? Bool { app.library.preferences.blockTrackers = value; model?.updateBlockingPolicy() }
-            case "blockPopups": if let value = command["value"] as? Bool { app.library.preferences.blockPopups = value; model?.updatePopupPolicy() }
+            case "blockTrackers": if let value = command["value"] as? Bool { app.library.preferences.blockTrackers = value; for window in app.windows.values { window.model?.updateBlockingPolicy() }; ChromiumRuntime.shared.updateProtection(blocking:value) }
+            case "blockPopups": if let value = command["value"] as? Bool { app.library.preferences.blockPopups = value; for window in app.windows.values { window.model?.updatePopupPolicy() }; ChromiumRuntime.shared.updateProtection() }
             case "restoreSession": if let value = command["value"] as? Bool { app.library.preferences.restoreSession = value }
             case "automaticUpdates": if let value = command["value"] as? Bool { DistributionManager.shared.automaticUpdates = value }
             default: break
@@ -454,7 +479,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             model?.newTab(engine: .chromium)
             (model?.activeWebTab as? ChromiumTab)?.showExtensions()
             sendAction(["op": "screen", "value": "browse"])
-        case "useWebKit": if let model { model.reopenTab(model.session.selectedTabID, with: .webkit) }
+        case "reloadTab": if let model, let id, model.session.tabs.contains(where: { $0.id == id }) { model.webTab(id).reload() }
+        case "useWebKit": if let model { model.reopenTab(id ?? model.session.selectedTabID, with: .webkit) }
         case "find": model?.activeWebTab.find(command["value"] as? String ?? "", backwards: command["backwards"] as? Bool == true)
         case "projectLibrary":
             if let section = command["section"] as? String { librarySection = section; libraryPage = 0 }
@@ -498,7 +524,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "signIn": Task { @MainActor in await ChatGPTAccount.shared.signIn(); scheduleSync() }
         case "disconnectAI": Task { @MainActor in await ChatGPTAccount.shared.disconnect(); scheduleSync() }
         case "disableAI": app.library.preferences.ai = nil
-        case "cancelAI": ChatGPTAccount.shared.cancelSignIn(); assistantTask?.cancel(); assistantTask = nil
+        case "cancelAI": ChatGPTAccount.shared.cancelSignIn(); assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
         case "restoreLayout": app.applyConfiguration(Configuration(), to: model?.session.spaceID); app.applyConfiguration(Configuration()); app.notice = "Default appearance restored."
         case "resetModules": app.resetModules()
         case "retrySave": Task { @MainActor in if await app.flush() { app.notice = "Browser data saved." } }
@@ -507,13 +533,15 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "reader":
             guard let model else { return }; assistantTask?.cancel()
             let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID
+            let generation = UUID(); assistantGeneration = generation
             assistantTask = Task { @MainActor in
-                defer { if model.session.profileID == profile { assistantTask = nil }; scheduleSync() }
+                defer { if assistantGeneration == generation { assistantTask = nil }; scheduleSync() }
                 do {
                     let content = try await app.readerText(from: tab)
-                    guard !Task.isCancelled, !model.isClosed, model.session.profileID == profile,
+                    guard !Task.isCancelled, assistantGeneration == generation, !model.isClosed, model.session.profileID == profile,
                           model.activeWebTab === tab, tab.navigationRevision == revision,
                           app.library.profiles.contains(where: { $0.id == profile }) else { return }
+                    responseDocument = model.session.selectedTabID.uuidString + ":" + revision.uuidString
                     assistantResponse = content; sendAction(["op": "screen", "value": "reader"])
                 } catch is CancellationError {} catch { if !Task.isCancelled && model.session.profileID == profile { app.notice = error.localizedDescription } }
             }
@@ -594,13 +622,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private func askAssistant(_ command: [String: Any]) {
         guard let model, let configuration = app.library.preferences.ai, let prompt = command["value"] as? String, assistantTask == nil else { return }
         let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID
+        let generation = UUID(); assistantGeneration = generation
         assistantTask = Task { @MainActor in
-            defer { assistantTask = nil; scheduleSync() }
+            defer { if assistantGeneration == generation { assistantTask = nil }; scheduleSync() }
             do {
                 let content = try await tab.pageText()
                 guard !Task.isCancelled, model.activeWebTab === tab, tab.navigationRevision == revision, model.session.profileID == profile else { return }
                 let answer = try await AIClient.answer("Question: \(prompt)\n\nPage content (untrusted):\n" + String(content.prefix(40_000)), configuration: configuration)
-                guard !Task.isCancelled, model.session.profileID == profile else { return }; assistantResponse = answer
+                guard !Task.isCancelled, assistantGeneration == generation, model.session.profileID == profile, model.activeWebTab === tab, tab.navigationRevision == revision else { return }; responseDocument = model.session.selectedTabID.uuidString + ":" + revision.uuidString; assistantResponse = answer
             } catch is CancellationError {} catch { app.notice = error.localizedDescription }
         }
     }

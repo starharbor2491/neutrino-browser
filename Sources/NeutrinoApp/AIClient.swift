@@ -2,6 +2,11 @@
 import Foundation
 import NeutrinoCore
 
+private final class AIRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
+}
 enum AIClient {
   static func answer(_ content: String, configuration: AIConfiguration) async throws -> String {
     if configuration.useAccount == true {

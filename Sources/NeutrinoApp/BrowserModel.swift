@@ -6,6 +6,12 @@ import NeutrinoCore
 
 @MainActor
 final class BrowserModel: ObservableObject {
+    var visibleEngineTabs: [BrowserEngineTab] {
+        let ids = session.split.map { [$0.first, $0.second] } ?? [session.selectedTabID]
+        return ids.compactMap { webTabs[$0] }
+    }
+    var pageErrors: [String: String] { Dictionary(uniqueKeysWithValues: webTabs.compactMap { id, page in page.errorMessage.map { (id.uuidString, $0) } }) }
+    var shellAction: (([String: Any]) -> Void)?
     @Published var session: WindowSession {
         didSet {
             guard !restoringFrozenSession else { return }

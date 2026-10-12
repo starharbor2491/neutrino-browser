@@ -89,6 +89,9 @@ final class ChromiumRuntime: ObservableObject {
     var focusedNativeTab: ChromiumTab? {
         tabs.values.first { $0.chromeWindow?.isKeyWindow == true }
     }
+    func updateProtection(blocking: Bool? = nil) {
+        for tab in tabs.values { if let blocking { tab.blockingEnabled = blocking }; tab.updatePopupPolicy() }
+    }
     var auxiliaryTabs: [ChromiumTab] { tabs.values.filter(\.isAuxiliary) }
     var extensionManagementTabs: [ChromiumTab] {
         tabs.values.filter { $0.url?.scheme == "chrome" && $0.url?.host == "extensions" }
