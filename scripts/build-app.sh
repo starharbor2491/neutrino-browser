@@ -7,6 +7,7 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 1
 fi
 configuration="${CONFIGURATION:-release}"
+./scripts/build-rust.sh
 if [[ "$configuration" != release && "$configuration" != debug ]]; then
   echo 'CONFIGURATION must be release or debug.' >&2
   exit 1

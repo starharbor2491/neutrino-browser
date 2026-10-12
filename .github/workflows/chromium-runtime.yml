@@ -52,6 +52,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Restore pinned Chromium SDK
         id: cef-cache
         uses: actions/cache/restore@v4

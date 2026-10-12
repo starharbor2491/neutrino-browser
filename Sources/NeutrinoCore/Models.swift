@@ -240,7 +240,7 @@ public enum DesignSystem: String, Codable, CaseIterable, Sendable {
     }
 }
 public enum ColorMode: String, Codable, CaseIterable, Sendable { case system, light, dark }
-public enum Accent: String, Codable, CaseIterable, Sendable { case blue, teal, orange, purple, pink }
+public enum Accent: String, Codable, CaseIterable, Sendable { case blue, teal, orange, purple, pink, rose }
 public enum Density: String, Codable, CaseIterable, Sendable { case comfortable, compact }
 public enum TabPlacement: String, Codable, CaseIterable, Sendable { case top, bottom, leading, trailing }
 public enum BarPlacement: String, Codable, CaseIterable, Sendable { case top, bottom }
@@ -297,7 +297,7 @@ public struct ToolbarComponent: Identifiable, Codable, Equatable, Sendable {
 public struct Theme: Codable, Equatable, Sendable {
     public var design: DesignSystem = .native
     public var colorMode: ColorMode = .system
-    public var accent: Accent = .purple
+    public var accent: Accent = .rose
     public var density: Density = .comfortable
     public var cornerRadius: Double = 10
     public var transparency: Bool = true
@@ -351,7 +351,7 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
         sidebarWidth = sidebarWidth.isFinite ? min(360, max(180, sidebarWidth)) : 240
         if treeTabs == true && (tabs == .top || tabs == .bottom) { tabs = .leading }
         if let value = addressWidth { addressWidth = value.isFinite ? min(1, max(0.4, value)) : 1 }
-        if let value = tabsWidth { tabsWidth = value.isFinite ? min(320, max(140, value)) : 190 }
+        if let value = tabsWidth { tabsWidth = value.isFinite ? min(340, max(200, value)) : 190 }
         if let components = toolbarComponents {
             var ids = Set<UUID>(), commands = Set<ToolbarCommand>()
             toolbarComponents = Array(components.filter { ids.insert($0.id).inserted && ($0.command == .separator || commands.insert($0.command).inserted) }.prefix(32))

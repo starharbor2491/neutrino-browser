@@ -1,12 +1,17 @@
 // swift-tools-version: 6.0
 // SPDX-License-Identifier: MPL-2.0
 import PackageDescription
+import Foundation
+
+let rustLibraryPath = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent(".build/rust").path
 
 var products: [Product] = [.library(name: "NeutrinoCore", targets: ["NeutrinoCore"]),
     .executable(name: "NeutrinoReaderWorker", targets: ["NeutrinoReaderWorker"])]
 var targets: [Target] = [
     .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
-    .target(name: "NeutrinoCore", dependencies: ["CSQLite"]),
+    .systemLibrary(name: "NeutrinoRust"),
+    .target(name: "NeutrinoCore", dependencies: ["CSQLite", "NeutrinoRust"],
+        linkerSettings: [.unsafeFlags(["-L", rustLibraryPath])]),
     .testTarget(name: "NeutrinoCoreTests", dependencies: ["NeutrinoCore"]),
     .target(name: "NeutrinoReaderLogic", dependencies: ["NeutrinoCore"]),
     .executableTarget(name: "NeutrinoReaderWorker", dependencies: ["NeutrinoCore", "NeutrinoReaderLogic"]),
@@ -24,7 +29,7 @@ targets.append(.executableTarget(name: "NeutrinoResourceMonitor", dependencies: 
 targets.append(.executableTarget(name: "NeutrinoMemoryMonitor", dependencies: ["NeutrinoCore", "NeutrinoResourcePlatform"]))
 targets.append(.target(name: "NeutrinoEngineABI", publicHeadersPath: "include",
     linkerSettings: [.linkedFramework("AppKit")]))
-targets.append(.executableTarget(name: "NeutrinoApp", dependencies: ["NeutrinoCore", "NeutrinoEngineABI", "NeutrinoDistribution"],
+targets.append(.executableTarget(name: "NeutrinoApp", dependencies: ["NeutrinoCore", "NeutrinoEngineABI", "NeutrinoDistribution", "NeutrinoRust"],
     resources: [.copy("Resources")]))
 targets.append(.testTarget(name: "NeutrinoAppTests", dependencies: ["NeutrinoApp"]))
 #endif

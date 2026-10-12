@@ -1372,6 +1372,10 @@ void Command(void* opaque,int command,const char* text,double value) {
   if (!page || !page->browser) return;
   auto browser=page->browser; auto host=browser->GetHost();
   switch (command) {
+    case NEUTRINO_CEF_REQUEST_CLOSE:
+      // Ordinary UI close must honor beforeunload. Destroy/close_page remains
+      // the explicit teardown path after confirmation or application shutdown.
+      host->CloseBrowser(false); break;
     case NEUTRINO_CEF_SYNC_ACTIVE: break;
     case NEUTRINO_CEF_FOCUS_LOCATION:
       [owner->view.browserWindow makeKeyAndOrderFront:nil];

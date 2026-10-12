@@ -4,7 +4,7 @@ import SwiftUI
 import NeutrinoCore
 
 extension Accent {
-    var color: Color { switch self { case .blue: .blue; case .teal: .teal; case .orange: .orange; case .purple: .purple; case .pink: .pink } }
+    var color: Color { switch self { case .blue: .blue; case .teal: .teal; case .orange: .orange; case .purple: .purple; case .pink: .pink; case .rose: Color(red: 0.46, green: 0.28, blue: 0.25) } }
 }
 extension InterfaceColor { var color: Color { Color(red: red, green: green, blue: blue) } }
 extension Theme {

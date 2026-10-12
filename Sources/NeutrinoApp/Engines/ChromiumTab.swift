@@ -461,6 +461,11 @@ final class ChromiumTab: BrowserEngineTab {
             request.continuation.resume(throwing: ValidationError("The Chromium page was closed."))
         }
     }
+    override var hasActiveDownloads: Bool { !downloadIDs.isEmpty }
+    override func requestClose() {
+        guard page != nil, !disposing else { onClose?(); return }
+        command(Int(NEUTRINO_CEF_REQUEST_CLOSE))
+    }
     override func dispose() {
         guard page != nil, closeTask == nil else { return }
         let notice = onNotice

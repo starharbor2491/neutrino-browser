@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/neutrino-shell"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MPL-2.0"
+rust-version = "1.85"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+

@@ -188,6 +188,9 @@ struct WorkspaceRail<Row: View>: View {
       let s = library.spaces?.firstIndex(where: { $0.id == spaceID && $0.profileID == profileID }),
       let i = library.spaces?[s].tabs.firstIndex(where: { $0.id == id })
     else { return }
+    if let pages = tab.chromiumSessionPages {
+      library.spaces?[s].tabs[i].chromiumPages = tab.isShowingStartPage && pages.count == 1 ? nil : ChromiumSessionPage.normalized(pages)
+    }
     let url = tab.isShowingStartPage ? nil : tab.url
     if url == nil || url.map(AddressResolver.isWebURL) == true {
       library.spaces?[s].tabs[i].url = url

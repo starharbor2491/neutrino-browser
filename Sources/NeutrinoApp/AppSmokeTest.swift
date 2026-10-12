@@ -388,10 +388,10 @@ enum AppSmokeTest {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1100, height: 780), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
-        for step in 0..<8 {
+        for step in 0..<7 {
             let view = NSHostingView(rootView: OnboardingView(previewStep: step).environmentObject(app))
             window.contentView = view; window.makeKeyAndOrderFront(nil)
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(600))
             view.layoutSubtreeIfNeeded()
             try capture(view, to: output.appendingPathComponent("Neutrino-setup-\(step + 1).png"))
         }

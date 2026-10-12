@@ -26,6 +26,7 @@ jobs:
       NEUTRINO_BUILD_NUMBER: ${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Validate preview version
         env:
           INPUT_VERSION: ${{ inputs.version }}
@@ -82,6 +83,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
           name: Neutrino-AppleSilicon-candidate
