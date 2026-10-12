@@ -7,6 +7,6 @@
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "startWidget",
   "dependencies": [],
-  "defaultInstalled": true,
+  "defaultInstalled": false,
   "runtime": "declarative"
 }

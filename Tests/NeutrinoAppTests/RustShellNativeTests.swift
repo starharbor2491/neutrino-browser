@@ -51,6 +51,34 @@ extension NativeIntegrationTests {
       #expect(app.library.notes.first?.text == "Kept after Escape")
       #expect((try await web.evaluateJavaScript("!document.querySelector('.utility-screen[data-screen=library]')")) as? Bool == true)
     }
+    @Test func moduleSettingsReachNotesAndFocusRestoresInlineNavigation() async throws {
+      _ = NSApplication.shared
+      let directory=FileManager.default.temporaryDirectory.appendingPathComponent("NeutrinoModuleShell-"+UUID().uuidString)
+      let app=AppState(directory:directory);await app.load()
+      app.library.profiles[0].engineID = .webkit;app.library.preferences.completedOnboarding=true
+      let model=BrowserModel(app:app,isPrivate:false)
+      let coordinator=RustShellCoordinator(app:app,model:model,downloadCenter:nil,previewStep:nil,openWindow:nil)
+      let window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:760),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
+      window.contentView=coordinator.container;window.makeKeyAndOrderFront(nil)
+      defer { coordinator.stop();model.close();window.close();try? FileManager.default.removeItem(at:directory) }
+      let web=coordinator.container.chrome;try await RustShellAcceptance.waitUntilReady(web)
+      try await RustShellAcceptance.action(["op":"screen","value":"modules"],web:web)
+      try await RustShellAcceptance.action(["op":"module-select","value":"org.neutrino.notes"],web:web)
+      _ = try await web.evaluateJavaScript("const setting=document.querySelector('[data-module-setting=defaultTitle]');setting.value='Scratchpad';setting.dispatchEvent(new Event('change',{bubbles:true}));")
+      try await Task.sleep(for:.milliseconds(200))
+      try await RustShellAcceptance.action(["op":"screen","value":"library","section":"notes"],web:web)
+      try await RustShellAcceptance.action(["op":"native","action":"createNote"],web:web)
+      #expect(app.library.notes.last?.title == "Scratchpad")
+      try await RustShellAcceptance.action(["op":"escape"],web:web)
+      try await RustShellAcceptance.action(["op":"native","action":"toggleFocus"],web:web)
+      #expect(model.focusMode)
+      try await RustShellAcceptance.action(["op":"escape"],web:web)
+      #expect(!model.focusMode)
+      try await RustShellAcceptance.action(["op":"native","action":"toggleFocus"],web:web)
+      try await RustShellAcceptance.action(["op":"focus-address"],web:web)
+      #expect(!model.focusMode)
+      #expect((try await web.evaluateJavaScript("document.activeElement.id==='address-input' && document.querySelector('#address-input').getBoundingClientRect().width>100")) as? Bool == true)
+    }
     @Test func auxiliaryDownloadsNeverProjectTheDefaultLibrary() async throws {
       _ = NSApplication.shared
       let directory=FileManager.default.temporaryDirectory.appendingPathComponent("NeutrinoDownloadsScope-"+UUID().uuidString)

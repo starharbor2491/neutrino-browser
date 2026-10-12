@@ -277,7 +277,6 @@ fn serve(mut stream: TcpStream, shell: &mut Shell) -> std::io::Result<()> {
         "/" => {
             shell.snapshot = fixture();
             contributions(shell);
-            contributions(shell);
             shell.screen = "browse".into();
             shell.palette = false;
             ("text/html", neutrino_shell::document())

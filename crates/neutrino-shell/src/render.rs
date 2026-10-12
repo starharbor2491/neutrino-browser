@@ -36,9 +36,11 @@ fn icon_definitions(s: &Shell) -> Markup {
     html! {svg class="icon-definitions" aria-hidden="true"{defs{@for name in names{
         @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules",v=>v};
         @let value = text(&s.snapshot["icons"],key);
+        @let image = text(&s.snapshot["iconImages"],key);
         @let filled = value.ends_with(".fill") || (value.is_empty() && text(&s.config()["theme"],"iconStyle")=="filled");
         symbol id=(format!("glyph-{name}")) viewBox="0 0 24 24"{
-            @if filled && ["back","forward","reload"].contains(&name){circle cx="12" cy="12" r="10" fill="currentColor" stroke="none";path d=(icon_path(name)) stroke="var(--rail)" fill="none";}
+            @if image.starts_with("data:image/png;base64,") && image.len()<12000{mask id=(format!("mask-{name}")) maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:alpha"{image href=(image) x="0" y="0" width="24" height="24";}rect x="0" y="0" width="24" height="24" fill="currentColor" stroke="none" mask=(format!("url(#mask-{name})"));}
+            @else if filled && ["back","forward","reload"].contains(&name){circle cx="12" cy="12" r="10" fill="currentColor" stroke="none";path d=(icon_path(name)) stroke="var(--rail)" fill="none";}
             @else {path d=(icon_path(name)) fill=(if filled && ["bookmark","grid","folder","pin"].contains(&name){"currentColor"}else{"none"});}
         }
     }}}}
@@ -47,19 +49,42 @@ fn theme_style(s: &Shell) -> String {
     let t = &s.config()["theme"];
     let mut style = format!("--component-radius:{}px;--font-scale:{};--spacing-scale:{};--theme-border:{}px;--theme-shadow:{}",t["cornerRadius"].as_f64().unwrap_or(6.).clamp(0.,24.),t["fontScale"].as_f64().unwrap_or(1.).clamp(0.85,1.4),t["spacingScale"].as_f64().unwrap_or(1.).clamp(0.75,1.5),t["borderWidth"].as_f64().unwrap_or(1.).clamp(0.,2.),t["shadowStrength"].as_f64().unwrap_or(0.).clamp(0.,1.));
     let valid = |v: &str| {
-        v.len() == 7 && v.starts_with('#') && v[1..].bytes().all(|b| b.is_ascii_hexdigit())
+        v.trim_start_matches('#').len() == 6
+            && v.trim_start_matches('#')
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit())
     };
-    let accent = text(t, "accentHex");
+    let accent = text(t, "accentHex").trim_start_matches('#');
     if valid(accent) {
         style.push_str(&format!(
-            ";--accent:{accent};--tint:{accent};--tint-light:{accent}"
+            ";--accent:#{accent};--tint:#{accent};--tint-light:#{accent}"
         ));
     }
-    let surface = text(t, "surfaceHex");
-    let ink = text(t, "textHex");
+    let surface = text(t, "surfaceHex").trim_start_matches('#');
+    let ink = text(t, "textHex").trim_start_matches('#');
     if valid(surface) && valid(ink) {
         style.push_str(&format!(
-            ";--bg:{surface};--rail:{surface};--surface:{surface};--ink:{ink};--muted:{ink}"
+            ";--bg:#{surface};--rail:#{surface};--surface:#{surface};--ink:#{ink};--muted:#{ink}"
+        ));
+    }
+    for (component, key) in [
+        ("tabs", "tabsAppearance"),
+        ("navigation", "navigationAppearance"),
+        ("sidebar", "sidebarAppearance"),
+    ] {
+        let a = &t[key];
+        style.push_str(&format!(
+            ";--{component}-radius:{}px;--{component}-font:{};--{component}-spacing:{}",
+            a["cornerRadius"]
+                .as_f64()
+                .unwrap_or(t["cornerRadius"].as_f64().unwrap_or(6.))
+                .clamp(0., 24.),
+            a["fontScale"].as_f64().unwrap_or(1.).clamp(0.85, 1.4),
+            if text(a, "density") == "compact" {
+                0.85
+            } else {
+                1.
+            }
         ));
     }
     style
@@ -348,8 +373,8 @@ fn setup(s: &Shell) -> Markup {
     ];
     html! {main class=(format!("onboarding step-{}",s.step)) {
         div class="setup-drag" data-window-drag="true"{}
-        aside class="setup-scene" aria-hidden="true" {div class="setup-emblem"{img src="neutrino.svg" alt="";}div class="scene-caption"{span{(["Your browser","Profiles & Spaces","Bookmarks","Appearance","Privacy & modules","Optional AI","All set"][s.step])}}
-            div class="mini-browser" data-layout=(text(&s.setup,"layout")){div class="mini-rail"{div class="mini-dots"{i{}i{}i{}}div class="mini-address"{(icon("search"))"Search or enter URL"}strong{(text(&s.setup,"space"))}div class="mini-pin"{(icon("bookmark"))"GitHub"}div class="mini-folder"{(icon("folder"))"Projects"}div class="mini-tab"{(icon("globe"))"Proton"}div class="mini-tab selected"{(icon("grid"))"Modules"}div class="mini-plus"{(icon("plus"))"New tab"}}div class="mini-page"{img src="neutrino.svg" alt="";h2{"Neutrino"}div class="mini-search"{(icon("search"))"Search or enter URL"}div class="mini-module-row"{(icon("bookmark"))(icon("grid"))(icon("shield"))}}}
+        aside class="setup-scene" aria-hidden="true" {div class="scene-caption"{span{(["Your browser","Profiles & Spaces","Bookmarks","Appearance","Privacy & modules","Optional AI","All set"][s.step])}}
+            div class="mini-browser" data-layout=(text(&s.setup,"layout")){div class="mini-rail"{div class="mini-dots"{i{}i{}i{}}div class="mini-address"{(icon("search"))"Search or enter URL"}strong{(text(&s.setup,"space"))}div class="mini-pin"{(icon("bookmark"))"GitHub"}div class="mini-folder"{(icon("folder"))"Projects"}div class="mini-tab"{(icon("globe"))"Proton"}div class="mini-tab selected"{(icon("grid"))"Modules"}div class="mini-plus"{(icon("plus"))"New tab"}}div class="mini-page"{h2{"Neutrino"}div class="mini-search"{(icon("search"))"Search or enter URL"}div class="mini-module-row"{(icon("bookmark"))(icon("grid"))(icon("shield"))}}}
         }
         section class="setup-content"{header class="setup-header"{span class="wordmark"{img class="brand-icon" src="neutrino.svg" alt="";"neutrino"}}
             div class="setup-copy"{h1 id="setup-heading" tabindex="-1"{(titles[s.step])}p{(descriptions[s.step])}}
@@ -609,15 +634,15 @@ fn module_details(s: &Shell, m: &Value) -> Markup {
     html! {div class="module-details"{
         button class="button quiet" data-op="module-select" data-value=""{(icon("back"))"All modules"}
         header class="module-detail-heading"{span class="module-icon"{(icon(module_glyph(id)))}div{h2{(text(m,"name"))}p{(module_description(m))}}}
-        div class="module-detail-actions"{button class="button primary" data-op="native" data-action=(if flag(m,"installed"){"toggleModule"}else{"installModule"}) data-id=(id){(if !flag(m,"installed"){"Install"}else if flag(m,"enabled"){"Disable"}else if flag(m,"replacesProvider"){"Replace provider"}else{"Enable"})}
+        div class="module-detail-actions"{button class=(if flag(m,"enabled"){"button"}else{"button primary"}) data-op="native" data-action=(if flag(m,"installed"){"toggleModule"}else{"installModule"}) data-id=(id){(if !flag(m,"installed"){"Install"}else if flag(m,"enabled"){"Disable"}else if flag(m,"replacesProvider"){"Replace provider"}else{"Enable"})}
             @if flag(m,"updateAvailable"){button class="button" data-op="native" data-action="installModule" data-id=(id){"Update to v"(m["availableVersion"].as_u64().unwrap_or(1))}}
             @if flag(m,"installed") && flag(m,"available"){button class="button" data-op="native" data-action="repairModule" data-id=(id){"Reinstall"}}
-            @if flag(m,"installed"){button class="button danger quiet" data-op="native" data-action="uninstallModule" data-id=(id){"Remove…"}}
+            @if flag(m,"installed"){button class="button danger" data-op="native" data-action="uninstallModule" data-id=(id){"Remove…"}}
         }
         @if flag(m,"enabled"){div class="module-use"{@match text(m,"capability"){
-            "resourceMonitor"=>{button class="button" data-op="screen" data-value="resources"{(icon("activity"))"Open monitor"}}
-            "focusMode"=>{button class="button" data-op="native" data-action="toggleFocus"{(icon("moon"))(if flag(&s.snapshot,"focusMode"){"Exit Focus"}else{"Enter Focus"})}}
-            "notes"=>{button class="button" data-op="screen" data-value="library" data-section="notes"{(icon("edit"))"Open notes"}}
+            "resourceMonitor"=>{button class="button primary" data-op="screen" data-value="resources"{(icon("activity"))"Open monitor"}}
+            "focusMode"=>{button class="button primary" data-op="native" data-action="toggleFocus"{(icon("moon"))(if flag(&s.snapshot,"focusMode"){"Exit Focus"}else{"Enter Focus"})}}
+            "notes"=>{button class="button primary" data-op="screen" data-value="library" data-section="notes"{(icon("edit"))"Open notes"}}
             _=>{}
         }}}        dl class="module-metadata"{div{dt{"Version"}dd{"v"(m["version"].as_u64().unwrap_or(1))}}div{dt{"Publisher"}dd{(text(m,"publisher"))}}div{dt{"Source"}dd{(if flag(m,"bundled"){"Included with Neutrino"}else{"Local / imported"})}}div{dt{"Status"}dd{(if flag(m,"enabled"){"Active"}else if flag(m,"installed"){"Disabled"}else{"Not installed"})}}}
         @if !text(m,"providerName").is_empty(){p class="module-provider"{(text(m,"providerName"))" is the current provider for this feature."}}

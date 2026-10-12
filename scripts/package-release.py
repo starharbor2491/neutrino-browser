@@ -49,7 +49,7 @@ def notarize(path):
     checked(['xcrun', 'stapler', 'validate', path])
 
 
-def package(app, output, development, allow_webkit_development=False):
+def package(app, output, development, allow_webkit_development=False, notarize_preview=False):
     if platform.system() != 'Darwin':
         raise RuntimeError('Disk image packaging requires macOS')
     app = app.resolve(strict=True)
@@ -57,6 +57,9 @@ def package(app, output, development, allow_webkit_development=False):
     metadata = json.loads((app / 'Contents/Resources/Distribution.json').read_text())
     channel = plistlib.loads((app / 'Contents/Info.plist').read_bytes()).get('NeutrinoUpdateChannel', 'local')
     preview = development and channel == 'preview'
+    if notarize_preview and not preview:
+        raise RuntimeError('Notarized preview packaging requires the preview update channel')
+    sealed = not development or notarize_preview
     if metadata['architecture'] != 'arm64':
         raise RuntimeError('Neutrino installers target Apple Silicon only')
     if not metadata['chromium'] and not (development and allow_webkit_development):
@@ -64,7 +67,7 @@ def package(app, output, development, allow_webkit_development=False):
     variant = 'AppleSilicon' if metadata['chromium'] else 'WebKit-development-AppleSilicon'
     prefix = 'Neutrino-' + metadata['version'] + '-' + variant
     identity = os.environ.get('NEUTRINO_SIGNING_IDENTITY')
-    if not development:
+    if sealed:
         if not identity or not identity.startswith('Developer ID Application: '):
             raise RuntimeError('Consumer packaging requires Developer ID Application signing')
         checked(['codesign', '--verify', '--deep', '--strict', '--all-architectures', app])
@@ -85,7 +88,7 @@ def package(app, output, development, allow_webkit_development=False):
         checked(['xcrun', 'stapler', 'staple', app])
         checked(['xcrun', 'stapler', 'validate', app])
         checked(['spctl', '--assess', '--type', 'execute', app])
-    dmg = output / (prefix + ('-development' if development else '') + '.dmg')
+    dmg = output / (prefix + ('-development' if development and not sealed else '') + '.dmg')
     if dmg.exists():
         dmg.unlink()
     with tempfile.TemporaryDirectory(prefix='neutrino-installer-') as temporary:
@@ -97,11 +100,11 @@ def package(app, output, development, allow_webkit_development=False):
             'This is the same Neutrino application with ' + ('Chromium and WebKit' if metadata['chromium'] else 'system WebKit') + '. '
             'Its default modules are included for offline installation. Existing browser data, customized layouts and intentionally removed modules are kept.\n\n'
             + (('GitHub preview: ad-hoc signed and unnotarized. Updates download from the Neutrino GitHub repository and install after you quit.\n' if preview else
-                'Local development build: ad-hoc signed and unnotarized. Automatic updates are disabled.\n') if development else
+                'Local development build: ad-hoc signed and unnotarized. Automatic updates are disabled.\n') if development and not sealed else
                'To install this package from an existing Neutrino app, choose Settings > Browsing engines > Import offline installer. Neutrino verifies the publisher and replaces the app after quitting.\n')
             + 'Source and licenses: https://github.com/starharbor2491/neutrino-browser\n')
         checked(['hdiutil', 'create', '-volname', 'Neutrino', '-srcfolder', root, '-format', 'UDZO', '-ov', dmg])
-    if not development:
+    if sealed:
         checked(['codesign', '--force', '--timestamp', '--sign', identity, dmg])
         notarize(dmg)
         checked(['spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature', dmg])
@@ -116,7 +119,7 @@ def package(app, output, development, allow_webkit_development=False):
     code_hash = re.search(r'^CDHash=([0-9a-f]{40})$', signature.stderr, re.MULTILINE)
     if not code_hash:
         raise RuntimeError('The application has no Apple Silicon code directory hash')
-    evidence = {'release': metadata, 'developerID': not development, 'notarized': not development,
+    evidence = {'release': metadata, 'developerID': sealed, 'notarized': sealed,
                 'file': dmg.name, 'bytes': dmg.stat().st_size,
                 'sha256': digest(dmg), 'codeDirectoryHash': code_hash.group(1),
                 'applicationArchive': {'file': archive.name, 'bytes': archive.stat().st_size, 'sha256': digest(archive)}}
@@ -138,5 +141,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, default=Path('dist'))
     parser.add_argument('--development', action='store_true')
     parser.add_argument('--allow-webkit-development', action='store_true', help='Allow an explicitly incomplete WebKit-only development package')
+    parser.add_argument('--notarize-preview', action='store_true', help='Developer ID sign/notarize a preview without claiming core parity')
     args = parser.parse_args()
-    package(args.app, args.output, args.development, args.allow_webkit_development)
+    package(args.app, args.output, args.development, args.allow_webkit_development, args.notarize_preview)

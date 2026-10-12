@@ -22,13 +22,11 @@ import uuid
 from pathlib import Path
 
 
-VERSION = "154.0.34+g14c5a08+chromium-154.0.8037.98"
-# Upstream standard distributions, observed 2026-10-09. SHA-256 values are pinned
-# independently of future CDN responses. Update these deliberately with VERSION.
-ARCHIVES = {
-    "arm64": ("macosarm64", "2e4a60880addad09c85d9ea27f4df09cb803069e1709377576e9cf62169648fe"),
-    "x86_64": ("macosx64", "b11f8b0d190541f167d0f66265c5017f2faf9b9d08790172732eb09accf00e40"),
-}
+PIN = json.loads((Path(__file__).resolve().parents[1] / "ChromiumRuntime/cef-version.json").read_text())
+VERSION = PIN["version"]
+ARCHIVES = {arch:(item["platform"],item["sha256"]) for arch,item in PIN["archives"].items()}
+if PIN.get("format") != 1 or set(ARCHIVES) != {"arm64","x86_64"}:
+    raise RuntimeError("Invalid CEF pin metadata")
 
 
 def checked(command):

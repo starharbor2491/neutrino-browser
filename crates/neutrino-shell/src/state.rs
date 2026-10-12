@@ -170,6 +170,9 @@ impl Shell {
                 "focus-address" => {
                     self.sidebar_hidden = false;
                     self.focus = "address-input".into();
+                    if flag(&self.snapshot, "focusMode") {
+                        commands.push(json!({"op":"exitFocus"}));
+                    }
                 }
                 "palette" => {
                     self.palette = true;
@@ -200,6 +203,8 @@ impl Shell {
                         && self.draft.as_ref() != Some(&self.snapshot["configuration"])
                     {
                         self.menu = "discard-editor".into();
+                    } else if self.screen == "browse" && flag(&self.snapshot, "focusMode") {
+                        commands.push(json!({"op":"exitFocus"}));
                     } else {
                         self.close_screen();
                     }
@@ -317,9 +322,10 @@ impl Shell {
                 }
                 "switchSpace" => {
                     if !self.private()
-                        && array(&self.snapshot["spaces"])
-                            .iter()
-                            .any(|s| s["id"] == request["id"])
+                        && array(&self.snapshot["spaces"]).iter().any(|s| {
+                            s["id"] == request["id"]
+                                && s["profileID"] == self.snapshot["session"]["profileID"]
+                        })
                     {
                         commands.push(json!({"op":op,"id":request["id"]}));
                         self.menu.clear();

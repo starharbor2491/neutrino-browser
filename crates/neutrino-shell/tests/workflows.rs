@@ -455,3 +455,23 @@ fn utility_pages_preserve_browser_tools_and_routine_menus_are_nonmodal() {
     let r = s.dispatch(json!({"op":"menu","value":"clear-history"}));
     assert_eq!(r["overlay"], true);
 }
+
+#[test]
+fn focus_recovers_after_overlays_and_address_focus_and_spaces_stay_in_profile() {
+    let mut s = shell();
+    s.snapshot["focusMode"] = json!(true);
+    s.dispatch(json!({"op":"palette"}));
+    assert!(commands(&s.dispatch(json!({"op":"escape"}))).is_empty());
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"escape"})))[0]["op"],
+        "exitFocus"
+    );
+    let address = s.dispatch(json!({"op":"focus-address"}));
+    assert_eq!(address["focus"], "address-input");
+    assert_eq!(commands(&address)[0]["op"], "exitFocus");
+    assert!(commands(&s.dispatch(json!({"op":"switchSpace","id":"secret"}))).is_empty());
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"switchSpace","id":"s2"})))[0]["id"],
+        "s2"
+    );
+}

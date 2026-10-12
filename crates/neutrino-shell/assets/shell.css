@@ -5005,3 +5005,19 @@ h2 {
 .app-shell[data-focus="true"][data-focus-hidden~="navigation"] .toolbar-controls { visibility:hidden; }
 .app-shell[data-focus="true"][data-focus-hidden~="bookmarks"] .bookmarks-bar,.app-shell[data-focus="true"][data-focus-hidden~="status"] .status-bar { display:none; }
 .page-toolbar .location { width:min(560px,50vw); }
+
+#setup-heading:focus { outline:none; }
+
+.app-shell .tab-row { min-height:calc(42px * var(--spacing-scale,1) * var(--tabs-spacing,1)); border-radius:var(--tabs-radius,6px); font-size:calc(12px * var(--font-scale,1) * var(--tabs-font,1)); }
+.app-shell .rail { gap:calc(8px * var(--spacing-scale,1) * var(--sidebar-spacing,1)); border-radius:var(--sidebar-radius,6px); font-size:calc(12px * var(--font-scale,1) * var(--sidebar-font,1)); }
+.app-shell .page-toolbar { gap:calc(8px * var(--spacing-scale,1) * var(--navigation-spacing,1)); font-size:calc(12px * var(--font-scale,1) * var(--navigation-font,1)); }
+.app-shell .page-toolbar button { border-radius:var(--navigation-radius,6px); }
+.app-shell .page-frame { box-shadow:0 12px 28px rgb(0 0 0 / calc(var(--theme-shadow,0) * .28)); border-width:var(--theme-border,1px); }
+.app-shell[data-typeface="serif"] { font-family:ui-serif,Georgia,serif; }
+.app-shell[data-typeface="rounded"] { font-family:ui-rounded,-apple-system,sans-serif; }
+
+.app-shell .tab-close,.app-shell .tab-menu,.app-shell .folder-options { width:32px; min-width:32px; height:36px; padding:8px; }
+.setup-scene .mini-browser { width:min(420px,85%); max-width:420px; }
+.setup-scene .mini-rail { font-size:13px; }
+.setup-scene .mini-address,.setup-scene .mini-search { font-size:11px; }
+.setup-scene .mini-page h2 { margin-top:28px; }

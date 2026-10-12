@@ -125,6 +125,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private let resourceWorker = ResourceWorker()
     private var resourceGeneration: UUID?
     private var resourcesOpen = false
+    private var cachedIconSymbols: [String:String] = [:]
+    private var cachedIconImages: [String:String] = [:]
     private var stopped = false
     private var projectedProfileID: UUID?
     private var downloadScreenOpened = false
@@ -293,6 +295,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "modules": moduleSnapshot(), "moduleCatalogs": app.communityCatalogNames,
             "menuItems": encoded(app.declarativeDefinition(.menu)?.menu ?? []),
             "icons": app.declarativeDefinition(.icons)?.icons ?? [:],
+            "iconImages": symbolImages(),
             "startWidgets": encoded(app.startWidgets),
             "resources": ["frame": encoded(resourceWorker.frame), "failure": resourceWorker.failure ?? ""],
         ]
@@ -369,6 +372,21 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         }
         if showingOverlay { container.hidePages() }
         return result
+    }
+    private func symbolImages() -> [String:String] {
+        let symbols=app.declarativeDefinition(.icons)?.icons ?? [:]
+        if symbols==cachedIconSymbols { return cachedIconImages }
+        cachedIconSymbols=symbols;cachedIconImages=[:]
+        // AppKit resolves validated SF Symbols. Rust still owns the controls and
+        // layout; only transparent image masks cross this platform boundary.
+        for (name,symbol) in symbols {
+            guard let source=NSImage(systemSymbolName:symbol,accessibilityDescription:nil)?.withSymbolConfiguration(.init(pointSize:18,weight:.regular)) else { continue }
+            let image=NSImage(size:NSSize(width:24,height:24))
+            image.lockFocus();source.draw(in:NSRect(x:2,y:2,width:20,height:20));image.unlockFocus()
+            guard let tiff=image.tiffRepresentation,let bitmap=NSBitmapImageRep(data:tiff),let png=bitmap.representation(using:.png,properties:[:]),png.count<8000 else { continue }
+            cachedIconImages[name]="data:image/png;base64,"+png.base64EncodedString()
+        }
+        return cachedIconImages
     }
     private func moduleSnapshot() -> [[String:Any]] {
         let catalogIDs = Set(app.catalog.map(\.id))
@@ -510,7 +528,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "bookmark": model?.toggleBookmark()
         case "split": model?.beginSplit(.sideBySide)
         case "unsplit": model?.endSplit()
-        case "switchSpace": if let id { model?.switchSpace(id) }
+        case "switchSpace": if let id, let model, app.library.spaces?.contains(where: { $0.id==id && $0.profileID==model.session.profileID })==true { model.switchSpace(id) }
         case "switchProfile": if let id { model?.switchProfile(id) }
         case "replaceTabs":
             guard let model, let source = command["tabs"], let data = try? JSONSerialization.data(withJSONObject: source),
@@ -680,6 +698,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "retrySave": Task { @MainActor in if await app.flush() { app.notice = "Browser data saved." } }
         case "showDataFolder": NSWorkspace.shared.open(app.dataDirectory)
         case "assistant": askAssistant(command)
+        case "exitFocus": model?.exitFocus()
         case "toggleFocus":
             guard let model else { return }; if model.focusMode { model.exitFocus() } else { model.enterFocus() }
         case "retryResources":
