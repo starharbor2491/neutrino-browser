@@ -203,14 +203,18 @@ impl Shell {
                         && self.draft.as_ref() != Some(&self.snapshot["configuration"])
                     {
                         self.menu = "discard-editor".into();
-                    } else if self.screen == "browse" && flag(&self.snapshot, "focusMode") {
+                    } else if flag(&self.snapshot, "focusMode") {
                         commands.push(json!({"op":"exitFocus"}));
+                        self.close_screen();
                     } else {
                         self.close_screen();
                     }
                 }
                 "screen" => {
                     let screen = text(&request, "value");
+                    if screen == "modules" {
+                        self.selected_module.clear();
+                    }
                     if [
                         "browse",
                         "settings",
@@ -646,6 +650,7 @@ impl Shell {
                     {
                         commands
                             .push(json!({"op":action,"id":request["id"],"value":request["value"]}));
+                        if action=="toggleFocus" { self.screen="browse".into();self.menu.clear(); }
                         if action == "deleteNote" || action == "credentialDelete" {
                             self.menu.clear();
                         }

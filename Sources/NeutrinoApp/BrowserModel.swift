@@ -192,6 +192,7 @@ final class BrowserModel: ObservableObject {
             case "reopenTab": self.reopenClosedTab()
             case "nextTab": self.selectRelativeTab(1)
             case "previousTab": self.selectRelativeTab(-1)
+            case "quickNavigation": self.shellAction?(["op":"palette"])
             case "focusAddress": NotificationCenter.default.post(name: .neutrinoFocusAddress, object: self.session.id)
             case "closeTab":
                 if let action = self.shellAction { action(["op":"closeTab","id":id.uuidString]) }

@@ -25,3 +25,9 @@ The live sidebar can be resized with its handle or arrow keys. Tab moves retain 
 [Laws of UX](https://lawsofux.com/) guide familiar shortcuts, grouped choices, reachable targets, and immediate feedback. [Material](https://m3.material.io/) informs consistent action hierarchy and control states. [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/) informs window behavior, drag/drop, keyboard access and reduced motion. [Carbon](https://carbondesignsystem.com/) informs labels, empty states, validation and recovery. These are principles, not competing default component libraries.
 
 The [gauntlet record](GAUNTLET.md) separates source, browser-harness, native-image, and interaction evidence. Arc remains the reference. A screenshot cannot establish interaction quality; a portable test cannot establish macOS behavior. Retained storage, modules/workers, privacy, downloads, reader/capture, recovery, and update services remain subject to their own tests.
+
+## Violet default
+
+The default is Graphite/Dark with violet accents drawn from the supplied icon. Neutral surfaces, 6px control corners, concise labels and explicit action hierarchy replace the former cream/serif presentation. Ordinary browsing uses inline fields and persistent destinations; command search is reserved for quick navigation. Motion acknowledges selection, setup steps, opening surfaces and dragging, and respects both macOS and app reduced-motion preferences. Start-page tips are optional modules.
+
+Modules are directly accessible from the sidebar and Settings. Installed providers project validated settings, menus, SF Symbol masks, start widgets, theme/layout/tab definitions and removable feature workers. Resources and Focus have visible entry/recovery paths. Theme component scales, densities and corners apply to the Rust shell while site identity, permission confirmations and recovery remain protected.

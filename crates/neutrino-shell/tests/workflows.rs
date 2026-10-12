@@ -460,6 +460,7 @@ fn utility_pages_preserve_browser_tools_and_routine_menus_are_nonmodal() {
 fn focus_recovers_after_overlays_and_address_focus_and_spaces_stay_in_profile() {
     let mut s = shell();
     s.snapshot["focusMode"] = json!(true);
+    s.screen = "modules".into();
     s.dispatch(json!({"op":"palette"}));
     assert!(commands(&s.dispatch(json!({"op":"escape"}))).is_empty());
     assert_eq!(

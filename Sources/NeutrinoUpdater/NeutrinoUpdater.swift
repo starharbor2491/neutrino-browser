@@ -31,7 +31,7 @@ struct NeutrinoUpdater {
             guard try ReleaseTrust.verifyCodeIntegrity(helper, identifier: "org.neutrino.updater") == ReleaseTrust.verifyCodeIntegrity(bundledHelper, identifier: "org.neutrino.updater") else {
                 throw ValidationError("The updater does not match the installed application.")
             }
-            if case .developerID(let team) = authority { try ReleaseTrust.verifySignature(helper, team: team, identifier: "org.neutrino.updater", notarized: false) }
+            if case .developerID(let team,_) = authority { try ReleaseTrust.verifySignature(helper, team: team, identifier: "org.neutrino.updater", notarized: false) }
             let current = try ReleaseTrust.metadata(of: currentApp, requireCompatibleArchitecture: false)
             let architecture: String
             #if arch(arm64)
@@ -52,7 +52,7 @@ struct NeutrinoUpdater {
                 // candidates must meet the current build/security floor above.
                 try ReleaseTrust.verifyBundleTree(app)
                 switch authority {
-                case .developerID(let team): try ReleaseTrust.verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
+                case .developerID(let team,_): try ReleaseTrust.verifySignature(app, team: team, identifier: "org.neutrino.browser", notarized: true)
                 case .githubPreview: _ = try ReleaseTrust.verifyCodeIntegrity(app, identifier: "org.neutrino.browser")
                 }
             }

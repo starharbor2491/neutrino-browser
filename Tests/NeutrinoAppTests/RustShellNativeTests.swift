@@ -60,8 +60,8 @@ extension NativeIntegrationTests {
       let coordinator=RustShellCoordinator(app:app,model:model,downloadCenter:nil,previewStep:nil,openWindow:nil)
       let window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:760),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
       window.contentView=coordinator.container;window.makeKeyAndOrderFront(nil)
-      defer { coordinator.stop();model.close();window.close();try? FileManager.default.removeItem(at:directory) }
-      let web=coordinator.container.chrome;try await RustShellAcceptance.waitUntilReady(web)
+      defer { coordinator.stop();model.closeWindow();window.orderOut(nil);try? FileManager.default.removeItem(at:directory) }
+      let web=try await RustShellAcceptance.waitForShell(in:window)
       try await RustShellAcceptance.action(["op":"screen","value":"modules"],web:web)
       try await RustShellAcceptance.action(["op":"module-select","value":"org.neutrino.notes"],web:web)
       _ = try await web.evaluateJavaScript("const setting=document.querySelector('[data-module-setting=defaultTitle]');setting.value='Scratchpad';setting.dispatchEvent(new Event('change',{bubbles:true}));")
@@ -69,7 +69,7 @@ extension NativeIntegrationTests {
       try await RustShellAcceptance.action(["op":"screen","value":"library","section":"notes"],web:web)
       try await RustShellAcceptance.action(["op":"native","action":"createNote"],web:web)
       #expect(app.library.notes.last?.title == "Scratchpad")
-      try await RustShellAcceptance.action(["op":"escape"],web:web)
+      try await RustShellAcceptance.action(["op":"screen","value":"modules"],web:web)
       try await RustShellAcceptance.action(["op":"native","action":"toggleFocus"],web:web)
       #expect(model.focusMode)
       try await RustShellAcceptance.action(["op":"escape"],web:web)

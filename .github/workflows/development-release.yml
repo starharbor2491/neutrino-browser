@@ -211,4 +211,15 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           release_version="$(python3 -c 'import json; print(json.load(open("release/catalog.json"))["releases"][0]["release"]["version"])')"
-          gh release create "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
+          if gh release view "v$release_version" --json isDraft > "$RUNNER_TEMP/neutrino-existing-release.json"; then
+            python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          if not json.loads((Path(os.environ['RUNNER_TEMP'])/'neutrino-existing-release.json').read_text())['isDraft']:
+              raise SystemExit('Published releases are immutable; choose a new version')
+          PY
+          else
+            gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
+          fi
+          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json --clobber
+          gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md

@@ -12,6 +12,9 @@ jobs:
   discover:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
     outputs:
       changed: ${{ steps.candidate.outputs.changed }}
       head: ${{ steps.candidate.outputs.head }}
@@ -19,7 +22,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: Retry an unpublished accepted preview before checking upstream
+        id: retry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/retry-preview-publication.py
       - name: Verify stable upstream candidate archives
+        if: steps.retry.outputs.published == 'true'
         id: candidate
         run: |
           python3 scripts/check-chromium-update.py --verify-archives
@@ -40,6 +51,8 @@ jobs:
     if: needs.discover.outputs.changed == 'true'
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      NEUTRINO_BUILD_NUMBER: ${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,10 +64,12 @@ jobs:
       - name: Apply verified candidate pin
         run: |
           python3 - <<'PY'
-          import json
+          import json,os
           from pathlib import Path
           candidate=json.loads(Path('cef-candidate.json').read_text())
           Path('ChromiumRuntime/cef-version.json').write_text(json.dumps(candidate['pin'],indent=2)+'\n')
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('NEUTRINO_VERSION='+Path('PREVIEW_VERSION').read_text().strip()+'\n')
           PY
       - run: ./scripts/test.sh
       - name: Compile upstream engine with Neutrino integration
@@ -64,6 +79,8 @@ jobs:
           NEUTRINO_UPDATE_CHANNEL: preview
           NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-candidate/Chromium-arm64.neutrinoengine
         run: ./scripts/build-app.sh
+      - name: Package the complete candidate for installed acceptance
+        run: python3 scripts/package-release.py --development
       - name: Verify updater, launch, data save and ordinary quit
         env:
           NEUTRINO_DISTRIBUTION_TEST_APP: ${{ github.workspace }}/dist/Neutrino.app

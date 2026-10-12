@@ -500,7 +500,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         webView.load(URLRequest(url:URL(string:"neutrino-ui://shell/index.html")!))
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         let url = navigationAction.request.url
         decisionHandler(url?.scheme == "neutrino-ui" && url?.host == "shell" && navigationAction.targetFrame?.isMainFrame == true ? .allow : .cancel)
     }

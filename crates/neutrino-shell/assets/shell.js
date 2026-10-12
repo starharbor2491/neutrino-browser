@@ -623,6 +623,18 @@
         e.target.matches(textInputSelector) ||
         (e.target.matches("select") && !currentEditing),
       command = e.metaKey || e.ctrlKey;
+    if (e.isComposing) return;
+    if (command && ["l","k","t"].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      const key=e.key.toLowerCase();
+      send({op:key==="l"?"focus-address":key==="k"?"palette":e.shiftKey?"reopenTab":"newTab"});
+      return;
+    }
+    if (e.key==="Enter" && e.target.matches('input[data-name]')) {
+      const action=e.target.closest('.popover-menu')?.querySelector('button.primary[data-op]');
+      if (action && e.target.value.trim()) { e.preventDefault();send({...action.dataset}); }
+      return;
+    }
     const moving = e.target.closest("[data-drag-dialog]");
     if (
       moving &&
@@ -740,13 +752,7 @@
       send({ op: "sidebar-width", value: Math.max(200, Math.min(340, v)) });
       return;
     }
-    if (command && e.key.toLowerCase() === "l") {
-      e.preventDefault();
-      send({ op: "palette" });
-    } else if (command && e.key.toLowerCase() === "t") {
-      e.preventDefault();
-      send({ op: e.shiftKey ? "reopenTab" : "newTab" });
-    } else if (command && e.key.toLowerCase() === "z" && !typing) {
+    if (command && e.key.toLowerCase() === "z" && !typing) {
       e.preventDefault();
       send({
         op: root.querySelector(".editor")

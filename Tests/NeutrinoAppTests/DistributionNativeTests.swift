@@ -10,6 +10,12 @@ import NeutrinoDistribution
 extension NativeIntegrationTests {
 @Suite(.serialized)
 struct DistributionNativeTests {
+    @Test func signedPreviewsKeepThePreviewChannelWithoutWeakeningPublisherTrust() {
+        #expect(ReleaseTrust.UpdateAuthority.developerID("TESTTEAM",previews:true).includesPreviews)
+        #expect(!ReleaseTrust.UpdateAuthority.developerID("TESTTEAM").includesPreviews)
+        #expect(ReleaseTrust.UpdateAuthority.githubPreview.includesPreviews)
+        #expect(ReleaseTrust.UpdateAuthority.developerID("TESTTEAM",previews:true) != .githubPreview)
+    }
     @Test func consumerRequirementSupportsNotarizationAndRejectsUnidentifiedCode() throws {
         var requirement: SecRequirement?
         #expect(SecRequirementCreateWithString("notarized" as CFString, [], &requirement) == errSecSuccess)
