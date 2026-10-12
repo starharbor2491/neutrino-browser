@@ -288,15 +288,74 @@ fn undo_toast_is_attached_only_to_the_tab_move() {
 }
 #[test]
 fn split_error_keeps_the_healthy_pane_visible() {
-    let mut s=shell();s.snapshot["session"]["split"]=json!({"first":"a","second":"b"});s.snapshot["pageError"]=json!("offline");s.snapshot["pageErrors"]=json!({"a":"offline"});let snapshot=s.snapshot.clone();let r=s.dispatch(json!({"op":"sync","snapshot":snapshot}));let html=r["html"].as_str().unwrap();assert!(html.contains("data-page=\"b\""));assert!(!html.contains("data-page=\"a\""));assert!(html.contains("Exit split view"));
+    let mut s = shell();
+    s.snapshot["session"]["split"] = json!({"first":"a","second":"b"});
+    s.snapshot["pageError"] = json!("offline");
+    s.snapshot["pageErrors"] = json!({"a":"offline"});
+    let snapshot = s.snapshot.clone();
+    let r = s.dispatch(json!({"op":"sync","snapshot":snapshot}));
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("data-page=\"b\""));
+    assert!(!html.contains("data-page=\"a\""));
+    assert!(html.contains("Exit split view"));
 }
 #[test]
 fn auxiliary_downloads_have_no_library_or_browser_capability() {
-    let mut s=shell();s.dispatch(json!({"op":"sync","snapshot":{"downloadsWindow":true,"completedOnboarding":true,"private":true,"downloads":[]}}));
-    for request in [json!({"op":"section","value":"notes"}),json!({"op":"native","action":"createNote"}),json!({"op":"screen","value":"settings"}),json!({"op":"newTab"})] {let r=s.dispatch(request);assert!(commands(&r).is_empty());let html=r["html"].as_str().unwrap();assert!(html.contains("downloads-window"));assert!(!html.contains("Library sections"));assert!(!html.contains("workspace-rail"));}
+    let mut s = shell();
+    s.dispatch(json!({"op":"sync","snapshot":{"downloadsWindow":true,"completedOnboarding":true,"private":true,"downloads":[]}}));
+    for request in [
+        json!({"op":"section","value":"notes"}),
+        json!({"op":"native","action":"createNote"}),
+        json!({"op":"screen","value":"settings"}),
+        json!({"op":"newTab"}),
+    ] {
+        let r = s.dispatch(request);
+        assert!(commands(&r).is_empty());
+        let html = r["html"].as_str().unwrap();
+        assert!(html.contains("downloads-window"));
+        assert!(!html.contains("Library sections"));
+        assert!(!html.contains("workspace-rail"));
+    }
 }
 #[test]
 fn keep_editing_forgets_the_cancelled_exit_and_save_completes_the_new_one() {
-    let mut s=shell();s.dispatch(json!({"op":"screen","value":"editor"}));s.dispatch(json!({"op":"dock","component":"tabs","region":"trailing"}));s.dispatch(json!({"op":"screen","value":"settings"}));s.dispatch(json!({"op":"escape"}));assert!(s.pending_exit.is_none());s.dispatch(json!({"op":"escape"}));s.dispatch(json!({"op":"editor-cancel"}));assert_eq!(s.screen,"browse");
-    s.dispatch(json!({"op":"screen","value":"editor"}));s.dispatch(json!({"op":"dock","component":"tabs","region":"trailing"}));s.dispatch(json!({"op":"screen","value":"settings"}));let r=s.dispatch(json!({"op":"editor-save"}));assert_eq!(commands(&r)[0]["op"],"applyConfiguration");assert_eq!(s.screen,"settings");assert!(s.draft.is_none());
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"dock","component":"tabs","region":"trailing"}));
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    s.dispatch(json!({"op":"escape"}));
+    assert!(s.pending_exit.is_none());
+    s.dispatch(json!({"op":"escape"}));
+    s.dispatch(json!({"op":"editor-cancel"}));
+    assert_eq!(s.screen, "browse");
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"dock","component":"tabs","region":"trailing"}));
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let r = s.dispatch(json!({"op":"editor-save"}));
+    assert_eq!(commands(&r)[0]["op"], "applyConfiguration");
+    assert_eq!(s.screen, "settings");
+    assert!(s.draft.is_none());
+}
+
+#[test]
+fn global_search_reveals_results_but_cancel_returns_to_settings() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    s.dispatch(json!({"op":"palette"}));
+    s.dispatch(json!({"op":"escape"}));
+    assert_eq!(s.screen, "settings");
+    s.dispatch(json!({"op":"palette","value":"Alpha"}));
+    let results = s.results();
+    let index = results.iter().position(|r| r["kind"] == "tab").unwrap();
+    let r = s.dispatch(json!({"op":"select-result","index":index}));
+    assert_eq!(commands(&r)[0]["op"], "selectTab");
+    assert_eq!(s.screen, "browse");
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    s.dispatch(json!({"op":"navigate","value":"https://example.org"}));
+    assert_eq!(s.screen, "browse");
+    s.dispatch(json!({"op":"screen","value":"library"}));
+    s.sidebar_hidden = true;
+    s.dispatch(json!({"op":"reveal-workspace"}));
+    assert_eq!(s.screen, "browse");
+    assert!(!s.sidebar_hidden);
 }

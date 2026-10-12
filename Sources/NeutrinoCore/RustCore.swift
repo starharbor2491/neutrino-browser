@@ -6,7 +6,7 @@ import NeutrinoRust
 public enum RustCore {
     public static func request(_ request: [String: Any]) throws -> Any {
         let data = try JSONSerialization.data(withJSONObject: request)
-        guard data.count <= 8_388_608, let json = String(data: data, encoding: .utf8),
+        guard data.count <= 64 * 1024 * 1024, let json = String(data: data, encoding: .utf8),
               let pointer = json.withCString({ neutrino_core_request($0) }) else {
             throw ValidationError("The browser request could not be encoded.")
         }

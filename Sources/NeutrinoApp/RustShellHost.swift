@@ -248,12 +248,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             snapshot["session"] = encoded(projectedSession)
             let tab = model.activeWebTab
             snapshot["loading"] = tab.loading
-            snapshot["pageErrors"] = model.pageErrors
+            let visible = model.visibleEngineTabs
+            snapshot["pageErrors"] = Dictionary(uniqueKeysWithValues: visible.compactMap { id, page in page.errorMessage.map { (id.uuidString, $0) } })
             if let error = tab.errorMessage { snapshot["pageError"] = error }
             snapshot["downloads"] = model.downloads.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
             // Only account identity is projected. Password values never enter the UI snapshot.
             snapshot["credentials"] = credentialMetadata
-            let engines = model.visibleEngineTabs
+            let engines = visible.map(\.page)
             let identities = Set(engines.map(ObjectIdentifier.init))
             if observedEngines != identities {
                 observedEngines = identities; engineObservations.removeAll()
@@ -261,6 +262,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
             let document = model.session.selectedTabID.uuidString + ":" + tab.navigationRevision.uuidString
             if let responseDocument, responseDocument != document { assistantResponse = ""; self.responseDocument = nil }
+            snapshot["assistantResponse"] = assistantResponse
 
         }
         if let center = downloadCenter {

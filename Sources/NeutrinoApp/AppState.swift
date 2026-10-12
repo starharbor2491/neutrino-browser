@@ -486,7 +486,8 @@ final class AppState: ObservableObject {
         } catch { notice = error.localizedDescription; return false }
     }
     func exportBookmarks(profileID: UUID) {
-        saveFile(BookmarkExchange.export(library.bookmarks.filter { $0.profileID == profileID }), name: "Neutrino Bookmarks.html", type: .html)
+        do { saveFile(try BookmarkExchange.export(library.bookmarks.filter { $0.profileID == profileID }), name: "Neutrino Bookmarks.html", type: .html) }
+        catch { notice = error.localizedDescription }
     }
     func applyConfiguration(_ configuration: Configuration) {
         var checked = configuration; checked.normalize()

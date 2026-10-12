@@ -1,31 +1,97 @@
 // SPDX-License-Identifier: MPL-2.0
 // DOM/platform adapter only. Rust owns rendering, validation and interaction state.
 (()=>{'use strict';
-const root=document.getElementById('app');let chain=Promise.resolve(),currentOverlay=false,generation=0,drag=null,resize=null,geometryFrame=0,returnFocus=null,composition=false,pendingPatch=null,currentContext=null;
+const root=document.getElementById('app');let chain=Promise.resolve(),currentOverlay=false,generation=0,drag=null,resize=null,geometryFrame=0,returnFocus=null,composition=false,currentContext=null;
 const native=()=>window.webkit?.messageHandlers?.neutrino;
 async function transport(message){if(native())return await native().postMessage(message);const r=await fetch('/dispatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(message)});if(!r.ok)throw Error('Connection unavailable');return await r.json();}
 function selector(el){if(!el)return null;if(el.id)return '#'+CSS.escape(el.id);for(const key of ['data-setup','data-name','data-note','data-editor'])if(el.hasAttribute(key))return el.tagName.toLowerCase()+'['+key+'="'+CSS.escape(el.getAttribute(key))+'"]'+(el.hasAttribute('data-note-field')?'[data-note-field="'+CSS.escape(el.getAttribute('data-note-field'))+'"]':'');if(el.matches('button[data-op]'))return 'button'+(el.classList[0]&&el.classList[0]!=='selected'?'.'+CSS.escape(el.classList[0]):'')+['data-op','data-id','data-value','data-action','data-key','data-component','data-region'].filter(k=>el.hasAttribute(k)).map(k=>'['+k+'="'+CSS.escape(el.getAttribute(k))+'"]').join('');if(el.name)return el.tagName.toLowerCase()+'[name="'+CSS.escape(el.name)+'"]';return null;}
-function patch(result){
- const sameContext=currentContext===null||currentContext===result.context;
- if(result.passive&&sameContext&&document.activeElement?.matches('[data-note]')||composition&&sameContext){pendingPatch=result;return;}
- if(result.context)currentContext=result.context;pendingPatch=null;
- if(result.generation&&result.generation<generation)return;if(result.generation)generation=result.generation;if(result.error){announce(result.error);return;}if(!result.html)return;const active=document.activeElement,key=selector(active),selection=active&&typeof active.selectionStart==='number'?[active.selectionStart,active.selectionEnd]:null;
- const preserved=key&&active.matches('input,textarea,select')?active.value:null;
- const scrolls=[...root.querySelectorAll('.tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content')].map(e=>[e.className,e.scrollTop]);
- const fields=[...root.querySelectorAll('.ai-form input,.ai-form select')].map(e=>[e.name,e.value]);
- const openDetails=[...root.querySelectorAll('details[open]')].map(e=>e.className);
- const hadDialog=!!root.querySelector('.command-palette,.popover-menu,.utility-screen');
- root.innerHTML=result.html;currentOverlay=!!result.overlay;
- const dialog=topDialog();
- for(const el of root.querySelectorAll('.browser-shell,.editor,.utility-screen,.command-palette'))el.inert=!!dialog&&!el.contains(dialog)&&el!==dialog;
- if(dialog&&!hadDialog)returnFocus=key;
- for(const [name,value]of fields){const el=root.querySelector('.ai-form [name="'+CSS.escape(name)+'"]');if(el)el.value=value;}
- for(const cls of openDetails){const el=root.getElementsByClassName(cls)[0];if(el)el.open=true;}
- for(const [cls,top] of scrolls){const el=root.getElementsByClassName(cls)[0];if(el)el.scrollTop=top;}
- const next=key?root.querySelector(key):null;if(result.focus&&(!next||next.id!==result.focus)){const focus=document.getElementById(result.focus);focus?.focus({preventScroll:true});focus?.select?.();}else if(next&&(!dialog||dialog.contains(next))){if(preserved!==null)next.value=preserved;next.focus({preventScroll:true});if(selection&&next.setSelectionRange&&next.type!=='number'&&next.type!=='range')try{next.setSelectionRange(...selection);}catch{}}
- else if(result.focus){const el=document.getElementById(result.focus);if(el){el.focus({preventScroll:true});if(el.id==='command-input')el.select();}}
- else if(dialog){dialog.querySelector('input,button:not(:disabled),select')?.focus({preventScroll:true});}else if(hadDialog&&returnFocus){root.querySelector(returnFocus)?.focus({preventScroll:true});returnFocus=null;}
- announce(result.announce);scalePreview();scheduleGeometry();
+// Keep existing editable nodes alive: replacing a textarea destroys its IME session
+// and native undo stack. Navigation identity, errors and geometry still update on
+// every response; no entire-frame deferral is allowed while the user types.
+function nodeKey(node) {
+ if (node.nodeType !== Node.ELEMENT_NODE) return String(node.nodeType);
+ const tag = node.tagName;
+ if (node.id) return tag + '#' + node.id;
+ for (const attr of ['data-note','data-tab','data-space','data-page']) {
+  if (node.hasAttribute(attr)) return tag + ':' + attr + ':' + node.getAttribute(attr) + ':' + (node.getAttribute('data-note-field') || '');
+ }
+ if (node.matches('input,textarea,select')) return tag + ':' + (node.name || node.dataset.setup || node.dataset.name || node.dataset.editor || node.className);
+ if (node.hasAttribute('data-op')) {
+  const attrs = ['data-op','data-id','data-action','data-key','data-component','data-region'];
+  if (!node.hasAttribute('data-key')) attrs.push('data-value');
+  return tag + ':' + attrs.map(attr => node.getAttribute(attr) || '').join(':');
+ }
+ return tag + ':' + (node.classList[0] || '') + ':' + (node.dataset.folder || '');
+}
+function reconcile(parent, incoming, preserveEditing) {
+ const available = new Map();
+ for (const node of parent.childNodes) {
+  const key = nodeKey(node);
+  if (!available.has(key)) available.set(key, []);
+  available.get(key).push(node);
+ }
+ let cursor = parent.firstChild;
+ for (const fresh of [...incoming.childNodes]) {
+  const current = available.get(nodeKey(fresh))?.shift();
+  if (!current) { parent.insertBefore(fresh.cloneNode(true), cursor); continue; }
+  if (current !== cursor) parent.insertBefore(current, cursor);
+  if (current.nodeType === Node.ELEMENT_NODE) {
+   const editing = preserveEditing && current.matches('input,textarea,select') &&
+    (current === document.activeElement || current.closest('form[data-form]'));
+   for (const attr of [...current.attributes]) {
+    if (!fresh.hasAttribute(attr.name) && !(editing && attr.name === 'value')) current.removeAttribute(attr.name);
+   }
+   for (const attr of fresh.attributes) {
+    if (!(editing && attr.name === 'value') && current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
+   }
+   if (!editing) {
+    reconcile(current, fresh, preserveEditing);
+    if (current.matches('input,textarea,select') && current.value !== fresh.value) current.value = fresh.value;
+   }
+  } else if (current.nodeValue !== fresh.nodeValue) current.nodeValue = fresh.nodeValue;
+  cursor = current.nextSibling;
+ }
+ for (const nodes of available.values()) for (const node of nodes) node.remove();
+}
+function patch(result) {
+ if (result.generation && result.generation < generation) return;
+ if (result.generation) generation = result.generation;
+ if (result.error) { announce(result.error); return; }
+ if (!result.html) return;
+ const sameContext = currentContext === null || currentContext === result.context;
+ if (result.context) currentContext = result.context;
+ const active = document.activeElement, key = selector(active);
+ const selection = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+ const preserved = sameContext && key && active.matches('input,textarea,select') ? active.value : null;
+ const scrolls = [...root.querySelectorAll('.tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list')].map(e => [e.className,e.scrollTop]);
+ const fields = sameContext ? [...root.querySelectorAll('.ai-form input,.ai-form select')].map(e => [e.name,e.value]) : [];
+ const openDetails = [...root.querySelectorAll('details[open]')].map(e => e.className);
+ const hadDialog = !!topDialog();
+ const template = document.createElement('template');
+ template.innerHTML = result.html;
+ reconcile(root, template.content, sameContext);
+ currentOverlay = !!result.overlay;
+ const dialog = topDialog();
+ for (const el of root.querySelectorAll('.browser-shell,.editor,.utility-screen,.command-palette')) el.inert = !!dialog && !el.contains(dialog) && el !== dialog;
+ if (dialog && !hadDialog) returnFocus = key;
+ for (const [name,value] of fields) {
+  const el = root.querySelector('.ai-form [name="'+CSS.escape(name)+'"]');
+  if (el && el.value !== value) el.value = value;
+ }
+ for (const cls of openDetails) { const el = root.getElementsByClassName(cls)[0]; if (el) el.open = true; }
+ for (const [cls,top] of scrolls) { const el = root.getElementsByClassName(cls)[0]; if (el) el.scrollTop = top; }
+ const next = key ? root.querySelector(key) : null;
+ if (result.focus && (!next || next.id !== result.focus)) {
+  const focus = document.getElementById(result.focus); focus?.focus({preventScroll:true}); focus?.select?.();
+ } else if (next && (!dialog || dialog.contains(next))) {
+  if (preserved !== null && next.value !== preserved) next.value = preserved;
+  if (document.activeElement !== next) next.focus({preventScroll:true});
+  if (!composition && next !== active && selection && next.setSelectionRange && next.type !== 'number' && next.type !== 'range') try { next.setSelectionRange(...selection); } catch {}
+ } else if (result.focus) {
+  const el = document.getElementById(result.focus); if (el) { el.focus({preventScroll:true}); if (el.id === 'command-input') el.select(); }
+ } else if (dialog) dialog.querySelector('input,button:not(:disabled),select')?.focus({preventScroll:true});
+ else if (hadDialog && returnFocus) { root.querySelector(returnFocus)?.focus({preventScroll:true}); returnFocus = null; }
+ announce(result.announce); scalePreview(); scheduleGeometry();
 }
 function topDialog(){return root.querySelector('.popover-menu')||root.querySelector('.command-palette')||root.querySelector('.utility-screen');}
 function announce(value){if(value)document.getElementById('announcer').textContent=value;}

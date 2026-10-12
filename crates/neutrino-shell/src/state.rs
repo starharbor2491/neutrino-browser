@@ -105,7 +105,13 @@ impl Shell {
             }
             self.close_screen();
         }
-        if flag(&self.snapshot,"downloadsWindow") && op != "sync" && op != "escape" && !(op == "native" && ["downloadCancel","downloadReveal","downloadOpen"].contains(&text(&request,"action"))) {
+        if flag(&self.snapshot, "downloadsWindow")
+            && op != "sync"
+            && op != "escape"
+            && !(op == "native"
+                && ["downloadCancel", "downloadReveal", "downloadOpen"]
+                    .contains(&text(&request, "action")))
+        {
             return self.response(vec![]);
         }
         let mut commands: Vec<Value> = vec![];
@@ -115,7 +121,10 @@ impl Shell {
         if op == "sync" {
             let previous = self.snapshot["session"]["spaceID"].clone();
             self.snapshot = request["snapshot"].clone();
-            if flag(&self.snapshot,"downloadsWindow") { self.screen="library".into(); self.section="downloads".into(); }
+            if flag(&self.snapshot, "downloadsWindow") {
+                self.screen = "library".into();
+                self.section = "downloads".into();
+            }
             if previous != self.snapshot["session"]["spaceID"] {
                 self.tab_undo.clear();
                 self.menu.clear();
@@ -210,6 +219,10 @@ impl Shell {
                 "sidebar" => {
                     self.sidebar_hidden = !self.sidebar_hidden;
                 }
+                "reveal-workspace" => {
+                    self.close_screen();
+                    self.sidebar_hidden = false;
+                }
                 "navigate" | "activate-result" => {
                     let value = if op == "activate-result" {
                         self.results()
@@ -222,12 +235,14 @@ impl Shell {
                     if text(&value, "kind") == "tab" {
                         commands.push(json!({"op":"selectTab","id":value["id"]}));
                         self.palette = false;
+                        self.close_screen();
                     } else if let Some(url) = resolve_address(
                         text(&value, "value"),
                         text(&self.snapshot["preferences"], "search"),
                     ) {
                         commands.push(json!({"op":"navigate","url":url}));
                         self.palette = false;
+                        self.close_screen();
                     } else {
                         self.notice = "Enter a website address or a search.".into();
                     }

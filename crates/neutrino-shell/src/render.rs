@@ -190,6 +190,7 @@ fn horizontal_tabs(s: &Shell, preview: bool) -> Markup {
         @for folder in array(&s.snapshot["folders"]) {
             div class="horizontal-group" data-drop-group="folder" data-folder=(text(folder,"id")) {
                 button class="horizontal-group-label" data-op="toggleFolder" data-id=(text(folder,"id")) aria-expanded=((!flag(folder,"collapsed")).to_string()){(icon("folder"))(text(folder,"name"))}
+                button class="icon-button folder-options" data-op="menu" data-value=(format!("folder:{}",text(folder,"id"))) aria-label=(format!("Options for {}",text(folder,"name"))){(icon("more"))}
                 @if !flag(folder,"collapsed") {@for t in s.tabs().iter().filter(|t|!flag(t,"pinned")&&t["folderID"]==folder["id"]){(tab_row(t,s,preview))}}
             }
         }
@@ -214,7 +215,7 @@ fn browser(s: &Shell, preview: bool) -> Markup {
         @if panel {aside class="library-panel" aria-label="Library" {header{h2{"Library"}(button("Close library","escape","close"))}(library(s))}}
         @if !horizontal && !s.sidebar_hidden {div class="rail-resizer" role="separator" tabindex="0" aria-label="Sidebar width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="340" aria-valuenow=(width) data-resize="rail" {}}
         main class="browser-main" {header class="page-toolbar" {
-            @if s.sidebar_hidden || horizontal || panel || placement=="trailing" { (button("Show sidebar","sidebar","sidebar"))(button("Back","back","back"))(button("Forward","forward","forward"))(button("Reload page","reload","reload")) }
+            @if s.sidebar_hidden || horizontal || panel || placement=="trailing" { (button(if panel{"Return to tabs"}else{"Show sidebar"},if panel{"reveal-workspace"}else{"sidebar"},"sidebar"))(button("Back","back","back"))(button("Forward","forward","forward"))(button("Reload page","reload","reload")) }
             button class="page-identity" data-op="palette" data-value=(text(s.active(),"url")) title=(text(s.active(),"url")){(icon(if text(s.active(),"url").starts_with("https:"){"lock"}else{"globe"}))span{(if text(s.active(),"url").is_empty(){"New tab".into()}else{host(text(s.active(),"url"))})}}
             div class="page-actions"{(button("Save bookmark","bookmark","bookmark"))(button("Split view","split","split"))button class="icon-button" data-op="screen" data-value="assistant" aria-label="Page assistant"{(icon("spark"))}}
         }
@@ -239,8 +240,8 @@ fn browser(s: &Shell, preview: bool) -> Markup {
     }}
 }
 
-fn page_error(message:&str,id:&str) -> Markup {
-    html!{div class="page-error"{(icon("globe"))h2{"This page couldn’t open"}p{(message)}div class="button-row"{button class="button primary" data-op="native" data-action="reloadTab" data-id=(id){"Try again"}button class="button" data-op="native" data-action="useWebKit" data-id=(id){"Try WebKit"}}}}
+fn page_error(message: &str, id: &str) -> Markup {
+    html! {div class="page-error"{(icon("globe"))h2{"This page couldn’t open"}p{(message)}div class="button-row"{button class="button primary" data-op="native" data-action="reloadTab" data-id=(id){"Try again"}button class="button" data-op="native" data-action="useWebKit" data-id=(id){"Try WebKit"}}}}
 }
 
 pub fn render(s: &Shell) -> Markup {

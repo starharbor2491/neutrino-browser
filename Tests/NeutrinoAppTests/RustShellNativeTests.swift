@@ -24,6 +24,19 @@ extension NativeIntegrationTests {
       try await RustShellAcceptance.action(["op":"screen","value":"library","section":"notes"],web:web)
       let note = try #require(app.library.notes.first)
       try await RustShellAcceptance.action(["op":"native","action":"selectNote","id":note.id.uuidString],web:web)
+      // A passive save/navigation update must preserve WebKit's editable node and
+      // native undo history, without freezing the visible security identity.
+      _ = try await web.evaluateJavaScript("window.noteElement=document.querySelector('textarea[data-note]');noteElement.focus();noteElement.value='Before';noteElement.select();document.execCommand('insertText',false,'After');")
+      try await Task.sleep(for:.milliseconds(150))
+      if let selected = model.session.tabs.firstIndex(where: { $0.id == model.session.selectedTabID }) {
+        model.session.tabs[selected].url = URL(string:"https://identity.example/test")
+      }
+      app.notice = "A visible save failure"
+      try await Task.sleep(for:.milliseconds(180))
+      #expect((try await web.evaluateJavaScript("document.querySelector('textarea[data-note]')===window.noteElement && document.activeElement===noteElement && document.querySelector('.page-identity').innerText.includes('identity.example') && document.body.innerText.includes('A visible save failure')")) as? Bool == true)
+      _ = try await web.evaluateJavaScript("document.execCommand('undo')")
+      try await Task.sleep(for:.milliseconds(150))
+      #expect(app.library.notes.first?.text == "Before")
       _ = try await web.evaluateJavaScript("const e=document.querySelector('textarea[data-note]');e.focus();e.value='Kept after Escape';e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));")
       try await Task.sleep(for:.milliseconds(180))
       #expect(app.library.notes.first?.text == "Kept after Escape")

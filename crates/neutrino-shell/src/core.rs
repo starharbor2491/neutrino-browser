@@ -26,6 +26,8 @@ pub const BLOCKED_DOMAINS: &[&str] = &[
 ];
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
+        "parseBookmarks" => crate::bookmarks::parse(text(&r,"html"))?,
+        "exportBookmarks" => crate::bookmarks::export(&r["bookmarks"]),
         "resolveAddress" => json!(resolve_address(text(&r,"input"), text(&r,"search"))),
         "isWebURL" => json!(Url::parse(text(&r,"url")).is_ok_and(|u| matches!(u.scheme(),"http"|"https") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none())),
         "pageTitle" => json!(text(&r,"title").chars().take(512).collect::<String>()),

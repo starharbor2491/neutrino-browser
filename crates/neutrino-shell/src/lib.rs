@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! The application-owned interface. macOS supplies engine views and platform services;
 //! this crate owns presentation, interaction state, editing and workspace transforms.
+mod bookmarks;
 mod core;
 mod storage;
 pub use core::request as core_request;
@@ -85,7 +86,7 @@ pub unsafe extern "C" fn neutrino_core_request(input: *const c_char) -> *mut c_c
             return Err("Missing core request");
         }
         let bytes = CStr::from_ptr(input).to_bytes();
-        if bytes.len() > 8_388_608 {
+        if bytes.len() > 64 * 1024 * 1024 {
             return Err("Core request is too large");
         }
         core::request(serde_json::from_slice(bytes).map_err(|_| "Invalid core request")?)
