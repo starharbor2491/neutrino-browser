@@ -295,6 +295,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "account": ["connected": ChatGPTAccount.shared.connected, "busy": ChatGPTAccount.shared.busy, "status": ChatGPTAccount.shared.status ?? "", "models": ChatGPTAccount.shared.models],
             "notice": app.notice ?? "", "defaultStatus": defaultStatus, "imported": imported,
             "blinkAvailable": ChromiumRuntime.shared.isInstalled(in: app.dataDirectory),
+            "engineVersion": ChromiumRuntime.cefVersion.components(separatedBy:"chromium-").last ?? "unavailable",
             "assistantResponse": assistantResponse, "assistantBusy": assistantTask != nil,
             "updates": ["version": "Neutrino " + (update.current?.version ?? "development"), "automatic": update.automaticUpdates,
                         "message": update.message ?? "Updates are downloaded from GitHub. Your browsing data is kept.", "busy": update.busy, "pending": update.pending != nil],

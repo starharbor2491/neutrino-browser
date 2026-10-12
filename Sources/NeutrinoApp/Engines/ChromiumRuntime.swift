@@ -11,7 +11,13 @@ import SwiftUI
 @MainActor
 final class ChromiumRuntime: ObservableObject {
     static let shared = ChromiumRuntime()
-    nonisolated static let cefVersion = "154.0.34+g14c5a08+chromium-154.0.8037.98"
+    nonisolated static let cefVersion: String = {
+        let file=Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/CEF-Version.json")
+        guard let size=try? file.resourceValues(forKeys:[.fileSizeKey]).fileSize,size>0,size<=4096,
+              let data=try? Data(contentsOf:file),let pin=try? JSONDecoder().decode(BundledCEFVersion.self,from:data),pin.format==1,
+              pin.version.range(of:#"^\d+\.\d+\.\d+\+g[0-9a-f]+\+chromium-\d+\.\d+\.\d+\.\d+$"#,options:.regularExpression) != nil else { return "unavailable" }
+        return pin.version
+    }()
     @Published private(set) var isLoaded = false
     @Published private(set) var status = "Chromium Chrome runtime"
     private var library: UnsafeMutableRawPointer?
@@ -205,6 +211,8 @@ final class ChromiumRuntime: ObservableObject {
         return false
     }
 }
+
+private struct BundledCEFVersion: Decodable { let format:Int;let version:String }
 
 private struct ChromiumManifest: Decodable {
     let format: Int
