@@ -84,7 +84,13 @@
     if (node.nodeType !== Node.ELEMENT_NODE) return String(node.nodeType);
     const tag = node.tagName;
     if (node.id) return tag + "#" + node.id;
-    for (const attr of ["data-note", "data-tab", "data-space", "data-page"]) {
+    for (const attr of [
+      "data-note",
+      "data-tab",
+      "data-space",
+      "data-page",
+      "data-start-document",
+    ]) {
       if (node.hasAttribute(attr))
         return (
           tag +
@@ -265,7 +271,7 @@
     const next = key ? root.querySelector(key) : null;
     const freshFocus = result.focus && result.focusToken !== focusToken;
     if (freshFocus) focusToken = result.focusToken;
-    if (freshFocus && (!next || next.id !== result.focus)) {
+    if (freshFocus) {
       const focus = document.getElementById(result.focus);
       focus?.focus({ preventScroll: true });
       focus?.select?.();
@@ -284,12 +290,6 @@
         try {
           next.setSelectionRange(...selection);
         } catch {}
-    } else if (freshFocus) {
-      const el = document.getElementById(result.focus);
-      if (el) {
-        el.focus({ preventScroll: true });
-        if (el.id === "command-input") el.select();
-      }
     } else if (dialog)
       dialog
         .querySelector("input,button:not(:disabled),select")

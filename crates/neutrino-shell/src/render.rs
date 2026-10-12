@@ -232,7 +232,7 @@ fn host(url: &str) -> String {
     }
 }
 fn start(s: &Shell) -> Markup {
-    html! {section class="start-surface" aria-label="New tab" {
+    html! {section class="start-surface" data-start-document=(text(s.active(),"id")) aria-label="New tab" {
         div class="start-inner" {
             div class="eyebrow"{(if s.private(){"PRIVATE WINDOW"}else{text(&s.snapshot,"spaceName")})}
             img class="start-logo" src="neutrino.svg" alt="";
