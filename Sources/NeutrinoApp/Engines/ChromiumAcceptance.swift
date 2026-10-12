@@ -67,6 +67,7 @@ enum ChromiumAcceptance {
         defer {
             for id in browser.session.tabs.map(\.id) where !ids.contains(id) { browser.closeTab(id) }
             browser.selectTab(original)
+            browser.shellAction?(["op":"screen","value":"browse"])
             if let i = browser.app.library.profiles.firstIndex(where: { $0.id == browser.profile.id }) { browser.app.library.profiles[i].engineID = oldEngine }
         }
         func wait(_ label:String,_ condition: () -> Bool) async throws {
@@ -118,11 +119,27 @@ enum ChromiumAcceptance {
             }
             return false
         }
+        func performWhenReady(_ title:String) async throws {
+            let deadline = ContinuousClock.now.advanced(by:.seconds(5))
+            repeat {
+                if let menu = NSApp.mainMenu, performMenuItem(title,in:menu) { return }
+                try await Task.sleep(for:.milliseconds(50))
+            } while ContinuousClock.now < deadline
+            var inventory:[String] = []
+            func describe(_ menu:NSMenu) {
+                for item in menu.items where inventory.count < 128 {
+                    inventory.append("\(item.identifier?.rawValue ?? "-"):\(item.title),enabled=\(item.isEnabled),target=\(item.target.map { String(describing:type(of:$0)) } ?? "nil"),action=\(item.action.map(NSStringFromSelector) ?? "nil")")
+                    if let submenu = item.submenu { describe(submenu) }
+                }
+            }
+            if let menu = NSApp.mainMenu { describe(menu) }
+            throw ValidationError("Neutrino \(title) menu unavailable: key=\(NSApp.keyWindow?.windowNumber ?? -1), parent=\(NSApp.keyWindow?.parent?.windowNumber ?? -1), menu=\(inventory.joined(separator:"; "))")
+        }
         page.focus()
         try await wait("page focus before File menu") { page.chromeWindow?.isKeyWindow == true }
-        guard let menu = NSApp.mainMenu, performMenuItem("New tab", in: menu) else { throw ValidationError("The Neutrino New tab menu is unavailable with Blink focused.") }
+        try await performWhenReady("New tab")
         try await wait("New tab menu") { browser.session.tabs.count == count + 1 }
-        guard performMenuItem("Close tab", in: menu) else { throw ValidationError("The Neutrino Close tab menu is unavailable.") }
+        try await performWhenReady("Close tab")
         try await wait("Close tab menu") { browser.session.tabs.count == count }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("File-menu tab actions replaced the existing document.") }

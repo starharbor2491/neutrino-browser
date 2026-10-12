@@ -41,14 +41,19 @@ import NeutrinoCore
         // address palette. SwiftPM's test runner does not own that event loop.
         let originalTab = model.session.selectedTabID, tabCount = model.session.tabs.count
         try await action(["op":"newTab"],web:web)
-        guard model.session.tabs.count == tabCount + 1 else { throw ValidationError("New tab did not create a browser tab.") }
+        guard model.session.tabs.count == tabCount + 1,
+              (try await web.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("New tab did not create a browser tab with its address palette.") }
         window.makeKey(); window.makeFirstResponder(web)
         for type in [NSEvent.EventType.keyDown,.keyUp] {
             guard let event = NSEvent.keyEvent(with:type,location:.zero,modifierFlags:.command,timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,characters:"w",charactersIgnoringModifiers:"w",isARepeat:false,keyCode:13) else { throw ValidationError("Could not create the tab-close keyboard event.") }
             NSApp.postEvent(event,atStart:false)
         }
         let closeDeadline = ContinuousClock.now.advanced(by:.seconds(5))
-        while model.session.tabs.count != tabCount, ContinuousClock.now < closeDeadline { try await Task.sleep(for:.milliseconds(30)) }
+        while ContinuousClock.now < closeDeadline {
+            if model.session.tabs.count == tabCount,
+               (try await web.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true { break }
+            try await Task.sleep(for:.milliseconds(30))
+        }
         guard model.session.tabs.count == tabCount, model.session.selectedTabID == originalTab,
               window.isVisible, !model.isClosed,
               (try await web.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("Command-W did not close the address-palette tab while retaining its browser window.") }
