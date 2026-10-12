@@ -89,6 +89,9 @@ final class ChromiumRuntime: ObservableObject {
     var focusedNativeTab: ChromiumTab? {
         tabs.values.first { $0.chromeWindow?.isKeyWindow == true }
     }
+    func updateProtection(blocking: Bool? = nil) {
+        for tab in tabs.values { if let blocking { tab.blockingEnabled = blocking }; tab.updatePopupPolicy() }
+    }
     var auxiliaryTabs: [ChromiumTab] { tabs.values.filter(\.isAuxiliary) }
     var extensionManagementTabs: [ChromiumTab] {
         tabs.values.filter { $0.url?.scheme == "chrome" && $0.url?.host == "extensions" }
@@ -108,7 +111,7 @@ final class ChromiumRuntime: ObservableObject {
     }
     func finalizeProfileDeletion(_ id: UUID) {
         // Release only after the deletion tombstone is durably saved. A refused
-        // save can reopen the existing private profile without losing its login.
+        // save can reopen the existing Profile without losing its session logins.
         releasePrivateContexts(sessionID: nil, profileID: id)
     }
 
@@ -153,7 +156,7 @@ final class ChromiumRuntime: ObservableObject {
         library = handle
         guard let symbol = dlsym(handle, "neutrino_cef_get_api") else { throw ValidationError("This runtime has no Neutrino engine API.") }
         let getter = unsafeBitCast(symbol, to: neutrino_cef_get_api_function.self)
-        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 5 else {
+        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 7 else {
             throw ValidationError("This runtime uses an incompatible Neutrino engine API.")
         }
         let loadedAPI = pointer.pointee
@@ -224,7 +227,7 @@ private enum ChromiumPackage {
         #else
         let architecture = "x86_64"
         #endif
-        guard manifest.format == 2, manifest.abi == 5, manifest.runtimeStyle == "chromeViews",
+        guard manifest.format == 2, manifest.abi == 7, manifest.runtimeStyle == "chromeViews",
               manifest.architecture == architecture, manifest.cefVersion == ChromiumRuntime.cefVersion else {
             throw ValidationError("This Chromium package is incompatible with this Neutrino build or Mac architecture.")
         }

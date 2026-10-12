@@ -5,7 +5,7 @@ import CSQLite
 @testable import NeutrinoCore
 
 @Test func addressesAreResolvedSafely() {
-    #expect(AddressResolver.resolve("example.com")?.absoluteString == "https://example.com")
+    #expect(AddressResolver.resolve("example.com")?.absoluteString == "https://example.com/")
     #expect(AddressResolver.resolve("localhost:8080/a")?.absoluteString == "http://localhost:8080/a")
     #expect(AddressResolver.resolve(" https://example.com/a?x=1 ")?.host == "example.com")
     #expect(AddressResolver.resolve("javascript:alert(1)") == nil)

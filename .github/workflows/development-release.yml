@@ -2,6 +2,8 @@ name: Publish Neutrino preview
 on:
   push:
     tags: ['v*-preview.*']
+    branches: [main]
+    paths: [PREVIEW_VERSION]
   workflow_dispatch:
     inputs:
       version:
@@ -26,13 +28,15 @@ jobs:
       NEUTRINO_BUILD_NUMBER: ${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Validate preview version
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           python3 - <<'PY'
           import os, re
-          version = os.environ.get('INPUT_VERSION') or os.environ['GITHUB_REF_NAME'].removeprefix('v')
+          from pathlib import Path
+          version = os.environ.get('INPUT_VERSION') or (os.environ['GITHUB_REF_NAME'].removeprefix('v') if os.environ['GITHUB_REF_TYPE'] == 'tag' else Path('PREVIEW_VERSION').read_text().strip())
           if not re.fullmatch(r'\d+\.\d+\.\d+-preview\.\d+', version):
               raise SystemExit('Preview releases require a version such as 1.0.1-preview.1')
           with open(os.environ['GITHUB_ENV'], 'a') as env:
@@ -41,7 +45,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/neutrino-cef-runtime
-          key: neutrino-cef154-views-5-arm64
+          key: neutrino-cef154-views-7-arm64
       - name: Test native application and portable core
         run: ./scripts/test.sh
       - name: Build pinned Blink package
@@ -82,6 +86,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
           name: Neutrino-AppleSilicon-candidate
@@ -127,9 +132,10 @@ jobs:
           (root / 'RELEASE.md').write_text(
               'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
+              'This preview replaces the old SwiftUI browser screens with a Rust-rendered interface: custom controls, draggable tabs, a live docking editor, command search, and seven-step setup. The supplied SVG is now the app icon. SQLite storage and bookmark import/export also run in Rust.\n\n'
               'Automatic updates download from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
-              'Use Settings > Browsing engines > Installation and updates to disable automatic updates or restart immediately.\n\n'
+              'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
               '**Development preview:** ad-hoc signed and unnotarized; macOS may require Open Anyway in Privacy & Security. '
               'This release does not certify the finished core or full browser parity. Native tests, real updater replacement, and installed shell acceptance passed. '
               'Full Blink/extension acceptance: **' + os.environ['BLINK_ACCEPTANCE'] + '**; see the attached receipt/log. '

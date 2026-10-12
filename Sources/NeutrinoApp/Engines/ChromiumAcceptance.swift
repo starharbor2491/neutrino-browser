@@ -6,92 +6,53 @@ import NeutrinoCore
 /// Executed only by the packaged application's isolated native smoke test.
 @MainActor
 enum ChromiumAcceptance {
-    static func verifyExtensionSheet(browser: BrowserModel, ownerWindow: NSWindow) async throws {
+    static func verifyExtensionInterface(browser: BrowserModel, ownerWindow: NSWindow) async throws {
         guard ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil,
-              CommandLine.arguments.contains("--smoke-test"), !browser.app.terminating,
-              !browser.app.finalQuitDataFrozen else {
-            throw ValidationError("Extension sheet acceptance requires the isolated smoke-test launch.")
+              CommandLine.arguments.contains("--smoke-test"), !browser.app.finalQuitDataFrozen else {
+            throw ValidationError("Extension interface acceptance requires the isolated smoke-test launch.")
         }
-        let original = try await waitForExtensionSheet(ownerWindow: ownerWindow, profileID: browser.session.profileID)
-        let profile = Profile(name: "Extension profile acceptance")
-        browser.app.library.profiles.append(profile)
-        defer { browser.app.library.profiles.removeAll { $0.id == profile.id } }
-        func picker(in view: NSView) -> NSPopUpButton? {
-            if let control = view as? NSPopUpButton, control.itemTitles.contains(profile.name) { return control }
-            for child in view.subviews { if let control = picker(in: child) { return control } }
-            return nil
-        }
-        let pickerDeadline = ContinuousClock.now.advanced(by: .seconds(5))
-        var profilePicker: NSPopUpButton?
-        while profilePicker == nil {
-            if let root = ownerWindow.attachedSheet?.contentView { profilePicker = picker(in: root) }
-            guard ContinuousClock.now < pickerDeadline else { throw ValidationError("The extension sheet's native profile selector was not available.") }
-            if profilePicker == nil { try await Task.sleep(for: .milliseconds(100)) }
-        }
-        // SwiftUI routes popup selections through each native menu item; the
-        // NSPopUpButton itself need not have an action.
-        guard let profilePicker, let selection = profilePicker.item(withTitle: profile.name),
-              let action = selection.action else { throw ValidationError("The extension profile selector has no native menu selection action.") }
-        // A profile selection can arrive while an asynchronous Quit is still
-        // awaiting its save decision. It must hide the old profile immediately
-        // and create the selected manager only after cancellation resumes work.
-        browser.app.terminating = true
-        defer { browser.app.terminating = false }
-        profilePicker.selectItem(withTitle: profile.name)
-        guard NSApp.sendAction(action, to: selection.target, from: selection) else {
-            throw ValidationError("The extension profile selector did not handle its native selection action.")
-        }
-        try await Task.sleep(for: .milliseconds(300))
-        guard original.nativeView.window == nil,
-              !ChromiumRuntime.shared.extensionManagementTabs.contains(where: { $0.profileID == profile.id }) else {
-            throw ValidationError("A deferred extension profile selection exposed the old profile or created a browser during Quit.")
-        }
-        browser.app.terminating = false
-        let replacement = try await waitForExtensionSheet(ownerWindow: ownerWindow, profileID: profile.id)
-        guard replacement !== original, original.nativeView.window == nil else {
-            throw ValidationError("Switching extension profiles reused the disposed manager's native host.")
-        }
-        try await waitForManager(replacement)
-        browser.app.terminating = true
-        try await Task.sleep(for: .milliseconds(100))
-        browser.app.terminating = false
-        try await Task.sleep(for: .milliseconds(200))
-        guard try await waitForExtensionSheet(ownerWindow: ownerWindow, profileID: profile.id) === replacement else {
-            throw ValidationError("Refusing Quit needlessly replaced the unchanged extension manager.")
-        }
-        _ = try? await replacement.request("Page.close", parameters: [:], timeout: .seconds(5))
-        let closeDeadline = ContinuousClock.now.advanced(by: .seconds(10))
-        while ownerWindow.attachedSheet != nil || browser.sheet != nil {
-            guard ContinuousClock.now < closeDeadline else { throw ValidationError("Closing the extension manager from Chrome left an empty native sheet open.") }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        // Keep the final manager alive so normal app Quit still proves that
-        // runtime-owned sheet pages are included in shutdown ownership.
-        browser.sheet = .extensions
-        _ = try await waitForExtensionSheet(ownerWindow: ownerWindow, profileID: browser.session.profileID)
-        print("Neutrino Chromium acceptance: native extension profile switching, engine close dismissal, and reopened sheet geometry passed")
-    }
-    private static func waitForExtensionSheet(ownerWindow: NSWindow, profileID: UUID) async throws -> ChromiumTab {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
-        while ContinuousClock.now < deadline {
-            if let tab = ChromiumRuntime.shared.extensionManagementTabs.first(where: {
-                $0.profileID == profileID && $0.nativeView.window?.sheetParent === ownerWindow
-            }), !tab.loading, tab.chromeStyle,
-               let sheet = tab.nativeView.window, let chrome = tab.chromeWindow,
-               chrome.parent === sheet, chrome.isVisible {
-                guard !sheet.preventsApplicationTerminationWhenModal else {
-                    throw ValidationError("The extension manager sheet prevents Quit from reaching Neutrino's application delegate.")
+        let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
+        let originalProfile = browser.session.profileID
+        browser.endSplit()
+        func openManager() async throws -> ChromiumTab {
+            try await RustShellAcceptance.action(["op":"screen","value":"extensions"],web:shell)
+            _ = try await shell.evaluateJavaScript("document.querySelector('[data-op=installExtension]').click()")
+            let deadline = ContinuousClock.now.advanced(by:.seconds(15))
+            while ContinuousClock.now < deadline {
+                if let page = browser.activeWebTab as? ChromiumTab,
+                   page.url?.scheme == "chrome", page.url?.host == "extensions", !page.loading,
+                   page.nativeView.window === ownerWindow, page.chromeWindow?.isVisible == true {
+                    guard page.profileID == browser.session.profileID else { throw ValidationError("The extension manager used another Profile.") }
+                    try await verifyChromeGeometry(page,ownerWindow:ownerWindow)
+                    return page
                 }
-                let expected = sheet.convertToScreen(tab.nativeView.convert(tab.nativeView.bounds.intersection(tab.nativeView.visibleRect), to: nil))
-                guard abs(chrome.frame.minX - expected.minX) < 2, abs(chrome.frame.minY - expected.minY) < 2,
-                      abs(chrome.frame.width - expected.width) < 2, abs(chrome.frame.height - expected.height) < 2 else {
-                    throw ValidationError("The extension manager's Chrome child is misaligned inside its native sheet.")
-                }
-                return tab
+                try await Task.sleep(for:.milliseconds(100))
             }
-            try await Task.sleep(for: .milliseconds(100))
+            throw ValidationError("The extension manager did not open in a Neutrino tab.")
         }
-        throw ValidationError("The extension manager did not become visible inside its native Neutrino sheet.")
+        func closeManager(_ page:ChromiumTab,id:UUID) async throws {
+            _ = try? await page.request("Page.close",parameters:[:],timeout:.seconds(5))
+            let deadline = ContinuousClock.now.advanced(by:.seconds(10))
+            while browser.session.tabs.contains(where:{$0.id == id}) {
+                guard ContinuousClock.now < deadline else { throw ValidationError("Chrome did not close its Neutrino manager tab.") }
+                try await Task.sleep(for:.milliseconds(50))
+            }
+            guard ownerWindow.isVisible,ownerWindow.attachedSheet == nil else { throw ValidationError("Closing the extension manager disrupted its browser window.") }
+        }
+        let original = try await openManager(), originalID = browser.session.selectedTabID
+        let profile = Profile(name:"Extension profile acceptance")
+        browser.app.library.profiles.append(profile)
+        guard browser.app.createSpace(name:profile.name,profileID:profile.id) != nil else { throw ValidationError("The extension acceptance Profile has no Space.") }
+        try await RustShellAcceptance.action(["op":"native","action":"switchProfile","id":profile.id.uuidString],web:shell)
+        let replacement = try await openManager()
+        guard replacement !== original, original.chromeWindow?.isVisible != true else { throw ValidationError("Switching Profiles exposed the previous extension manager.") }
+        try await closeManager(replacement,id:browser.session.selectedTabID)
+        try await RustShellAcceptance.action(["op":"native","action":"switchProfile","id":originalProfile.uuidString],web:shell)
+        browser.selectTab(originalID)
+        guard browser.activeWebTab === original else { throw ValidationError("Returning to the original Profile replaced its extension manager document.") }
+        try await closeManager(original,id:originalID)
+        _ = try await openManager() // Leave a real manager tab open for normal Quit.
+        print("Neutrino Chromium acceptance: Rust extension controls, Profile isolation, retained manager, engine close and quit ownership passed")
     }
     static func verifyKeyboardRouting(browser: BrowserModel, ownerWindow: NSWindow) async throws {
         guard CommandLine.arguments.contains("--smoke-test"),
@@ -106,31 +67,50 @@ enum ChromiumAcceptance {
         defer {
             for id in browser.session.tabs.map(\.id) where !ids.contains(id) { browser.closeTab(id) }
             browser.selectTab(original)
+            browser.shellAction?(["op":"screen","value":"browse"])
             if let i = browser.app.library.profiles.firstIndex(where: { $0.id == browser.profile.id }) { browser.app.library.profiles[i].engineID = oldEngine }
         }
-        func wait(_ condition: () -> Bool) async throws {
+        func wait(_ label:String,_ condition: () -> Bool) async throws {
             let deadline = ContinuousClock.now.advanced(by: .seconds(15))
-            while !condition() { guard ContinuousClock.now < deadline else { throw ValidationError("Neutrino keyboard routing timed out.") }; try await Task.sleep(for: .milliseconds(50)) }
+            while !condition() { guard ContinuousClock.now < deadline else { throw ValidationError("Neutrino keyboard routing timed out: \(label), tabs=\(browser.session.tabs.count), visible=\(ownerWindow.isVisible), closed=\(browser.isClosed).") }; try await Task.sleep(for: .milliseconds(50)) }
         }
         browser.newTab(url: url, engine: .chromium)
         let probe = browser.session.selectedTabID
         let page = try requireChromium(browser.activeWebTab)
-        try await wait { page.url == url && !page.loading && page.chromeWindow?.isVisible == true }
+        try await wait("fixture mount") { page.url == url && !page.loading && page.chromeWindow?.isVisible == true }
         try await verifyChromeGeometry(page, ownerWindow: ownerWindow)
         _ = try await evaluate(page, "(window.neutrinoLiveMarker=73, 'ready')")
         let count = browser.session.tabs.count
         page.focus()
         try key("t", code: 17, modifiers: .command, window: page.chromeWindow!)
-        try await wait { browser.session.tabs.count == count + 1 }
+        try await wait("Command-T") { browser.session.tabs.count == count + 1 }
         guard browser.session.selectedTabID != probe else { throw ValidationError("Command-T did not create a Neutrino tab.") }
         try key("w", code: 13, modifiers: .command, window: ownerWindow)
-        try await wait { browser.session.tabs.count == count }
+        try await wait("Command-W") { browser.session.tabs.count == count && ownerWindow.isVisible && !browser.isClosed }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("Creating and closing a tab replaced the existing document.") }
         page.focus()
         try key("l", code: 37, modifiers: .command, window: page.chromeWindow!)
-        try await wait { ownerWindow.isKeyWindow && ownerWindow.firstResponder is NSTextView }
+        let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
+        let addressDeadline = ContinuousClock.now.advanced(by:.seconds(15))
+        while true {
+            let responder = ownerWindow.firstResponder as? NSView
+            let nativeFocus = ownerWindow.isKeyWindow && (responder === shell || responder?.isDescendant(of:shell) == true)
+            let addressFocus = (try await shell.evaluateJavaScript("document.activeElement?.id === 'command-input'")) as? Bool == true
+            if nativeFocus && addressFocus { break }
+            guard ContinuousClock.now < addressDeadline else { throw ValidationError("Command-L did not focus Neutrino’s address field in its native Rust shell.") }
+            try await Task.sleep(for:.milliseconds(50))
+        }
         guard !page.hasNativeNavigationChrome else { throw ValidationError("Chrome's native toolbar remains active.") }
+        // The address palette intentionally hides native page windows. Dismiss
+        // it through AppKit before testing commands with the page focused.
+        try key("\u{1b}", code:53, window:ownerWindow)
+        let dismissDeadline = ContinuousClock.now.advanced(by:.seconds(5))
+        while (try await shell.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true {
+            guard ContinuousClock.now < dismissDeadline else { throw ValidationError("Escape did not dismiss the address palette.") }
+            try await Task.sleep(for:.milliseconds(30))
+        }
+        try await wait("page remount after address palette") { page.chromeWindow?.parent === ownerWindow && page.chromeWindow?.isVisible == true }
         func performMenuItem(_ title: String, in menu: NSMenu) -> Bool {
             menu.update()
             for (index, item) in menu.items.enumerated() {
@@ -139,11 +119,28 @@ enum ChromiumAcceptance {
             }
             return false
         }
+        func performWhenReady(_ title:String) async throws {
+            let deadline = ContinuousClock.now.advanced(by:.seconds(5))
+            repeat {
+                if let menu = NSApp.mainMenu, performMenuItem(title,in:menu) { return }
+                try await Task.sleep(for:.milliseconds(50))
+            } while ContinuousClock.now < deadline
+            var inventory:[String] = []
+            func describe(_ menu:NSMenu) {
+                for item in menu.items where inventory.count < 128 {
+                    inventory.append("\(item.identifier?.rawValue ?? "-"):\(item.title),enabled=\(item.isEnabled),target=\(item.target.map { String(describing:type(of:$0)) } ?? "nil"),action=\(item.action.map(NSStringFromSelector) ?? "nil")")
+                    if let submenu = item.submenu { describe(submenu) }
+                }
+            }
+            if let menu = NSApp.mainMenu { describe(menu) }
+            throw ValidationError("Neutrino \(title) menu unavailable: key=\(NSApp.keyWindow?.windowNumber ?? -1), parent=\(NSApp.keyWindow?.parent?.windowNumber ?? -1), menu=\(inventory.joined(separator:"; "))")
+        }
         page.focus()
-        guard let menu = NSApp.mainMenu, performMenuItem("New tab", in: menu) else { throw ValidationError("The Neutrino New tab menu is unavailable with Blink focused.") }
-        try await wait { browser.session.tabs.count == count + 1 }
-        guard performMenuItem("Close tab", in: menu) else { throw ValidationError("The Neutrino Close tab menu is unavailable.") }
-        try await wait { browser.session.tabs.count == count }
+        try await wait("page focus before File menu") { page.chromeWindow?.isKeyWindow == true }
+        try await performWhenReady("New tab")
+        try await wait("New tab menu") { browser.session.tabs.count == count + 1 }
+        try await performWhenReady("Close tab")
+        try await wait("Close tab menu") { browser.session.tabs.count == count }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("File-menu tab actions replaced the existing document.") }
         try await verifyNavigationRetry(browser: browser, tab: page, fixtureURL: url)
@@ -360,7 +357,8 @@ enum ChromiumAcceptance {
             for child in view.subviews { if let found = region(identifier, in: child) { return found } }
             return nil
         }
-        guard let root = ownerWindow.contentView, let page = region("neutrino.page", in: root) else {
+        guard let root = ownerWindow.contentView, let page = tab.nativeView.superview as? EngineViewContainer,
+              page.window === ownerWindow, !page.isHidden else {
             throw ValidationError("Neutrino's independent native page layout region is unavailable.")
         }
         let pageRect = ownerWindow.convertToScreen(page.convert(page.bounds, to: nil))

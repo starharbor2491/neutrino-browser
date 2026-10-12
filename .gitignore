@@ -6,3 +6,4 @@ dist/
 *.dmg
 
 __pycache__/
+target/

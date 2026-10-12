@@ -8,6 +8,19 @@ enum NativeTabCommand { case new, close, reopen, previous, next }
 /// Native browser controls observe this state; engines own their website context.
 @MainActor
 class BrowserEngineTab: NSObject, ObservableObject {
+    @Published var faviconDataURL: String?
+    private var faviconOrigin: String?
+    private var faviconTask: Task<Void, Never>?
+    func updateSiteIcon(for url: URL) {
+        let origin = url.scheme.map { $0 + "://" + (url.host ?? "") + ":" + String(url.port ?? 0) }
+        guard origin != faviconOrigin else { return }
+        faviconOrigin = origin; faviconDataURL = nil; faviconTask?.cancel()
+        faviconTask = Task { @MainActor [weak self] in
+            let icon = await SiteIcon.load(for: url)
+            guard !Task.isCancelled, let self, self.faviconOrigin == origin else { return }
+            self.faviconDataURL = icon; self.onChange?(false)
+        }
+    }
     @Published var loading = false
     @Published var progress = 0.0
     @Published var canGoBack = false
@@ -31,6 +44,11 @@ class BrowserEngineTab: NSObject, ObservableObject {
     var title: String? { nil }
     var engineID: BrowserEngineID { preconditionFailure("An engine must identify itself") }
     func refreshActiveContent() {}
+    private var interfaceEditors = Set<UUID>()
+    var interfaceEditing: Bool { !interfaceEditors.isEmpty }
+    func setInterfaceEditing(_ value: Bool, owner: UUID) {
+        if value { interfaceEditors.insert(owner) } else { interfaceEditors.remove(owner) }
+    }
     func performNativeTabCommand(_ command: NativeTabCommand) -> Bool { false }
     var chromiumSessionPages: [ChromiumSessionPage]? { nil }
     func restoreChromiumSessionPages(_ pages: [ChromiumSessionPage]) {}
@@ -47,9 +65,11 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func pageText() async throws -> String { throw ValidationError("This engine cannot read page text.") }
     func selectedText() async throws -> String { throw ValidationError("This engine cannot read selected text.") }
     func fillCredential(_ credential: LocalCredential) async throws { throw ValidationError("Autofill is unavailable in this engine.") }
-    func focus() { nativeView.window?.makeFirstResponder(nativeView) }
+    func focus() { if !interfaceEditing { nativeView.window?.makeFirstResponder(nativeView) } }
     func find(_ text: String, backwards: Bool = false) { preconditionFailure("An engine must implement find") }
     func pageHTML() async throws -> String { throw ValidationError("This engine cannot capture page HTML.") }
     func capturePNG() async throws -> Data { throw ValidationError("This engine cannot capture the page.") }
-    func dispose() { onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil }
+    var hasActiveDownloads: Bool { false }
+    func requestClose() { onClose?() }
+    func dispose() { faviconTask?.cancel(); faviconTask = nil; onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil }
 }

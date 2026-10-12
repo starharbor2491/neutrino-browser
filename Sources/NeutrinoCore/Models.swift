@@ -19,46 +19,20 @@ public enum SearchProvider: String, Codable, CaseIterable, Sendable {
 }
 
 public enum AddressResolver {
-    /// User-entered navigation only. Websites never gain access to local files or custom schemes.
+    /// Navigation policy lives in Rust and is shared with the interface reducer.
     public static func resolve(_ input: String, search: SearchProvider = .duckDuckGo) -> URL? {
-        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-        if let components = URLComponents(string: value), let scheme = components.scheme {
-            if ["http", "https"].contains(scheme.lowercased()),
-               let host = components.host, !host.isEmpty, components.user == nil, components.password == nil {
-                return components.url
-            }
-            // localhost:port and host:port are addresses, not executable schemes.
-            if !value.contains("://"), isHostWithPort(value) {
-                return URL(string: "http://" + value)
-            }
-            if ["javascript", "data", "file", "about", "vbscript"].contains(scheme.lowercased()) || value.contains("://") { return nil }
-            return search.searchURL(value)
-        }
-        if !value.contains(where: { $0.isWhitespace }),
-           (value.contains(".") || value == "localhost" || value.hasPrefix("localhost/") || value.hasPrefix("[")),
-           let parts = URLComponents(string: "https://" + value),
-           let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil {
-            let scheme = (host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]") ? "http://" : "https://"
-            return URL(string: scheme + value)
-        }
-        return search.searchURL(value)
-    }
-    private static func isHostWithPort(_ text: String) -> Bool {
-        guard let parts = URLComponents(string: "http://" + text),
-              let host = parts.host, parts.port != nil, parts.user == nil, parts.password == nil else { return false }
-        return host == "localhost" || host.contains(".") || host.contains(":")
+        guard let value = try? RustCore.request(["op": "resolveAddress", "input": input, "search": search.rawValue]) as? String else { return nil }
+        return URL(string: value)
     }
     public static func isWebURL(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), let host = url.host, !host.isEmpty else { return false }
-        return ["http", "https"].contains(scheme) && url.user == nil && url.password == nil
+        (try? RustCore.request(["op": "isWebURL", "url": url.absoluteString]) as? Bool) ?? false
     }
 }
 
 /// Website titles are limited to 512 Unicode scalars and at most 2048 UTF-8
 /// bytes; grapheme counts alone do not bound combining-character input.
 public func boundedPageTitle(_ title: String) -> String {
-    String(String.UnicodeScalarView(title.unicodeScalars.prefix(512)))
+    (try? RustCore.request(["op": "pageTitle", "title": title]) as? String) ?? "Website"
 }
 
 public enum BrowserEngineID: String, Codable, CaseIterable, Sendable {
@@ -91,6 +65,7 @@ public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
     public var parentID: UUID?
     public var collapsed: Bool?
     public var engineID: BrowserEngineID?
+    public var faviconDataURL: String?
     public var chromiumPages: [ChromiumSessionPage]?
     public var folderID: UUID?
     public var lastUsedAt: Date?
@@ -240,7 +215,7 @@ public enum DesignSystem: String, Codable, CaseIterable, Sendable {
     }
 }
 public enum ColorMode: String, Codable, CaseIterable, Sendable { case system, light, dark }
-public enum Accent: String, Codable, CaseIterable, Sendable { case blue, teal, orange, purple, pink }
+public enum Accent: String, Codable, CaseIterable, Sendable { case blue, teal, orange, purple, pink, rose }
 public enum Density: String, Codable, CaseIterable, Sendable { case comfortable, compact }
 public enum TabPlacement: String, Codable, CaseIterable, Sendable { case top, bottom, leading, trailing }
 public enum BarPlacement: String, Codable, CaseIterable, Sendable { case top, bottom }
@@ -297,7 +272,7 @@ public struct ToolbarComponent: Identifiable, Codable, Equatable, Sendable {
 public struct Theme: Codable, Equatable, Sendable {
     public var design: DesignSystem = .native
     public var colorMode: ColorMode = .system
-    public var accent: Accent = .purple
+    public var accent: Accent = .rose
     public var density: Density = .comfortable
     public var cornerRadius: Double = 10
     public var transparency: Bool = true
@@ -351,7 +326,7 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
         sidebarWidth = sidebarWidth.isFinite ? min(360, max(180, sidebarWidth)) : 240
         if treeTabs == true && (tabs == .top || tabs == .bottom) { tabs = .leading }
         if let value = addressWidth { addressWidth = value.isFinite ? min(1, max(0.4, value)) : 1 }
-        if let value = tabsWidth { tabsWidth = value.isFinite ? min(320, max(140, value)) : 190 }
+        if let value = tabsWidth { tabsWidth = value.isFinite ? min(340, max(200, value)) : 190 }
         if let components = toolbarComponents {
             var ids = Set<UUID>(), commands = Set<ToolbarCommand>()
             toolbarComponents = Array(components.filter { ids.insert($0.id).inserted && ($0.command == .separator || commands.insert($0.command).inserted) }.prefix(32))

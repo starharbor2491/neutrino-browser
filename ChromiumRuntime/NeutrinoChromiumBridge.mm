@@ -42,6 +42,7 @@
 @property(nonatomic, assign) BOOL chromeStyle;
 @property(nonatomic, assign) BOOL navigationChrome;
 @property(nonatomic, assign) BOOL activeContentKnown;
+@property(nonatomic, assign) BOOL inputSuspended;
 - (void)synchronizeBrowserWindow;
 @end
 @implementation NeutrinoChromiumHostView
@@ -51,6 +52,11 @@
 @synthesize chromeStyle;
 @synthesize navigationChrome;
 @synthesize activeContentKnown;
+@synthesize inputSuspended;
+- (void)setInputSuspended:(BOOL)value {
+  inputSuspended=value;
+  [self synchronizeBrowserWindow];
+}
 - (void)synchronizeBrowserWindow {
   if (self.auxiliary) return;
   NSWindow* child = self.browserWindow;
@@ -64,6 +70,12 @@
   child.collectionBehavior=NSWindowCollectionBehaviorFullScreenAuxiliary |
       NSWindowCollectionBehaviorFullScreenDisallowsTiling;
   NSWindow* parent = self.window;
+  child.ignoresMouseEvents=self.inputSuspended;
+  [child setAccessibilityHidden:self.inputSuspended];
+  if (self.inputSuspended && child.keyWindow) {
+    [child resignKeyWindow];
+    [parent makeKeyWindow];
+  }
   // On macOS 14 an unclipped NSView's visibleRect may extend beyond its own
   // bounds. The Chrome child must never cover Neutrino's surrounding controls.
   NSRect visible = NSIntersectionRect(self.bounds, self.visibleRect);
@@ -94,8 +106,9 @@
 - (void)viewDidMoveToWindow { [super viewDidMoveToWindow]; [self synchronizeBrowserWindow]; }
 - (void)setFrame:(NSRect)frame { [super setFrame:frame]; [self synchronizeBrowserWindow]; }
 - (void)setHidden:(BOOL)hidden { [super setHidden:hidden]; [self synchronizeBrowserWindow]; }
-- (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)acceptsFirstResponder { return !self.inputSuspended; }
 - (BOOL)becomeFirstResponder {
+  if (self.inputSuspended) return NO;
   if (self.browserWindow.visible) [self.browserWindow makeKeyWindow];
   return YES;
 }
@@ -224,6 +237,7 @@ struct Page {
   std::string title;
   bool navigation_failed = false;
   bool closing = false;
+  bool requested_close = false;
   bool navigated = false;
   bool popups = false;
   bool awaiting_context = true;
@@ -444,8 +458,17 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (auto client=ForBrowser(browser); client && client!=this) return client->OnGotFocus(browser);
     if (!page_) return;
     auto owner=Group(page_);
+    if (owner->view.inputSuspended) {
+      browser->GetHost()->SetFocus(false);
+      [owner->view synchronizeBrowserWindow];
+      return;
+    }
     RefreshActive(owner);
     if (owner->view.browserWindow.keyWindow) Message(page_,NEUTRINO_CEF_ACTIVATE,"");
+  }
+  bool OnSetFocus(CefRefPtr<CefBrowser> browser,FocusSource source) override {
+    if (auto client=ForBrowser(browser); client && client!=this) return client->OnSetFocus(browser,source);
+    return page_ && Group(page_)->view.inputSuspended;
   }
   bool OnChromeCommand(CefRefPtr<CefBrowser> browser,int id,cef_window_open_disposition_t disposition) override {
     if (auto client = ForBrowser(browser); client && client != this) return client->OnChromeCommand(browser,id,disposition);
@@ -525,6 +548,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
       owner->awaiting_restore_browser=false; page_->navigated=true;
     }
     if (owner->closing) browser->GetHost()->CloseBrowser(true);
+    else if (owner->requested_close) browser->GetHost()->CloseBrowser(false);
     else if (!restoring_browser && !page_->pending_url.empty()) browser->GetMainFrame()->LoadURL(page_->pending_url);
     if (auto active=Active(owner)) State(active);
   }
@@ -1260,7 +1284,10 @@ void* Create(const char* profile,const char* private_window) {
     const uint64_t generation = ++next_context_generation;
     auto context = CefRequestContext::CreateContext(settings,new ContextHandler(key,generation));
     if (!context) { last_error="Chromium could not create an isolated website context."; return nullptr; }
-    contexts.emplace(key,Context{context,0,false,generation,ephemeral,ephemeral ? private_window : "",profile});
+    // A tab is not a website-data lifetime. Keep regular Profile contexts until
+    // Profile deletion or app shutdown, and private contexts until their owning
+    // private window ends. Otherwise closing the last tab drops session cookies.
+    contexts.emplace(key,Context{context,0,false,generation,true,ephemeral ? private_window : "",profile});
   }
   Page* page = Allocate(key);
   if (contexts.at(key).ready) {
@@ -1309,6 +1336,11 @@ void Command(void* opaque,int command,const char* text,double value) {
     owner->admission_closed=true;
     std::vector<CefRefPtr<Client>> clients; for (const auto& entry : pages) clients.push_back(entry.first->client);
     for (const auto& client : clients) client->CancelNativeDownloads(owner);
+    return;
+  }
+  if (command==NEUTRINO_CEF_SUSPEND_INPUT) {
+    owner->view.inputSuspended=value!=0;
+    for (Page* member : Members(owner)) if (value!=0 && member->browser) member->browser->GetHost()->SetFocus(false);
     return;
   }
   if (final_quit_frozen && command!=NEUTRINO_CEF_SYNC_ACTIVE) return;
@@ -1369,9 +1401,14 @@ void Command(void* opaque,int command,const char* text,double value) {
     page->browser->GetMainFrame()->LoadURL(target);
     return;
   }
+  if (command==NEUTRINO_CEF_REQUEST_CLOSE && (!page || !page->browser)) { owner->requested_close=true; return; }
   if (!page || !page->browser) return;
   auto browser=page->browser; auto host=browser->GetHost();
   switch (command) {
+    case NEUTRINO_CEF_REQUEST_CLOSE:
+      // Ordinary UI close must honor beforeunload. Destroy/close_page remains
+      // the explicit teardown path after confirmation or application shutdown.
+      host->CloseBrowser(false); break;
     case NEUTRINO_CEF_SYNC_ACTIVE: break;
     case NEUTRINO_CEF_FOCUS_LOCATION:
       [owner->view.browserWindow makeKeyAndOrderFront:nil];
@@ -1550,7 +1587,9 @@ void ReleasePrivateContexts(const char* private_window,const char* profile) {
   if (window_id.empty() && profile_id.empty()) return;
   for (auto entry=contexts.begin(); entry!=contexts.end();) {
     auto& context=entry->second;
-    if (!context.private_window.empty() &&
+    // A window-scoped release affects only that private window. A Profile-wide
+    // release (used by deletion) also releases its retained regular context.
+    if ((!context.private_window.empty() || window_id.empty()) &&
         (window_id.empty() || context.private_window==window_id) &&
         (profile_id.empty() || context.profile==profile_id)) {
       context.retained=false;
@@ -1569,6 +1608,6 @@ int Shutdown() {
 }
 const char* Error() { return last_error.c_str(); }
 void SetFinalQuitFrozen(int frozen) { final_quit_frozen=frozen!=0; }
-const neutrino_cef_api api={5,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
+const neutrino_cef_api api={7,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
 }
 extern "C" __attribute__((visibility("default"))) const neutrino_cef_api* neutrino_cef_get_api() { return &api; }

@@ -6,6 +6,11 @@ import NeutrinoCore
 
 @MainActor
 final class BrowserModel: ObservableObject {
+    var visibleEngineTabs: [(id: UUID, page: BrowserEngineTab)] {
+        let ids = session.split.map { [$0.first, $0.second] } ?? [session.selectedTabID]
+        return ids.map { ($0, webTab($0)) }
+    }
+    var shellAction: (([String: Any]) -> Void)?
     @Published var session: WindowSession {
         didSet {
             guard !restoringFrozenSession else { return }
@@ -49,7 +54,12 @@ final class BrowserModel: ObservableObject {
         focusMode = false
     }
     @Published var sheet: BrowserSheet?
-    @Published var closedTabs: [BrowserTab] = []
+    private struct ClosedTabContext: Hashable { let profileID: UUID; let spaceID: UUID? }
+    private var closedTabStacks: [ClosedTabContext: [BrowserTab]] = [:]
+    var closedTabs: [BrowserTab] {
+        get { closedTabStacks[ClosedTabContext(profileID: session.profileID, spaceID: session.spaceID)] ?? [] }
+        set { closedTabStacks[ClosedTabContext(profileID: session.profileID, spaceID: session.spaceID)] = newValue; objectWillChange.send() }
+    }
     let isPrivate: Bool
     let app: AppState
     private let privateDownloads = DownloadCenter()
@@ -138,6 +148,8 @@ final class BrowserModel: ObservableObject {
             }
             if let url = tab.url, AddressResolver.isWebURL(url) || url.scheme == "blob" || url.absoluteString == "about:blank" ||
                 (tab.engineID == .chromium && ["chrome", "chrome-extension"].contains(url.scheme ?? "")) {
+                if finished { tab.updateSiteIcon(for: url) }
+                self.session.tabs[index].faviconDataURL = tab.faviconDataURL
                 self.session.tabs[index].url = url
                 self.session.tabs[index].title = boundedPageTitle(tab.title ?? url.host ?? "Website")
                 if self.session.selectedTabID == id && !self.addressEditing { self.address = url.absoluteString }
@@ -161,7 +173,7 @@ final class BrowserModel: ObservableObject {
         }
         tab.onClose = { [weak self] in
             guard let self else { return }
-            if self.session.tabs.contains(where: { $0.id == id }) { self.closeTab(id) }
+            if self.session.tabs.contains(where: { $0.id == id }) { self.completeCloseTab(id) }
             else if let sourceSpaceID { self.app.closeBackgroundTab(id, spaceID: sourceSpaceID) }
         }
         tab.onNotice = { [weak self] message in self?.app.notice = message }
@@ -265,7 +277,22 @@ final class BrowserModel: ObservableObject {
             tab.focus()
         }
     }
+    func requestCloseTab(_ id: UUID) { closeTab(id) }
     func closeTab(_ id: UUID) {
+        guard !isClosed, !app.finalQuitDataFrozen, session.tabs.contains(where: { $0.id == id }) else { return }
+        moveLiveTabHere(id)
+        guard let page = webTabs[id] else { completeCloseTab(id); return }
+        if page.hasActiveDownloads {
+            let alert = NSAlert(); alert.messageText = "Cancel this tab’s downloads?"
+            alert.informativeText = "Keep the tab open until its downloads finish, or cancel them and close the tab."
+            alert.addButton(withTitle: "Keep tab open"); alert.addButton(withTitle: "Cancel downloads and close")
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
+        // Keep the live adapter and canonical descriptor until the engine confirms
+        // closure. A site's beforeunload Cancel leaves both intact.
+        page.requestClose()
+    }
+    private func completeCloseTab(_ id: UUID) {
         guard !app.finalQuitDataFrozen, let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
         captureChromiumSessions()
         let closing = session.tabs[index]
@@ -289,6 +316,7 @@ final class BrowserModel: ObservableObject {
     func reopenClosedTab() {
         guard !app.finalQuitDataFrozen, session.tabs.count < 200, var tab = closedTabs.popLast() else { return }
         tab.id = UUID(); tab.parentID = nil; tab.collapsed = nil
+        if let folder = tab.folderID, space?.folders.contains(where: { $0.id == folder }) != true { tab.folderID = nil }
         if tab.pinned {
             session.tabs.insert(tab, at: session.tabs.firstIndex(where: { !$0.pinned }) ?? session.tabs.endIndex)
         } else { session.tabs.append(tab) }
@@ -459,6 +487,7 @@ final class BrowserModel: ObservableObject {
               app.library.profiles.contains(where: { $0.id == session.profileID }),
               let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
         if session.tabs[index].engineID != .chromium, let url = session.tabs[index].url, !AddressResolver.isWebURL(url) { return }
+        moveLiveTabHere(id)
         let url = safeReopeningURL(session.tabs[index])
         webTabs.removeValue(forKey: id)?.dispose()
         session.tabs[index].engineID = engine
@@ -504,6 +533,7 @@ final class BrowserModel: ObservableObject {
         webTabs.values.forEach { $0.dispose() }; webTabs.removeAll(); tabProfiles.removeAll()
     }
     func disposeEngineTabs(profileID: UUID) {
+        closedTabStacks = closedTabStacks.filter { $0.key.profileID != profileID }
         for id in Array(webTabs.keys) where tabProfiles[id] == profileID {
             app.tabOwnership.release(id, from: session.id)
             webTabs.removeValue(forKey: id)?.dispose(); tabProfiles.removeValue(forKey: id)
@@ -547,13 +577,49 @@ final class BrowserModel: ObservableObject {
         next.spaceID = id; session = next
         panel = nil; addressEditing = false; address = selectedTab.url?.absoluteString ?? ""
         moveLiveTabHere(session.selectedTabID)
+        synchronizeSplit()
+    }
+    func moveTab(_ id: UUID, toSpace destination: UUID) {
+        guard !isPrivate, !isClosed, !app.finalQuitDataFrozen,
+              let source = session.spaceID, source != destination,
+              let from = app.library.spaces?.firstIndex(where: { $0.id == source }),
+              let to = app.library.spaces?.firstIndex(where: { $0.id == destination && $0.profileID == session.profileID }),
+              (app.library.spaces?[to].tabs.count ?? 200) < 200,
+              let descriptor = session.tabs.first(where: { $0.id == id }) else { return }
+        moveLiveTabHere(id)
+        captureChromiumSessions()
+        let live = takeLiveTab(id)
+        var moved = session.tabs.first(where: { $0.id == id }) ?? descriptor
+        moved.parentID = nil; moved.folderID = nil; moved.collapsed = nil
+        // Move in one library transaction: normalization never sees duplicate IDs.
+        var library = app.library
+        library.spaces?[from].tabs.removeAll { $0.id == id }
+        for i in library.spaces![from].tabs.indices where library.spaces![from].tabs[i].parentID == id {
+            library.spaces![from].tabs[i].parentID = descriptor.parentID
+        }
+        if library.spaces![from].tabs.isEmpty { library.spaces![from].tabs = [BrowserTab(engineID: profile.engineID ?? .chromium)] }
+        library.spaces?[to].tabs.append(moved)
+        if let tabs = library.spaces?[from].tabs { receiveSharedTabs(tabs) }
+        app.library = library
+        for window in app.windows.values.compactMap(\.model) where window !== self {
+            if window.session.spaceID == source { window.receiveSharedTabs(library.spaces![from].tabs) }
+            if window.session.spaceID == destination { window.receiveSharedTabs(library.spaces![to].tabs) }
+        }
+        switchSpace(destination)
+        if let live { attach(live, id: id) }
+        selectTab(id)
     }
     func captureChromiumSessions() {
         guard !isClosed, !app.finalQuitDataFrozen, !app.deletingProfileIDs.contains(session.profileID) else { return }
         for (id, tab) in webTabs {
             tab.refreshActiveContent()
-            guard let index = session.tabs.firstIndex(where: { $0.id == id }),
-                  let pages = tab.chromiumSessionPages else { continue }
+            guard let pages = tab.chromiumSessionPages else { continue }
+            guard let index = session.tabs.firstIndex(where: { $0.id == id }) else {
+                if let profileID = tabProfiles[id], let space = app.library.spaces?.first(where: { $0.tabs.contains(where: { $0.id == id }) }) {
+                    app.recordBackgroundTab(tab, id: id, spaceID: space.id, profileID: profileID, finished: false)
+                }
+                continue
+            }
             let saved: [ChromiumSessionPage]? = tab.isShowingStartPage && pages.count == 1 ? nil : ChromiumSessionPage.normalized(pages)
             if session.tabs[index].chromiumPages != saved { session.tabs[index].chromiumPages = saved }
         }

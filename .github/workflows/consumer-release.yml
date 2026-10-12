@@ -38,6 +38,7 @@ jobs:
       NEUTRINO_NOTARY_ISSUER: ${{ secrets.NEUTRINO_NOTARY_ISSUER }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Configure ephemeral signing keychain and notary key
         env:
           CERTIFICATE: ${{ secrets.NEUTRINO_SIGNING_CERTIFICATE_BASE64 }}
@@ -120,6 +121,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
           pattern: Neutrino-consumer-*

@@ -5,7 +5,7 @@ The target is equivalent local user workflows from Arc, Chrome, and Opera/Opera 
 | Area | Target | Current boundary |
 | --- | --- | --- |
 | Navigation | Address/search, back/forward, reload/stop, zoom/find, shortcuts, site identity | Basic native navigation/custom tab/address checks pass; complete workflow acceptance pending |
-| Tabs | Restore/pin/tree/folders/duplicate/reorder/close/reopen, mute/suspend/discard/search/groups | Organization/restore/reorder present; mute/suspend/search incomplete |
+| Tabs | Restore/pin/tree/folders/duplicate/reorder/close/reopen, mute/suspend/discard/search/groups | Organization, restore, direct reordering and command search present; mute/suspend and advanced tab management incomplete |
 | Spaces/windows | Separate Profiles, shared Spaces, live-page transfer, splits, per-Space setups | WebKit native document-transfer/state/setup tests pass; full everyday and Blink acceptance pending |
 | Setup/import | Complete guided setup, optional import/AI, default browser, review | Flow present; import currently HTML bookmarks only |
 | Library | Bookmarks/history/download control/notes/import/export | Services retained; advanced managers and full download history need review |
@@ -13,7 +13,7 @@ The target is equivalent local user workflows from Arc, Chrome, and Opera/Opera 
 | Blocking/privacy | Filtering/exceptions/filter management, private isolation, permissions/site data | Starter domain list and privacy services; full filtering/site-permission UI incomplete |
 | Extensions | Store/local installs, MV3 workers/scripts/storage/permissions, actions/popups/options/side panels, restart/removal | Genuine Web Store install and MV3 worker/script/storage execution pass; `chrome.action.openPopup` fails because Views has no toolbar; complete API/restart acceptance blocked |
 | Media | Codecs, picture-in-picture, local casting, protected streaming, capture permissions | Engine acceptance pending; licensed DRM/codecs and verified streaming blocked |
-| Editor | Direct docking/select/resize/remove/replace/style, undo, app/per-Space setups/recovery | Native layout/screenshots reviewed; complete interactions/accessibility acceptance pending |
+| Editor | Direct docking/select/resize/remove/replace/style, undo, app/per-Space setups/recovery | Rust docking, width dragging, Undo/Redo and expandable live preview present; arbitrary replacement, detailed styling, named setups and full accessibility acceptance pending |
 | AI | BYOK/local, supported account OAuth, explicit selected/page sharing, summaries, reviewed organization | Selected text/page/organization/OpenAI source present; native account acceptance pending; xAI blocked |
 | Arc local | Favorites/Spaces/splits, Peek/Little Arc/Boosts/Easels, archive/search | Workspace/splits/archive started; other equivalents later |
 | Chrome tools | DevTools/task manager/site settings/print/PDF/save page/local translation/reading/accessibility/shortcuts | Reader/capture retained; complete tool surfaces require implementation/acceptance |

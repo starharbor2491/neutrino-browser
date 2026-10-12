@@ -48,6 +48,10 @@ final class ChromiumTab: BrowserEngineTab {
     private var readerContexts: [Int: String] = [:]
     override var nativeView: NSView { hostView }
     var chromeWindow: NSWindow? { hostView.value(forKey: "browserWindow") as? NSWindow }
+    override func setInterfaceEditing(_ value: Bool, owner: UUID) {
+        super.setInterfaceEditing(value, owner: owner)
+        command(Int(NEUTRINO_CEF_SUSPEND_INPUT), value: interfaceEditing ? 1 : 0)
+    }
     override var url: URL? { activeContentKnown ? failedURL ?? pageURL : nil }
     override var title: String? { activeContentKnown ? pageTitle : nil }
     override var isShowingStartPage: Bool { !restoringPages && activeContentKnown && activePristine }
@@ -130,6 +134,7 @@ final class ChromiumTab: BrowserEngineTab {
                           windowID == ObjectIdentifier(chrome) else { return }
                     self.runtime.objectWillChange.send()
                     guard becameKey else { return }
+                    if self.interfaceEditing { self.hostView.window?.makeKey(); return }
                     if let owner = self.hostView.window, owner.isVisible, owner.canBecomeMain {
                         owner.makeMain()
                     }
@@ -147,7 +152,7 @@ final class ChromiumTab: BrowserEngineTab {
             let handled = MainActor.assumeIsolated {
                 guard let self, !self.isAuxiliary,
                       let chrome = self.chromeWindow, windowID == ObjectIdentifier(chrome), chrome.isKeyWindow else { return false }
-                if self.runtime.finalQuitFrozen { return true }
+                if self.runtime.finalQuitFrozen || self.interfaceEditing { return true }
                 if !self.hasNativeNavigationChrome {
                     let command: String
                     if modifiers == NSEvent.ModifierFlags.command.rawValue, key == "l" { command = "focusAddress" }
@@ -261,6 +266,7 @@ final class ChromiumTab: BrowserEngineTab {
     }
     override func updatePopupPolicy() { command(Int(NEUTRINO_CEF_POPUPS), value: allowPopups?() == true ? 1 : 0) }
     override func focus() {
+        guard !interfaceEditing else { return }
         command(Int(NEUTRINO_CEF_FOCUS))
         // Re-selecting the native pane while this child is already key emits
         // no AppKit key-window notification, but still changes command context.
@@ -460,6 +466,11 @@ final class ChromiumTab: BrowserEngineTab {
             request.timeout.cancel()
             request.continuation.resume(throwing: ValidationError("The Chromium page was closed."))
         }
+    }
+    override var hasActiveDownloads: Bool { !downloadIDs.isEmpty }
+    override func requestClose() {
+        guard page != nil, !disposing else { onClose?(); return }
+        command(Int(NEUTRINO_CEF_REQUEST_CLOSE))
     }
     override func dispose() {
         guard page != nil, closeTask == nil else { return }

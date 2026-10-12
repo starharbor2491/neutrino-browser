@@ -372,7 +372,10 @@ private final class DownloadWindowController: NSWindowController, NSWindowDelega
         window.title = "Downloads — Neutrino"
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        window.contentView = NSHostingView(rootView: DownloadsPanel(center: center))
+        if let app = AppDelegate.state {
+            window.contentView = NSHostingView(rootView: RustShellView(app: app, model: nil, downloadCenter: center))
+            window.setContentSize(NSSize(width: 760, height: 560))
+        }
         window.delegate = self
         window.center()
     }

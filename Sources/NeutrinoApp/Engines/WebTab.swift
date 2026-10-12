@@ -310,10 +310,17 @@ struct WebViewHost: NSViewRepresentable {
 @MainActor
 final class EngineViewContainer: NSView {
     private var page: NSView?
+    var isPreviewing = false {
+        didSet { setAccessibilityHidden(isPreviewing) }
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return isPreviewing && hit != nil ? self : hit
+    }
     init(page: NSView) { super.init(frame: .zero); mount(page) }
     required init?(coder: NSCoder) { fatalError("Not used") }
     func mount(_ page: NSView) {
-        guard self.page !== page else { return }
+        guard self.page !== page || page.superview !== self else { return }
         unmount()
         self.page = page
         if page.superview !== self {

@@ -1,6 +1,6 @@
 # Neutrino verification
 
-Run `./scripts/test.sh` with Swift 6 and SQLite development headers. macOS additionally builds and tests the native app targets. Linux runs portable core/reader tests only.
+Run `./scripts/test.sh` with Rust 1.88+, Swift 6 and SQLite development headers. macOS additionally builds and tests the native app targets. Linux runs the Rust workspace and portable Swift core/reader tests.
 
 ## Verified in this workspace
 
@@ -13,9 +13,25 @@ The portable suite covers database round trips/recovery, modules and transaction
 
 Swift syntax parsing checks grammar, not macOS type checking or execution. Native verification runs separately on GitHub's Apple Silicon macOS runners.
 
-## Native CI evidence
+## Rust rebuild checks
 
-Released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
+`8863146` passes 21 Rust workflow/core tests and 71 portable Swift tests, including existing bookmark import/export and SQLite persistence/recovery cases after their Rust migration. Browser-harness checks independently cover search destinations, narrow Library, folders, editor save/discard, docking, note scroll, live identity/error updates, and text Undo/Redo. Follow-up checks cover slider-focused Undo, live account-option availability, and replacement of editable nodes on Profile changes.
+
+The native `RustShellNativeTests` suite uses an actual WKWebView to exercise a large library, immediate note dismissal, live security/error updates during note editing, native text Undo, auxiliary Downloads isolation, canonical AI endpoints and view ownership. Installed smoke also checks editor draft isolation and live-document identity/geometry. These checks must pass on the final compiled revision.
+
+`0ccc58d` [macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38230973377) built and installed the Rust shell, but its black setup captures are invalid visual evidence. Subsequent native compilation failures were fixed, not reported as passes. [c4aa34b native CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38237647239) passed portable, debug/release native, package and installed-shell checks. Its seven setup images are distinct WKWebView snapshots. The new live-page editor is being verified on its own subsequent revision.
+
+[336b1f1 macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38243160959) and [d19a1f0 macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38244385471) passed 165 debug tests, 94 release native tests, packaging, installed shell launch and normal quit. These revisions include the live editor and native input isolation. The portable suite has 22 Rust tests in addition to the 71 Swift Testing and 12 XCTest cases.
+
+Native screenshots now use the OS window compositor, which includes Blink child windows. The full Blink run independently exercises page keyboard controls before editing, rejection during editing, and restored input afterward; editor resize/expand/cancel preserves document identity. Parent-directed mouse events plus the child-window input flag establish a narrower mouse boundary than independent WindowServer targeting. Single shell scroll containers are recorded alongside screenshots.
+
+`7720c97` [macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38247169537) passes 22 Rust tests, the portable Swift suites, 165 macOS debug tests and 94 release native tests. The actual packaged application passes Command-W while its address palette is open, tab/window preservation, editor checks, read-only DMG copy, installed launch, normal quit and removal. This is the verified application source for the final documentation/CI-path cleanup.
+
+The same-source [full Blink run](https://github.com/starharbor2491/neutrino-browser/actions/runs/38247169538) passed native compilation/tests, packaging, custom keyboard and File-menu tab commands, address focus, retained documents, navigation Retry, Reader/capture, download ownership, native hosting, Web Store installation and regular/private cookie-lifetime checks. It fails only the collected MV3 action-popup gate: **Browser window has no toolbar**. Full Blink shutdown/restart acceptance is therefore still incomplete; this result is not a passing core receipt.
+
+## Historical release CI evidence
+
+Pre-Rust released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
 
 [macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38138834489) passed. The debug suite runs 161 tests; release native integration runs 90. The development WebKit app ZIP/DMG passed sealed copy, detached installed launch, ordinary quit and removal. Native captures cover the shell, settings, editor and all eight setup screens. Visual review previously caught and corrected an overflowing editor inspector; its header, exit and Save controls remain visible. Screenshot capture does not verify interactive setup completion or all editor/accessibility workflows.
 
@@ -36,7 +52,7 @@ python3 scripts/package-release.py --development
 python3 scripts/installed-smoke.py --chromium-restart
 ```
 
-The packaged smoke runner also captures all eight guided setup screens without completing the wizard or accessing a real account; those captures still require macOS execution and visual review.
+The Rust packaged smoke runner advances through seven guided setup screens using the real command bridge. It captures them with WKWebView snapshots and rejects identical images. It does not use a real account. Current screenshot and interaction results must be reviewed separately from the historical eight-screen implementation.
 
 Native workspace tests use a real WebKit document to check live-tab identity, unsaved form/JavaScript preservation, callback rewiring, shared descriptors, per-Space setups, and inactive Profile cleanup. Existing services retain real store/worker/download/write-failure tests.
 

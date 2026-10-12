@@ -5,6 +5,11 @@ on:
     paths:
       - 'ChromiumRuntime/**'
       - 'Package.swift'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'neutrino.svg'
+      - 'Sources/NeutrinoRust/**'
       - 'Sources/CSQLite/**'
       - 'Sources/NeutrinoCore/**'
       - 'Sources/NeutrinoEngineABI/**'
@@ -23,7 +28,7 @@ on:
       - 'Resources/Entitlements/**'
       - 'scripts/chromium-runtime.py'
       - 'scripts/build-app.sh'
-      - 'scripts/build-icon.swift'
+      - 'scripts/build-rust.sh'
       - 'scripts/distribution-metadata.py'
       - 'scripts/sign-release.py'
       - 'scripts/package-release.py'
@@ -52,12 +57,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Restore pinned Chromium SDK
         id: cef-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/neutrino-cef-runtime
-          key: neutrino-cef154-views-5-${{ matrix.arch }}
+          key: neutrino-cef154-views-7-${{ matrix.arch }}
       - name: Build pinned Blink package
         id: chromium-build
         run: python3 scripts/chromium-runtime.py --arch "${{ matrix.arch }}" --work-dir "$RUNNER_TEMP/neutrino-cef-runtime"
@@ -66,7 +72,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/neutrino-cef-runtime
-          key: neutrino-cef154-views-5-${{ matrix.arch }}
+          key: neutrino-cef154-views-7-${{ matrix.arch }}
       - name: Test native shell
         id: native-tests
         run: ./scripts/test.sh

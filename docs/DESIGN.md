@@ -1,29 +1,27 @@
 # Neutrino interface
 
-The intended default feels like Arc: a quiet lavender canvas, vertical workspace rail, persistent pinned/folder tabs, and a rounded page area with room to breathe. Vivaldi/Shift inform customization; Helium/Safari inform restraint. Familiar keyboard shortcuts and macOS window behavior remain useful.
+The default uses a warm rose workspace, a quiet sidebar, persistent pins/folders, and a rounded page area. Arc informs the composition and keyboard flow; Vivaldi/Shift inform customization, and Helium/Safari inform restraint. The supplied Neutrino SVG is used unchanged.
 
-The shell uses shared Neutrino button, choice-card, icon, surface, and typography components. Native file pickers, Keychain, system default-browser approval, and website permission dialogs retain their system behavior. These choices are not a claim of completed visual or accessibility acceptance.
+Rust renders custom buttons, segmented choices, switches, menus, tab rows, the command palette, setup, settings, and the editor. Native file pickers, Keychain, default-browser approval, and website permission dialogs retain macOS behavior. See [the implementation boundary](RUST_ARCHITECTURE.md).
 
 ## Organization
 
-Spaces own tab organization and optional named setups. Profiles independently own website identity and engine data. Several Spaces may use one Profile. The app has a default setup; individual Spaces may select a named setup.
+Spaces own tab organization; Profiles independently own website identity and engine data. Multiple Spaces can use one Profile. Each Space can retain an appearance separate from the browser default.
 
-Tabs are shared across windows, but each live document appears in one window/pane at a time. Selecting it elsewhere moves its original view; Duplicate creates a separate tab. Regular tabs restore by default, pinned/folder tabs persist, and optional archiving is recoverable. Private browsing does not persist website/session records.
+Tabs share organization across windows, with one owner for each live document. Selecting a tab elsewhere transfers its view; Duplicate creates a separate tab. Drag tabs to reorder, pin, file into folders, or move to another Space using the same Profile. Menus and keyboard commands provide alternatives. Normal tabs restore, and optional auto-archiving remains recoverable. Private browsing does not persist website/session records.
 
 ## Setup
 
-An eight-stage first-run flow covers welcome, Profile/Space naming, optional bookmarks import, layout/theme, search/privacy, features, optional AI, and final review/default-browser selection. Browsing begins after completion. Import currently accepts HTML bookmarks; other data import needs implementation and verification.
+Seven screens cover welcome, Profile/Space naming, optional HTML bookmarks import, appearance/layout, search/privacy, optional AI, and final review/default-browser selection. Defaults keep required decisions short; no import file or AI credential is required. Back preserves entered choices. Inline validation focuses the missing field. Browsing begins only after setup is saved, and a failed save keeps the wizard available for retry.
 
 ## Editing
 
-Edit mode has a component palette, docking preview, and inspector. Tabs dock on any edge; navigation docks top/bottom; panels dock beside the page. Selection, drag/drop, tab width, density, colors, corners, removal, undo, and reset are present. Advanced controls preserve detailed styles and setup import/export.
+The component palette and live layout preview expose tabs, navigation, and Library docking. Tabs support every edge; navigation supports top/bottom; Library supports either side. Drag a component to a highlighted valid edge or use labeled position controls. Sidebar width, accent, light/dark/system appearance, and density are editable. The active page remains mounted in its original engine while its frame follows the draft; interactions with that page are paused during editing. Save applies the draft to this Space or the browser default. Undo, Redo, Cancel, reset, and save/discard before leaving remain reachable.
 
-Advanced editing returns changes to the parent draft. Cancel exits without applying that draft. Live preview has stable ownership and does not create browsing tabs. Save reviews actual module requirements and can assign a named setup to the current Space.
+The live sidebar can be resized with its handle or arrow keys. Tab moves retain their live pages and offer Undo. Site identity and recovery controls remain reachable in supported layouts. Detailed per-component styling, arbitrary component replacement/removal, and a full named-setup management interface remain product work; retained configuration fields alone are not evidence of those workflows.
 
-Site identity, permission confirmations, and exit/reset/recovery must stay reachable. Future replacement/custom components must uphold those functions.
+## Design rules and review
 
-## Review gates
+[Laws of UX](https://lawsofux.com/) guide familiar shortcuts, grouped choices, reachable targets, and immediate feedback. [Material](https://m3.material.io/) informs consistent action hierarchy and control states. [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/) informs window behavior, drag/drop, keyboard access and reduced motion. [Carbon](https://carbondesignsystem.com/) informs labels, empty states, validation and recovery. These are principles, not competing default component libraries.
 
-Run the app on macOS before judging completion. Review every default screen at multiple window sizes and in light/dark modes; check keyboard focus, VoiceOver names, contrast, hit targets, reduced motion/transparency, and interaction feedback. Verify docking regions and per-Space previews match the actual browser. Source syntax and conceptual previews are insufficient visual evidence.
-
-Retained services include storage, profile cleanup, privacy, downloads, modules/workers, reader, recovery, and trusted distribution. [PARITY.md](PARITY.md) identifies remaining product work; [PRODUCT_PLAN.md](PRODUCT_PLAN.md) is the accepted brief.
+The [gauntlet record](GAUNTLET.md) separates source, browser-harness, native-image, and interaction evidence. Arc remains the reference. A screenshot cannot establish interaction quality; a portable test cannot establish macOS behavior. Retained storage, modules/workers, privacy, downloads, reader/capture, recovery, and update services remain subject to their own tests.
