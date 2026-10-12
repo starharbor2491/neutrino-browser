@@ -1284,7 +1284,10 @@ void* Create(const char* profile,const char* private_window) {
     const uint64_t generation = ++next_context_generation;
     auto context = CefRequestContext::CreateContext(settings,new ContextHandler(key,generation));
     if (!context) { last_error="Chromium could not create an isolated website context."; return nullptr; }
-    contexts.emplace(key,Context{context,0,false,generation,ephemeral,ephemeral ? private_window : "",profile});
+    // A tab is not a website-data lifetime. Keep regular Profile contexts until
+    // Profile deletion or app shutdown, and private contexts until their owning
+    // private window ends. Otherwise closing the last tab drops session cookies.
+    contexts.emplace(key,Context{context,0,false,generation,true,ephemeral ? private_window : "",profile});
   }
   Page* page = Allocate(key);
   if (contexts.at(key).ready) {
@@ -1584,7 +1587,9 @@ void ReleasePrivateContexts(const char* private_window,const char* profile) {
   if (window_id.empty() && profile_id.empty()) return;
   for (auto entry=contexts.begin(); entry!=contexts.end();) {
     auto& context=entry->second;
-    if (!context.private_window.empty() &&
+    // A window-scoped release affects only that private window. A Profile-wide
+    // release (used by deletion) also releases its retained regular context.
+    if ((!context.private_window.empty() || window_id.empty()) &&
         (window_id.empty() || context.private_window==window_id) &&
         (profile_id.empty() || context.profile==profile_id)) {
       context.retained=false;

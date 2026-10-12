@@ -279,6 +279,9 @@ impl Shell {
                     {
                         commands.push(json!({"op":op,"id":tab["id"]}));
                         self.menu.clear();
+                        if ["selectTab", "closeTab"].contains(&op) {
+                            self.palette = false;
+                        }
                     }
                 }
                 "switchSpace" => {

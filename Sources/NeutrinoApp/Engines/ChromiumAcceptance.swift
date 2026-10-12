@@ -69,23 +69,23 @@ enum ChromiumAcceptance {
             browser.selectTab(original)
             if let i = browser.app.library.profiles.firstIndex(where: { $0.id == browser.profile.id }) { browser.app.library.profiles[i].engineID = oldEngine }
         }
-        func wait(_ condition: () -> Bool) async throws {
+        func wait(_ label:String,_ condition: () -> Bool) async throws {
             let deadline = ContinuousClock.now.advanced(by: .seconds(15))
-            while !condition() { guard ContinuousClock.now < deadline else { throw ValidationError("Neutrino keyboard routing timed out.") }; try await Task.sleep(for: .milliseconds(50)) }
+            while !condition() { guard ContinuousClock.now < deadline else { throw ValidationError("Neutrino keyboard routing timed out: \(label), tabs=\(browser.session.tabs.count), visible=\(ownerWindow.isVisible), closed=\(browser.isClosed).") }; try await Task.sleep(for: .milliseconds(50)) }
         }
         browser.newTab(url: url, engine: .chromium)
         let probe = browser.session.selectedTabID
         let page = try requireChromium(browser.activeWebTab)
-        try await wait { page.url == url && !page.loading && page.chromeWindow?.isVisible == true }
+        try await wait("fixture mount") { page.url == url && !page.loading && page.chromeWindow?.isVisible == true }
         try await verifyChromeGeometry(page, ownerWindow: ownerWindow)
         _ = try await evaluate(page, "(window.neutrinoLiveMarker=73, 'ready')")
         let count = browser.session.tabs.count
         page.focus()
         try key("t", code: 17, modifiers: .command, window: page.chromeWindow!)
-        try await wait { browser.session.tabs.count == count + 1 }
+        try await wait("Command-T") { browser.session.tabs.count == count + 1 }
         guard browser.session.selectedTabID != probe else { throw ValidationError("Command-T did not create a Neutrino tab.") }
         try key("w", code: 13, modifiers: .command, window: ownerWindow)
-        try await wait { browser.session.tabs.count == count }
+        try await wait("Command-W") { browser.session.tabs.count == count && ownerWindow.isVisible && !browser.isClosed }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("Creating and closing a tab replaced the existing document.") }
         page.focus()
@@ -111,9 +111,9 @@ enum ChromiumAcceptance {
         }
         page.focus()
         guard let menu = NSApp.mainMenu, performMenuItem("New tab", in: menu) else { throw ValidationError("The Neutrino New tab menu is unavailable with Blink focused.") }
-        try await wait { browser.session.tabs.count == count + 1 }
+        try await wait("New tab menu") { browser.session.tabs.count == count + 1 }
         guard performMenuItem("Close tab", in: menu) else { throw ValidationError("The Neutrino Close tab menu is unavailable.") }
-        try await wait { browser.session.tabs.count == count }
+        try await wait("Close tab menu") { browser.session.tabs.count == count }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("File-menu tab actions replaced the existing document.") }
         try await verifyNavigationRetry(browser: browser, tab: page, fixtureURL: url)

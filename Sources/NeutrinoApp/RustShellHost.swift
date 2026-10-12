@@ -142,13 +142,25 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         chrome.navigationDelegate = self
         editingInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             let windowID = event.window.map(ObjectIdentifier.init)
+            let closeTab = event.type == .keyDown && event.charactersIgnoringModifiers?.lowercased() == "w" &&
+                event.modifierFlags.intersection([.command,.shift,.option,.control]) == .command
             let blocked = MainActor.assumeIsolated {
-                guard let self, !self.editingEngines.isEmpty,
-                      windowID == self.container.window.map(ObjectIdentifier.init),
-                      let responder = self.container.window?.firstResponder as? NSView,
-                      self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) else { return false }
-                self.container.window?.makeFirstResponder(self.container.chrome)
-                return true
+                guard let self, !self.stopped,
+                      windowID == self.container.window.map(ObjectIdentifier.init) else { return false }
+                if !self.editingEngines.isEmpty,
+                   let responder = self.container.window?.firstResponder as? NSView,
+                   self.editingEngines.contains(where: { responder === $0.nativeView || responder.isDescendant(of: $0.nativeView) }) {
+                    self.container.window?.makeFirstResponder(self.container.chrome)
+                    return true
+                }
+                // Cocoa's default Command-W closes the whole window before WK
+                // receives a DOM key event. Own tab closing on the browser window,
+                // including the address palette and the empty new-tab surface.
+                if closeTab, self.ready, let model = self.model, !model.isClosed {
+                    self.sendAction(["op":"closeTab","id":model.session.selectedTabID.uuidString])
+                    return true
+                }
+                return false
             }
             return blocked ? nil : event
         }
@@ -164,6 +176,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             NotificationCenter.default.publisher(for: .neutrinoFocusAddress).sink { [weak self] notification in
                 guard notification.object as? UUID == model.session.id else { return }
                 self?.sendAction(["op": "palette", "value": model.selectedTab.url?.absoluteString ?? ""])
+                self?.container.window?.makeKey()
                 self?.container.window?.makeFirstResponder(self?.container.chrome)
             }.store(in: &subscriptions)
             NotificationCenter.default.publisher(for: .neutrinoFind).sink { [weak self] notification in

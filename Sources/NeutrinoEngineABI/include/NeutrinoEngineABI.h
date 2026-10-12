@@ -39,8 +39,8 @@ typedef struct neutrino_cef_api {
     void (*close_page)(void *page);
     int (*live_pages)(void);
     int (*shutdown)(void);
-    /// Release private context ownership for one window and/or profile. Empty
-    /// fields are wildcards; at least one field must be nonempty.
+    /// Release a private window's contexts, or all contexts of a deleted Profile
+    /// when window ID is empty. At least one field must be nonempty.
     void (*release_private_contexts)(const char *private_window_id, const char *profile_id);
     /// Execute a supported normal Chrome tab command; zero means unavailable.
     int (*native_tab_command)(void *page, int command);

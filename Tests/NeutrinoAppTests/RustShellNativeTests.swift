@@ -21,6 +21,21 @@ extension NativeIntegrationTests {
       window.contentView = coordinator.container; window.makeKeyAndOrderFront(nil)
       defer { coordinator.stop(); model.closeWindow(); window.orderOut(nil); try? FileManager.default.removeItem(at:directory) }
       let web = try await RustShellAcceptance.waitForShell(in:window)
+      let original = model.session.selectedTabID, originalCount = model.session.tabs.count
+      try await RustShellAcceptance.action(["op":"newTab"],web:web)
+      #expect(model.session.tabs.count == originalCount + 1)
+      window.makeKey(); window.makeFirstResponder(web)
+      let close = try #require(NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:.command,timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,characters:"w",charactersIgnoringModifiers:"w",isARepeat:false,keyCode:13))
+      NSApp.postEvent(close,atStart:false)
+      let deadline = ContinuousClock.now.advanced(by:.seconds(3))
+      while model.session.tabs.count != originalCount, ContinuousClock.now < deadline {
+        // SwiftPM does not run NSApplication's normal event loop.
+        if let event = NSApp.nextEvent(matching:[.keyDown,.keyUp],until:Date(),inMode:.default,dequeue:true) { NSApp.sendEvent(event) }
+        try await Task.sleep(for:.milliseconds(30))
+      }
+      #expect(model.session.tabs.count == originalCount && model.session.selectedTabID == original)
+      #expect(window.isVisible && !model.isClosed)
+      #expect((try await web.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true)
       // Exercise range input on the actual custom-scheme origin, where secure
       // context browser APIs available in localhost fixtures may be absent.
       try await RustShellAcceptance.action(["op":"screen","value":"editor"],web:web)

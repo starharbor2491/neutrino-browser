@@ -111,7 +111,7 @@ final class ChromiumRuntime: ObservableObject {
     }
     func finalizeProfileDeletion(_ id: UUID) {
         // Release only after the deletion tombstone is durably saved. A refused
-        // save can reopen the existing private profile without losing its login.
+        // save can reopen the existing Profile without losing its session logins.
         releasePrivateContexts(sessionID: nil, profileID: id)
     }
 
