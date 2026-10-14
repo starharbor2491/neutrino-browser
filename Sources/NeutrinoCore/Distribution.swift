@@ -38,10 +38,11 @@ public struct DistributionEngineManifest: Codable, Sendable {
     public let format: Int
     public let abi: Int
     public let runtimeStyle: String
+    public let hostPresentation: String?
     public let architecture: String
     public let cefVersion: String
     public init(abi: Int, architecture: String, cefVersion: String) {
-        self.format = 2; self.abi = abi; self.runtimeStyle = "chromeClipped"
+        self.format = 2; self.abi = abi; self.runtimeStyle = "chromeViews"; self.hostPresentation = "clippedNative"
         self.architecture = architecture; self.cefVersion = cefVersion
     }
     public func validate(release: DistributionRelease, architecture expected: String?) throws {

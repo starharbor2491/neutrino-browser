@@ -63,6 +63,7 @@
           : "") +
         [
           "data-op",
+          "data-page",
           "data-id",
           "data-value",
           "data-action",

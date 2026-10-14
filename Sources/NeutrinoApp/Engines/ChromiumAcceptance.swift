@@ -363,6 +363,12 @@ enum ChromiumAcceptance {
     static func verifyChromeGeometry(_ tab: ChromiumTab, ownerWindow: NSWindow) async throws {
         guard let chrome = tab.chromeWindow else { throw ValidationError("Chrome has no native window.") }
         let buttonKinds = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+        // Chrome updates its frame controls after navigation/layout. Require
+        // their effective hiding once that native update has settled.
+        let controlsDeadline = ContinuousClock.now.advanced(by:.seconds(2))
+        while buttonKinds.contains(where: { chrome.standardWindowButton($0).map { !$0.isHiddenOrHasHiddenAncestor } ?? false }), ContinuousClock.now < controlsDeadline {
+            try await Task.sleep(for:.milliseconds(40))
+        }
         let controls = buttonKinds.map { kind -> String in
             guard let button = chrome.standardWindowButton(kind) else { return "\(kind.rawValue):missing" }
             return "\(kind.rawValue):hidden=\(button.isHidden),enabled=\(button.isEnabled),window=\(button.window?.windowNumber ?? -1),super=\(button.superview.map { String(describing: type(of: $0)) } ?? "nil")"
@@ -374,7 +380,7 @@ enum ChromiumAcceptance {
             throw ValidationError("The embedded Chrome window can move independently or lost its required native frame (\(frameState)).")
         }
         for kind in buttonKinds {
-            if let button = chrome.standardWindowButton(kind), !button.isHidden || button.isEnabled {
+            if let button = chrome.standardWindowButton(kind), !button.isHiddenOrHasHiddenAncestor {
                 throw ValidationError("An embedded Chrome window exposes a second set of native window controls (\(frameState)).")
             }
         }

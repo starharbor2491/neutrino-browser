@@ -56,6 +56,7 @@ static NSView* PageContentView(NSView* view) {
 @property(nonatomic, assign) BOOL activeContentKnown;
 @property(nonatomic, assign) BOOL inputSuspended;
 - (void)synchronizeBrowserWindow;
+- (void)hideNativeControls:(NSNotification*)notification;
 @end
 @implementation NeutrinoChromiumHostView
 @synthesize browserWindow;
@@ -68,6 +69,21 @@ static NSView* PageContentView(NSView* view) {
 @synthesize navigationChrome;
 @synthesize activeContentKnown;
 @synthesize inputSuspended;
+- (void)setBrowserWindow:(NSWindow*)value {
+  if (browserWindow==value) return;
+  if (browserWindow) [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidUpdateNotification object:browserWindow];
+  [browserWindow release]; browserWindow=[value retain];
+  if (browserWindow) [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hideNativeControls:) name:NSWindowDidUpdateNotification object:browserWindow];
+}
+- (void)hideNativeControls:(NSNotification*)notification {
+  if (self.auxiliary) return;
+  for (NSWindowButton button : {NSWindowCloseButton,NSWindowMiniaturizeButton,NSWindowZoomButton}) {
+    NSButton* control=[self.browserWindow standardWindowButton:button];
+    if (!control.hidden) control.hidden=YES;
+    if (control.enabled) control.enabled=NO;
+    [control setAccessibilityHidden:YES];
+  }
+}
 - (void)setInputSuspended:(BOOL)value {
   inputSuspended=value;
   [self synchronizeBrowserWindow];
@@ -154,11 +170,7 @@ static NSView* PageContentView(NSView* view) {
   if (!child.visible) [child orderFront:nil];
   // Chrome's size-constraint/layout work can re-enable the zoom button.
   // Apply pane-owned controls after native attachment, layout and ordering.
-  for (NSWindowButton button : {NSWindowCloseButton,NSWindowMiniaturizeButton,NSWindowZoomButton}) {
-    NSButton* control=[child standardWindowButton:button];
-    if (!control.hidden) control.hidden=YES;
-    if (control.enabled) control.enabled=NO;
-  }
+  [self hideNativeControls:nil];
 }
 - (void)viewDidMoveToWindow { [super viewDidMoveToWindow]; [self synchronizeBrowserWindow]; }
 - (void)setFrame:(NSRect)frame { [super setFrame:frame]; [self synchronizeBrowserWindow]; }
@@ -170,6 +182,7 @@ static NSView* PageContentView(NSView* view) {
   return YES;
 }
 - (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   if (self.browserWindow.parentWindow) [self.browserWindow.parentWindow removeChildWindow:self.browserWindow];
   [chromeClip release];
   [browserWindow release];

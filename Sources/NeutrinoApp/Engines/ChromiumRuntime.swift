@@ -220,6 +220,7 @@ private struct ChromiumManifest: Decodable {
     let architecture: String
     let cefVersion: String
     let runtimeStyle: String
+    let hostPresentation: String?
 }
 
 /// Ad-hoc signatures establish code integrity, not publisher identity.
@@ -235,7 +236,7 @@ private enum ChromiumPackage {
         #else
         let architecture = "x86_64"
         #endif
-        guard manifest.format == 2, manifest.abi == 8, manifest.runtimeStyle == "chromeClipped",
+        guard manifest.format == 2, manifest.abi == 8, manifest.runtimeStyle == "chromeViews", manifest.hostPresentation == "clippedNative",
               manifest.architecture == architecture, manifest.cefVersion == ChromiumRuntime.cefVersion else {
             throw ValidationError("This Chromium package is incompatible with this Neutrino build or Mac architecture.")
         }

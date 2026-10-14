@@ -235,10 +235,13 @@ import NeutrinoCore
         let web=try await waitForShell(in:window)
         try await action(["op":"screen","value":"browse"],web:web)
         try await Task.sleep(for:.milliseconds(200))
-        let geometry = try await web.evaluateJavaScript("(()=>{const p=document.querySelector('.native-page');if(!p)return null;const r=p.getBoundingClientRect();return {width:r.width,height:r.height,x:r.x,y:r.y};})()") as? [String:Double]
-        guard let geometry, geometry["width",default:0]>=300, geometry["height",default:0]>=250,
+        let geometry = try await web.evaluateJavaScript("(()=>{const p=document.querySelector('.native-page[data-page=\"\(model.session.selectedTabID.uuidString)\"]');if(!p)return null;const r=p.getBoundingClientRect();return {width:r.width,height:r.height,x:r.x,y:r.y};})()") as? [String:Double]
+        // The research check deliberately retains split panes and a panel.
+        // Validate the selected pane, including supported narrow comparisons.
+        guard let geometry, geometry["width",default:0]>100, geometry["height",default:0]>=250,
               model.activeWebTab.nativeView.window === window,
-              abs(model.activeWebTab.nativeView.bounds.width-geometry["width",default:0]) < 3 else { throw ValidationError("The native page does not match the Rust-rendered page region.") }
+              abs(model.activeWebTab.nativeView.bounds.width-geometry["width",default:0]) < 3,
+              abs(model.activeWebTab.nativeView.bounds.height-geometry["height",default:0]) < 3 else { throw ValidationError("The native page does not match the Rust-rendered page region.") }
         let page = model.activeWebTab
         let configuration = model.configuration
         try await installInputProbe(page)

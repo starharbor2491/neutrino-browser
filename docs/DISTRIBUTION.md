@@ -30,7 +30,7 @@ The retained consumer service verifies bounded download bytes/digest, read-only 
 
 The verified helper waits for genuine process exit, verifies the copied candidate again, and uses a journaled sibling rename with rollback/recovery. Preview candidates must match the advertised CDHash throughout staging/copy/activation. Consumer candidates must retain the same Developer ID publisher and notarization. No update removes quarantine or disables Gatekeeper.
 
-The new host requires ABI 8 / `chromeClipped`; predecessor runtime packages must fail compatibility checks.
+The new host requires ABI 8 / `chromeViews` with `hostPresentation=clippedNative`; predecessor runtime packages must fail compatibility checks.
 
 ## Production prerequisites
 
@@ -75,3 +75,5 @@ Sparkle 2.10.0 is checksum-pinned and bundled. Keyed builds seal `SUPublicEDKey`
 Enable keyed publication with repository variable `NEUTRINO_SPARKLE_PUBLIC_KEY` and matching secret `NEUTRINO_SPARKLE_PRIVATE_KEY` (32-byte seed, Base64). They are not configured in this workspace. Such previews retain the verified GitHub updater and publish an explicit `sparkle-status.json` instead of claiming Sparkle is active. Previously installed binaries gain Sparkle by updating to a keyed build through that bridge; their compiled update implementation cannot be changed retroactively.
 
 Settings → General → Uninstall Neutrino asks for permanent removal. Cancel remains the default. Removal joins pending update and interface work, freezes writes, stops/reaps workers and engines, releases WebKit stores, erases only Neutrino's allowlisted browser paths and Keychain services, then deletes its installed app. Downloads and exports remain. Pending installers block removal; canceled quits disarm the request. A failed cleanup reports what remains and keeps the app available for retry.
+
+The `chromeViews` manifest family label is retained for complete-application updates from existing previews. ABI 8 and `hostPresentation=clippedNative` identify the actual new hosting integration; the replacement host enforces both. This does not allow predecessor engine packages to load in Studio.

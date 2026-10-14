@@ -8,7 +8,7 @@ The bridge creates a normal upstream CEF Chrome-style browser window. CEF Views 
 
 One Neutrino tab owns one live engine adapter. Spaces share descriptors across windows; selecting elsewhere transfers the existing adapter/native surface rather than creating a second document. Background Space adapters retain their original Profile and callbacks. Popups must preserve original POST/opener state while becoming Neutrino tabs. These are source implementations requiring macOS acceptance.
 
-The bridge ABI is **8**, manifest format **2**, and `runtimeStyle` is **chromeClipped**. Predecessor Views and stock-window packages are rejected. The pinned upstream CEF distribution is `154.0.34+g14c5a08+chromium-154.0.8037.98`, [commit 14c5a08](https://github.com/chromiumembedded/cef/commit/14c5a089e8452874cb1a556dc3fde26ed2d87723).
+The bridge ABI is **8**, manifest format **2**, and `runtimeStyle` remains **chromeViews** and `hostPresentation` is **clippedNative**. Predecessor Views and stock-window packages are rejected. The pinned upstream CEF distribution is `154.0.34+g14c5a08+chromium-154.0.8037.98`, [commit 14c5a08](https://github.com/chromiumembedded/cef/commit/14c5a089e8452874cb1a556dc3fde26ed2d87723).
 
 ## Compatibility gates
 
@@ -42,3 +42,5 @@ The framework, five helper variants, resources/locales, and notices remain insid
 ## Validation status
 
 Linux checks validate portable state and source syntax, not this Cocoa/CEF integration. Native build/type checking, child-window geometry/focus, document transfer, extension workflows, media permissions, clean-Mac installation, and ordinary shutdown must run on macOS. Earlier Radius acceptance is historical and does not certify this new host.
+
+The `chromeViews` manifest family label is retained for complete-application updates from existing previews. ABI 8 and `hostPresentation=clippedNative` identify the actual new hosting integration; the replacement host enforces both. This does not allow predecessor engine packages to load in Studio.
