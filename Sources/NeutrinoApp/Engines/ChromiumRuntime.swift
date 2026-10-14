@@ -210,7 +210,7 @@ final class ChromiumRuntime: ObservableObject {
             }
             try? await Task.sleep(for: .milliseconds(50))
         }
-        status = "Chromium pages did not finish closing. Retry quitting Neutrino."
+        status = "Chromium pages or native windows did not finish closing. Retry quitting Neutrino."
         return false
     }
 }

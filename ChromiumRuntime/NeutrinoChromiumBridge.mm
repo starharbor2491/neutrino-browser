@@ -28,6 +28,26 @@
 #include "include/cef_devtools_message_observer.h"
 #include "include/wrapper/cef_library_loader.h"
 
+// OnBeforeClose ends WebContents ownership before Chrome's asynchronous native
+// window close. Keep weak identities across Page destruction and reparenting;
+// a cleared delegate is Chromium's native close-completion invariant.
+static NSHashTable<NSWindow*>* engineWindows = nil;
+static void TrackEngineWindow(NSWindow* window) {
+  if (!window) return;
+  if (!engineWindows) engineWindows=[[NSHashTable weakObjectsHashTable] retain];
+  [engineWindows addObject:window];
+}
+static int PendingEngineWindows() {
+  int pending=0;
+  @autoreleasepool {
+    for (NSWindow* window in [engineWindows allObjects]) {
+      if (window.delegate) ++pending;
+      else [engineWindows removeObject:window];
+    }
+  }
+  return pending;
+}
+
 // Keep a normal upstream Chrome browser (extension action APIs reject the
 // popup type forced by CEF Views). Clip its native chrome above the page;
 // Neutrino owns the controls surrounding this viewport.
@@ -74,6 +94,7 @@ static NSView* PageContentView(NSView* view) {
 @synthesize inputSuspended;
 @synthesize closingChrome;
 - (void)setBrowserWindow:(NSWindow*)value {
+  TrackEngineWindow(value);
   if (browserWindow==value) return;
   [self restoreBrowserContent];
   [browserWindow release]; browserWindow=[value retain];
@@ -621,6 +642,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     return true;
   }
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    TrackEngineWindow([(NSView*)browser->GetHost()->GetWindowHandle() window]);
     if (!page_ || page_->browser_created) {
       Page* preferred=page_ ? Group(page_) : popup_owner_;
       if (popup_owner_ && (!pages.count(popup_owner_) || popup_owner_->generation!=popup_owner_generation_ || popup_owner_->closing || popup_owner_->admission_closed)) preferred=nullptr;
@@ -667,6 +689,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (auto active=Active(owner)) State(active);
   }
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+    TrackEngineWindow([(NSView*)browser->GetHost()->GetWindowHandle() window]);
     if (auto client = ForBrowser(browser); client && client != this) return client->OnBeforeClose(browser);
     if (unowned_browsers.erase(browser->GetIdentifier()) != 0) return;
     if (!page_ || !page_->browser || !page_->browser->IsSame(browser)) return;
@@ -1163,6 +1186,7 @@ void ReconcileWindows() {
     Page* old_owner=Group(member);
     NSView* handle=(NSView*)member->browser->GetHost()->GetWindowHandle();
     NSWindow* window=[handle window];
+    TrackEngineWindow(window);
     if (!window || old_owner->creating) continue;
     if (old_owner->closing || old_owner->admission_closed) {
       if (member->awaiting_window || old_owner->view.browserWindow!=window) member->browser->GetHost()->CloseBrowser(true);
@@ -1437,7 +1461,9 @@ void Command(void* opaque,int command,const char* text,double value) {
     if (final_quit_frozen || owner->admission_closed || !std::isfinite(value) || value<1 || value>INT_MAX || std::floor(value)!=value) return;
     for (Page* member : Members(owner)) if (member->browser && member->browser_id==static_cast<int>(value)) {
       if (command==NEUTRINO_CEF_CLOSE_INNER_PAGE) member->browser->GetHost()->CloseBrowser(false);
-      else member->browser->GetHost()->ExecuteDevToolsMethod(0,"Page.bringToFront",nullptr);
+      // CEF allocates an ID even for fire-and-forget calls. Sharing the same
+      // increasing sequence prevents it from reassigning the next tracked ID.
+      else member->browser->GetHost()->ExecuteDevToolsMethod(++next_devtools_id,"Page.bringToFront",nullptr);
       return;
     }
     return;
@@ -1674,7 +1700,10 @@ void Close(void* opaque) {
   }
   if (!waiting && pages.count(owner)) FinishEmptyGroup(owner);
 }
-int Live() { return static_cast<int>(pages.size() + unowned_browsers.size()); }
+int Live() {
+  const int browsers=static_cast<int>(pages.size() + unowned_browsers.size());
+  return browsers ? browsers : pumping ? 1 : PendingEngineWindows();
+}
 void ReleasePrivateContexts(const char* private_window,const char* profile) {
   const std::string window_id=private_window ? private_window : "";
   const std::string profile_id=profile ? profile : "";
@@ -1694,11 +1723,14 @@ void ReleasePrivateContexts(const char* private_window,const char* profile) {
 }
 int Shutdown() {
   if (!initialized) return 1;
+  if (pumping) { last_error="Chromium's message pump is still running."; return 0; }
   if (!pages.empty() || !unowned_browsers.empty()) { last_error="Chromium pages are still closing."; return 0; }
+  if (PendingEngineWindows()!=0) { last_error="Chromium native windows are still closing."; return 0; }
   stopped=true; CancelPump();
   contexts.clear();
-  Trace("all native pages closed; entering CEF shutdown");
+  Trace("all native pages and windows closed; entering CEF shutdown");
   CefShutdown(); engine_app=nullptr; initialized=false;
+  [engineWindows release]; engineWindows=nil;
   Trace("CEF shutdown returned");
   // Never dlclose Chromium: runtime code may remain referenced by ObjC classes.
   return 1;
