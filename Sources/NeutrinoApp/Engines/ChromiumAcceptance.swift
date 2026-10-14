@@ -904,6 +904,7 @@ enum ChromiumAcceptance {
         guard let blank = browser.activeWebTab as? ChromiumTab else {
             throw ValidationError("The pristine pane did not create Chromium.")
         }
+        let shell = try await RustShellAcceptance.waitForShell(in:window)
         let initialDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while !blank.isReadyForEngineSwitch || blank.chromiumSessionPages?.count != 1 || blank.loading {
             guard ContinuousClock.now < initialDeadline else { throw ValidationError("The pristine Chromium pane did not become ready.") }
@@ -931,20 +932,22 @@ enum ChromiumAcceptance {
         let created = try await evaluate(options, "String((await chrome.tabs.create({windowId:\(nativeWindowID),active:false,url:\(address)})).id)")
         guard let createdID = Int(created) else { throw ValidationError("The extension did not create an inactive tab.") }
         let siblingDeadline = ContinuousClock.now.advanced(by: .seconds(10))
-        while blank.chromiumSessionPages?.count != 2 ||
-            blank.chromiumSessionPages?.last?.url != targetURL ||
-            browser.selectedTab.chromiumPages?.count != 2 ||
-            blank.nativeView.window !== window || !blank.hasNativeNavigationChrome {
+        while true {
+            let rowVisible = (try await shell.evaluateJavaScript("!!document.querySelector('[data-op=chrome-page][data-id=\"\(browser.session.selectedTabID.uuidString)\"]')")) as? Bool == true
+            if blank.chromiumSessionPages?.count == 2,
+               blank.chromiumSessionPages?.last?.url == targetURL,
+               browser.selectedTab.chromiumPages?.count == 2,
+               blank.nativeView.window == nil, !blank.hasNativeNavigationChrome, rowVisible { break }
             guard ContinuousClock.now < siblingDeadline else {
-                throw ValidationError("An inactive extension tab stayed hidden or absent from its pristine pane's saved inventory.")
+                throw ValidationError("An inactive extension page is absent from Neutrino’s tab controls or saved inventory.")
             }
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for:.milliseconds(100))
         }
         browser.captureChromiumSessions()
         let members = try await nativeBrowsers(blank)
         let selectedIDs = Set(members.filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int })
         guard members.count == 2, selectedIDs == initialIDs,
-              blank.chromeWindow === chromeWindow, chromeWindow.parent === window,
+              blank.chromeWindow === chromeWindow, chromeWindow.parent == nil,
               blank.url == nil, browser.selectedTab.url == nil,
               blank.chromiumSessionPages?.first?.url == nil,
               browser.selectedTab.chromiumPages?.last?.url == targetURL,
@@ -953,13 +956,13 @@ enum ChromiumAcceptance {
               try await evaluate(options, "String((await chrome.tabs.get(\(createdID))).windowId)") == String(nativeWindowID) else {
             throw ValidationError("Exposing an inactive sibling changed the pristine page's actual selection, identity, or session records.")
         }
-        try await verifyChromeGeometry(blank, ownerWindow: window)
-        _ = try await evaluate(options, "String((await chrome.tabs.update(\(createdID),{active:true})).id)")
+        _ = try await shell.evaluateJavaScript("document.querySelector('[data-op=chrome-page][data-id=\"\(browser.session.selectedTabID.uuidString)\"]').click()")
         let selectedDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while blank.url != targetURL || browser.selectedTab.url != targetURL {
             guard ContinuousClock.now < selectedDeadline else { throw ValidationError("Selecting the new sibling did not update the active URL and native Neutrino descriptor.") }
             try await Task.sleep(for: .milliseconds(100))
         }
+        try await verifyChromeGeometry(blank,ownerWindow:window)
         let savedZoom = try await evaluate(options, "String(await chrome.tabs.getZoom(\(createdID)))")
         guard let siblingZoom = Double(savedZoom), siblingZoom.isFinite else { throw ValidationError("The fixture did not report its native zoom.") }
         _ = try await evaluate(blank, "(history.pushState(null, '', location.href), 'ready')")
@@ -977,7 +980,7 @@ enum ChromiumAcceptance {
             try await Task.sleep(for: .milliseconds(100))
         }
         guard Set(try await nativeBrowsers(blank).filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int }) == initialIDs,
-              blank.nativeView.window === window, blank.hasNativeNavigationChrome,
+              blank.nativeView.window == nil, !blank.hasNativeNavigationChrome,
               browser.selectedTab.chromiumPages?.last?.url == targetURL else {
             throw ValidationError("Returning to the pristine tab lost the selected browser identity or hid its surviving sibling.")
         }
@@ -990,7 +993,7 @@ enum ChromiumAcceptance {
             throw ValidationError("Returning to the pristine browser retained its sibling's loading, history controls, or zoom.")
         }
         _ = try await evaluate(options, "String(await chrome.tabs.setZoom(\(createdID),\(siblingZoom)))")
-        _ = try await evaluate(options, "String(await chrome.tabs.remove(\(createdID)))")
+        _ = try await shell.evaluateJavaScript("document.querySelector('[data-op=chrome-page-close][data-id=\"\(browser.session.selectedTabID.uuidString)\"]').click()")
         let removalDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while blank.chromiumSessionPages?.count != 1 || blank.nativeView.window != nil {
             guard ContinuousClock.now < removalDeadline else { throw ValidationError("Closing the inactive sibling did not return the untouched pane to native Start.") }
@@ -1001,7 +1004,7 @@ enum ChromiumAcceptance {
               browser.activeWebTab === blank, blank.url == nil, browser.selectedTab.chromiumPages == nil else {
             throw ValidationError("Closing the inactive sibling discarded its original pristine browser or persisted a different Start surface.")
         }
-        print("Neutrino Chromium acceptance: pristine pane preserved inactive extension tab identity, mounted its native strip, saved both entries, and returned to Start after removal")
+        print("Neutrino Chromium acceptance: pristine pane preserved inactive extension tab identity, exposed and selected its Neutrino subrow, saved both entries, and returned to Start after removal")
     }
     private static func fixtureState(_ tab: ChromiumTab) async throws -> [String: String] {
         if tab.loading { return [:] }

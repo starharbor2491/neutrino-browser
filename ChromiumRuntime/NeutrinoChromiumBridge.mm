@@ -37,6 +37,7 @@
 - (BOOL)isFlipped { return self.documentView.isFlipped; }
 @end
 static NSView* PageContentView(NSView* view) {
+  if (view.hiddenOrHasHiddenAncestor) return nil;
   NSString* name=NSStringFromClass(view.class);
   if (([name containsString:@"WebContentsView"] || [name containsString:@"RenderWidgetHostView"]) &&
       !view.hidden && NSWidth(view.bounds)>40 && NSHeight(view.bounds)>40) return view;
@@ -82,6 +83,9 @@ static NSView* PageContentView(NSView* view) {
     child.styleMask=NSWindowStyleMaskBorderless;
     NeutrinoChromeClipView* clip=[[NeutrinoChromeClipView alloc] initWithFrame:document.bounds];
     clip.drawsBackground=NO;
+    clip.automaticallyAdjustsContentInsets=NO;
+    clip.contentInsets=NSEdgeInsetsMake(0,0,0,0);
+    clip.autoresizingMask=NSViewWidthSizable | NSViewHeightSizable;
     child.contentView=clip;
     clip.documentView=document;
     [document release];
@@ -120,14 +124,17 @@ static NSView* PageContentView(NSView* view) {
   }
   NSRect bounds = [parent convertRectToScreen:[self convertRect:visible toView:nil]];
   if (!NSEqualRects(child.frame,bounds)) [child setFrame:bounds display:YES];
+  const NSRect viewport_frame=NSMakeRect(0,0,NSWidth(bounds),NSHeight(bounds));
+  if (!NSEqualRects(self.chromeClip.frame,viewport_frame)) self.chromeClip.frame=viewport_frame;
   if (!self.arrangingChrome) {
     self.arrangingChrome=YES;
     NSView* document=self.chromeClip.documentView;
     const NSSize viewport=self.chromeClip.bounds.size;
     for (int pass=0;pass<3;++pass) {
       if (NSView* page=PageContentView(document)) {
-        const NSRect rect=[page convertRect:page.bounds toView:document];
-        const CGFloat inset=document.isFlipped ? NSMinY(rect)-NSMinY(document.bounds) : NSMaxY(document.bounds)-NSMaxY(rect);
+        // The Cocoa content origin includes scroll offsets. Its height is the
+        // actual WebContents allocation; subtract heights to isolate chrome.
+        const CGFloat inset=NSHeight(document.bounds)-NSHeight(page.bounds);
         if (inset>=0 && inset<=220) self.chromeInset=inset;
       }
       const NSRect frame=NSMakeRect(0,0,viewport.width,viewport.height+self.chromeInset);

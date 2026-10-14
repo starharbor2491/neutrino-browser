@@ -25,7 +25,16 @@ private final class RustShellHandle {
     init() { value = neutrino_shell_new()! }
     deinit { neutrino_shell_free(value) }
     func dispatch(_ request: [String: Any]) -> [String: Any] {
-        guard let data = try? JSONSerialization.data(withJSONObject: request), data.count <= 8_388_608,
+        var bounded = request
+        var payload = try? JSONSerialization.data(withJSONObject: bounded)
+        if let data = payload, data.count > 8_388_608,
+           var snapshot = bounded["snapshot"] as? [String:Any] {
+            // Captured backgrounds are optional decoration. Drop them before
+            // allowing pictures to prevent interaction with actual data.
+            snapshot["pageBackdrops"] = [:]; bounded["snapshot"] = snapshot
+            payload = try? JSONSerialization.data(withJSONObject: bounded)
+        }
+        guard let data = payload, data.count <= 8_388_608,
               let input = String(data: data, encoding: .utf8),
               let result = input.withCString({ neutrino_shell_dispatch(value, $0) }) else { return ["error": "The interface request could not be encoded."] }
         defer { neutrino_string_free(result) }
@@ -348,6 +357,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
             snapshot["session"] = encoded(projectedSession)
             snapshot["chromePages"] = model.chromePageSnapshots
+            snapshot["chromePageCounts"] = model.chromePageCounts
             snapshot["pageBackdrops"] = Dictionary(uniqueKeysWithValues:model.visibleEngineTabs.compactMap {entry -> (String,String)? in
                 guard backdropRevisions[entry.id]==entry.page.navigationRevision,let image=pageBackdrops[entry.id.uuidString] else{return nil}
                 return (entry.id.uuidString,image)
@@ -600,6 +610,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "selectChromePage", "closeChromePage":
             guard let id, let model, model.session.tabs.contains(where:{$0.id==id}), let pageID = command["page"] as? Int else { return }
             model.selectTab(id)
+            if operation == "closeChromePage", model.activeWebTab.hasActiveDownloads {
+                let alert = NSAlert(); alert.messageText = "Close this page while downloads are running?"
+                alert.informativeText = "This tab group has active downloads. Closing a page with an active transfer cancels that transfer."
+                alert.addButton(withTitle:"Keep page open"); alert.addButton(withTitle:"Close page")
+                guard alert.runModal() == .alertSecondButtonReturn else { return }
+            }
             (model.activeWebTab as? ChromiumTab)?.selectInterfacePage(pageID,close:operation=="closeChromePage")
             pendingPageFocus = id
         case "closeTab": if let id { model?.requestCloseTab(id) }

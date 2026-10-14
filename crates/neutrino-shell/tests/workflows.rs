@@ -824,3 +824,24 @@ fn portable_note_mutations_keep_sources_and_profile_boundaries() {
     assert_eq!(result["note"]["text"], "annotation");
     assert!(neutrino_shell::core_request(json!({"op":"moduleNote","action":"delete","id":"n","profileID":"p","output":{"delete":false},"value":note})).is_err());
 }
+
+#[test]
+fn extension_pages_have_owned_controls_and_reject_unknown_native_ids() {
+    let mut s = shell();
+    s.snapshot["session"]["tabs"][0]["url"] = Value::Null;
+    s.snapshot["session"]["tabs"][0]["title"] = json!("New tab");
+    s.snapshot["chromePageCounts"] = json!({"a":2});
+    s.snapshot["chromePages"] = json!({"a":[{"id":10,"selected":true,"url":"about:blank","title":""},{"id":11,"selected":false,"url":"https://example.com/source","title":"Background source"}]});
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(r["html"].as_str().unwrap().contains("Background source"));
+    assert!(r["html"].as_str().unwrap().contains("Extension pages"));
+    assert!(commands(&s.dispatch(json!({"op":"chrome-page","id":"a","page":999}))).is_empty());
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"chrome-page","id":"a","page":11})))[0],
+        json!({"op":"selectChromePage","id":"a","page":11})
+    );
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"chrome-page-close","id":"a","page":11})))[0],
+        json!({"op":"closeChromePage","id":"a","page":11})
+    );
+}

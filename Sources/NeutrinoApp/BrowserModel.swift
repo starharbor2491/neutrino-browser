@@ -73,9 +73,20 @@ final class BrowserModel: ObservableObject {
     var activeWebTab: BrowserEngineTab { webTab(session.selectedTabID) }
     var hasPage: Bool { selectedTab.url != nil }
     var chromePageSnapshots: [String:[[String:Any]]] {
+        guard let engine = webTabs[session.selectedTabID] as? ChromiumTab, engine.interfacePages.count > 1 else { return [:] }
+        // Only the current group's subrows are expanded. Labels are display
+        // metadata; native membership/selection always use the original IDs.
+        let pages = engine.interfacePages.prefix(200).map { item in
+            ["id":item["id"] as? Int ?? 0,"selected":item["selected"] as? Bool ?? false,
+             "title":String((item["title"] as? String ?? "").prefix(128)),
+             "url":String((item["url"] as? String ?? "").prefix(1024))] as [String:Any]
+        }
+        return [session.selectedTabID.uuidString:pages]
+    }
+    var chromePageCounts: [String:Int] {
         Dictionary(uniqueKeysWithValues:session.tabs.compactMap { tab in
-            guard let engine = webTabs[tab.id] as? ChromiumTab, engine.interfacePages.count > 1 else { return nil }
-            return (tab.id.uuidString,engine.interfacePages)
+            guard let engine = webTabs[tab.id] as? ChromiumTab else { return nil }
+            return (tab.id.uuidString,engine.interfacePages.count)
         })
     }
     var hasNativeTabs: Bool { webTabs[session.selectedTabID]?.hasNativeNavigationChrome == true }

@@ -90,7 +90,10 @@ fn toggle(label: &str, detail: &str, key: &str, value: bool, setup: bool) -> Mar
 fn tab_visible(tab: &Value, s: &Shell) -> bool {
     if text(tab, "url").is_empty()
         && text(tab, "title") == "New tab"
-        && array(&s.snapshot["chromePages"][text(tab, "id")]).len() < 2
+        && s.snapshot["chromePageCounts"][text(tab, "id")]
+            .as_u64()
+            .unwrap_or(0)
+            < 2
     {
         return false;
     }
