@@ -8,7 +8,7 @@ Studio implements command-first destinations without a new-tab page, six familia
 
 Source `9df79ea` passed native WebKit CI and the research workflow in both engines: selected quotations, source identity across Space moves, separate same-URL tabs, durable SQLite notes, live split retention, presets, named setups, and large-note UI projection. Its complete Blink gate failed at extension action popups. The subsequent host uses a normal upstream Chromium window with native chrome clipped above the Neutrino viewport, tagged ABI 8 / `chromeViews` with `hostPresentation=clippedNative`. This change requires fresh installed geometry, extension-popup and shutdown verification before publication.
 
-The current portable checks pass 42 Rust workflows, 71 Swift adapter/core tests, package validation, and packaging/update regressions. The [testing record](TESTING.md) separates fixture interactions, native tests, installed artifacts, and historical results. Screenshots and parser tests do not certify browser compatibility.
+The current portable checks pass 42 Rust workflows, three executable worker-protocol tests, 71 Swift adapter/core tests, package validation, and packaging/update regressions. The [testing record](TESTING.md) separates fixture interactions, native tests, installed artifacts, and historical results. Screenshots and parser tests do not certify browser compatibility.
 
 Preview publication now requires installed launch, ordinary quit, external-data preservation, research acceptance in both engines, and complete Blink/MV3 acceptance against the exact packaged app. Consumer publishing additionally requires the manual core, protected streaming, signing, and clean-Mac gates.
 

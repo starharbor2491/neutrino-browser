@@ -105,7 +105,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         _ => return Err("Unknown portable browser operation."),
     })
 }
-fn reader(html: &str) -> Result<String, &'static str> {
+pub(crate) fn reader(html: &str) -> Result<String, &'static str> {
     if html.len() > 1024 * 1024 {
         return Err("Reader supports page snapshots up to 1 MB.");
     }

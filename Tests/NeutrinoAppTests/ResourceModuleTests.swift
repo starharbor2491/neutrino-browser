@@ -56,7 +56,9 @@ struct ResourceModuleTests {
                     probe.attemptUpdate()
                 }
             })
-            CFRunLoopAddTimer(runLoop, timer, CFRunLoopMode.commonModes)
+            // The production reap loop runs the default mode. Swift Testing's
+            // executor run loop need not include it in its common-mode set.
+            CFRunLoopAddTimer(runLoop, timer, CFRunLoopMode.defaultMode)
             defer { CFRunLoopTimerInvalidate(timer) }
 
             if rollback {

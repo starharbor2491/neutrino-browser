@@ -73,6 +73,7 @@ The harness is for interaction testing; it does not certify native engine behavi
 | --- | --- |
 | Interface, reducer, presets, SVG icons, appearance policy | Rust / Maud |
 | SQLite storage, sessions/Spaces/profiles, module repository/programs, imports, release and identity policy | Rust |
+| Removable Reader, CPU and memory module executables | Rust |
 | macOS windows, WKWebView/CEF ownership, Keychain, native framework adapters | Swift / Objective-C++ |
 | SDK builds, packaging, signing, release and acceptance automation | Python / shell |
 

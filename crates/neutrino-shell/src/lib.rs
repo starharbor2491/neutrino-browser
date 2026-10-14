@@ -11,6 +11,7 @@ mod policy;
 mod storage;
 mod uninstall;
 mod workspace;
+pub mod workers;
 pub use core::request as core_request;
 mod render;
 mod state;

@@ -13,9 +13,10 @@ if [[ "$configuration" != release && "$configuration" != debug ]]; then
   exit 1
 fi
 # The shipped application and every bundled worker target Apple Silicon.
-for product in Neutrino NeutrinoResourceMonitor NeutrinoMemoryMonitor NeutrinoReaderWorker NeutrinoUpdater; do
+for product in Neutrino NeutrinoUpdater; do
   swift build -c "$configuration" --product "$product" --triple arm64-apple-macosx14.0
 done
+./scripts/build-workers.sh "$configuration" --triple arm64-apple-macosx14.0
 arm_binary_directory="$(swift build -c "$configuration" --triple arm64-apple-macosx14.0 --show-bin-path)"
 app_directory="$PWD/dist/Neutrino.app"
 mkdir -p "$app_directory/Contents/MacOS" "$app_directory/Contents/Resources/Legal"
@@ -31,6 +32,7 @@ for worker in NeutrinoResourceMonitor NeutrinoMemoryMonitor NeutrinoReaderWorker
   esac
   payload="$app_directory/Contents/Resources/Modules/$module_id/worker"
   cp "$arm_binary_directory/$worker" "$payload"
+  lipo "$payload" -verify_arch arm64
   chmod 755 "$payload"
   codesign --force --sign - "$payload"
   codesign --verify --strict "$payload"

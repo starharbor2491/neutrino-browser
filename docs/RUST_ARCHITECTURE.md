@@ -22,4 +22,6 @@ GitHub counts test and launch-acceptance sources in the language graph. Swift's 
 
 JSON uses serde_json's correctly rounded floating-point parsing so Swift Date values retain their exact binary representation across normalization/storage. The shell ABI accepts 8 MiB; note list projections contain metadata only, with the full body and quotation restricted to the selected note.
 
+Reader, Resource Monitor and Memory Breakdown are Rust executables. Reader retains bounded JSON transport and the shared nonexecuting extractor. The monitors use Darwin Mach/sysctl sampling directly, publish the existing bounded frame protocol, and exit when their owning pipe closes. `scripts/build-workers.sh` stages and signs them for native tests and app packaging; their former Swift targets and source files are removed.
+
 Module presentation reads one inventory, validates data definitions, and caches the resulting display data until a module/settings mutation. Runtime programs and native worker admission always perform fresh receipt/signature checks. Only the selected module’s settings enter the shell snapshot. Note editing crosses the core ABI with one record, never unrelated notebook bodies. Chromium removal deduplicates overflow bookmarks with an insertion-preserving hash index.

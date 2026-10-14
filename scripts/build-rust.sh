@@ -15,7 +15,7 @@ if ! cmp -s .build/rust-target/release/libneutrino_shell.a .build/rust/libneutri
   # incremental compiler can produce identical adapter objects after a touch;
   # missing product outputs reliably force linking the new Rust archive.
   for variant in .build/*/debug .build/*/release; do
-    for product in Neutrino NeutrinoReaderWorker NeutrinoResourceMonitor NeutrinoMemoryMonitor NeutrinoUpdater NeutrinoPackageTests.xctest; do
+    for product in Neutrino NeutrinoUpdater NeutrinoPackageTests.xctest; do
       rm -rf "$variant/$product"
     done
   done

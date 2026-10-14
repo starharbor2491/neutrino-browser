@@ -154,7 +154,7 @@ final class AppState: ObservableObject {
                 }
                 guard let product = workers[manifest.id] else { throw ValidationError("An unrecognized native worker is bundled with Neutrino.") }
                 let packaged = directory.appendingPathComponent(manifest.id).appendingPathComponent("worker")
-                // SwiftPM development builds put executable products beside their resource bundle.
+                // Development builds stage Rust workers beside the SwiftPM resource bundle.
                 let executable = developmentWorkerDirectory?.appendingPathComponent(product) ?? packaged
                 let size = try executable.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
                 guard size.isSymbolicLink != true, (size.fileSize ?? 0) > 0, (size.fileSize ?? 0) <= 8 * 1024 * 1024 else { throw ValidationError("Invalid bundled worker payload.") }
