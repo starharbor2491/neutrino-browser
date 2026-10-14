@@ -16,6 +16,8 @@ The portable suite additionally covers three executable worker protocols, 72 Swi
 
 Each preview is rebuilt, installed, and verified on a fresh macOS runner before publication. Its attached receipts certify that exact packaged app. Screenshots, parser tests, historical receipts, and diagnostic exits cannot substitute for that verification.
 
+The first final release candidate (`33e7474`, run [38648337999](https://github.com/starharbor2491/neutrino-browser/actions/runs/38648337999)) passed native tests, all five real updater replacement/rollback/data-preservation tests, installed WebKit, and both research receipts. A later Web Store registry query timed out in an unmounted test-only browser, so publication was refused. The verifier now uses its own real window after native approval, preserving the initiating Store page and all registry, deadline, quit, and restart gates. A fresh packaged-binary run is required for this correction.
+
 ## Remaining consumer-release gates
 
 - Developer ID signing/notarization and clean-Mac Gatekeeper acceptance. Without configured Apple credentials, previews are ad-hoc signed and may require Open Anyway.

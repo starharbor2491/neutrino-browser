@@ -1285,7 +1285,8 @@ enum ChromiumAcceptance {
         print("Neutrino Chromium acceptance: waiting for the native Web Store permission dialog")
         var approved = false
         var verifier: ChromiumTab?
-        defer { verifier?.dispose() }
+        var verifierWindow: NSWindow?
+        defer { verifier?.dispose(); verifierWindow?.close() }
         var lastPromptState = ""
         let installDeadline = ContinuousClock.now.advanced(by: .seconds(45))
         while ContinuousClock.now < installDeadline {
@@ -1301,18 +1302,28 @@ enum ChromiumAcceptance {
             }
             if approved {
                 // Extensions can select an onboarding tab after installation.
-                // Query the same profile's real manager in a separate hidden
-                // native browser so the Store's initiating WebContents remains
-                // intact throughout its install, regardless of selected tab.
+                // Keep the Store's initiating WebContents intact while a real
+                // visible manager checks the same profile. An unmounted idle
+                // browser can suspend before its asynchronous registry reply.
                 if verifier == nil {
-                    verifier = try ChromiumRuntime.shared.makeTab(profileID: tab.profileID, privateSessionID: nil, dataDirectory: app.dataDirectory)
-                    verifier?.showExtensions()
+                    let manager = try ChromiumRuntime.shared.makeTab(profileID: tab.profileID, privateSessionID: nil, dataDirectory: app.dataDirectory)
+                    verifier = manager
+                    let window = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 900, height: 680),
+                                          styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                    window.isReleasedWhenClosed = false; window.title = "Neutrino Web Store installation verification"
+                    verifierWindow = window; window.contentView = manager.nativeView; window.makeKeyAndOrderFront(nil)
+                    manager.showExtensions()
                 }
                 if let verifier, verifier.url?.host == "extensions", !verifier.loading {
+                    try await focusPage(verifier)
+                    guard let verifierWindow, verifier.nativeView.window === verifierWindow,
+                          verifier.chromeWindow?.parent === verifierWindow else {
+                        throw ValidationError("The Web Store verifier is not hosted by its owned window.")
+                    }
                     let state = try await evaluate(verifier, "String((await chrome.developerPrivate.getExtensionsInfo({includeDisabled:true,includeTerminated:true})).find(e => e.id === '\(extensionID)')?.state)")
                     if state == "ENABLED" {
-                        tab.showExtensions(); try await waitForManager(tab)
-                        print("Neutrino Chromium acceptance: live Chrome Web Store install passed for \(extensionID)")
+                        tab.showExtensions(); try await waitForManager(tab); try await focusPage(tab)
+                        print("Neutrino Chromium acceptance: live Chrome Web Store install passed for \(extensionID) with a hosted registry verifier")
                         return
                     }
                 }
