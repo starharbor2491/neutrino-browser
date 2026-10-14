@@ -235,7 +235,7 @@ private enum ChromiumPackage {
         #else
         let architecture = "x86_64"
         #endif
-        guard manifest.format == 2, manifest.abi == 7, manifest.runtimeStyle == "chromeViews",
+        guard manifest.format == 2, manifest.abi == 8, manifest.runtimeStyle == "chromeClipped",
               manifest.architecture == architecture, manifest.cefVersion == ChromiumRuntime.cefVersion else {
             throw ValidationError("This Chromium package is incompatible with this Neutrino build or Mac architecture.")
         }

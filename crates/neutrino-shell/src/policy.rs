@@ -166,7 +166,7 @@ fn dispatch(r: &Value) -> Result<Value, String> {
                 .unwrap_or(0);
             if v["format"] != 2
                 || !v["abi"].as_u64().is_some_and(|v| (1..=1024).contains(&v))
-                || v["runtimeStyle"] != "chromeViews"
+                || v["runtimeStyle"] != "chromeClipped"
                 || !["arm64", "x86_64"].contains(&text(v, "architecture"))
                 || v["architecture"] != r["release"]["architecture"]
                 || (!r["architecture"].is_null() && v["architecture"] != r["architecture"])

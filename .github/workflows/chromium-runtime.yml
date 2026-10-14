@@ -116,7 +116,7 @@ jobs:
           evidence = json.loads(path.read_text())
           evidence['neutrinoEmbeddedRuntimeValidated'] = True
           evidence['chromeExtensions'] = True
-          evidence['runtimeStyle'] = 'chromeViews'
+          evidence['runtimeStyle'] = 'chromeClipped'
           evidence['testedSource'] = os.environ['GITHUB_SHA']
           evidence['nativeChecks'] = ['HTTP', 'HTTPS', 'reader', 'PNG capture', 'profiles', 'private windows', 'normal/private popup policy and opener', 'Neutrino page geometry and focus', 'MV3 lifecycle and APIs', 'extension auxiliary window identity and lifetime', 'Chrome Web Store installation', 'extension persistence after process restart', 'extension removal', 'tab close', 'extension manager open during normal quit']
           path.write_text(json.dumps(evidence, indent=2) + '\n')

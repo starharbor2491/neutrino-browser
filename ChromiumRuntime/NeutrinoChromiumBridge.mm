@@ -81,7 +81,6 @@ static NSView* PageContentView(NSView* view) {
     child.styleMask=NSWindowStyleMaskBorderless;
     NeutrinoChromeClipView* clip=[[NeutrinoChromeClipView alloc] initWithFrame:document.bounds];
     clip.drawsBackground=NO;
-    clip.copiesOnScroll=NO;
     child.contentView=clip;
     clip.documentView=document;
     [document release];
