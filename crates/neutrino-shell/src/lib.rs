@@ -107,6 +107,36 @@ pub unsafe extern "C" fn neutrino_core_request(input: *const c_char) -> *mut c_c
     CString::new(response.to_string()).unwrap().into_raw()
 }
 
+/// Searches a borrowed note field without serializing its body into UI state.
+/// # Safety
+/// Each nonempty buffer must be readable for its supplied length during the call.
+#[no_mangle]
+pub unsafe extern "C" fn neutrino_text_contains(
+    text: *const c_char,
+    text_length: usize,
+    query: *const c_char,
+    query_length: usize,
+) -> bool {
+    if text_length > 1_048_576 || query_length > 1_024 || text.is_null() || query.is_null() {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(std::slice::from_raw_parts(text.cast(), text_length)) else {
+        return false;
+    };
+    let Ok(query) = std::str::from_utf8(std::slice::from_raw_parts(query.cast(), query_length)) else {
+        return false;
+    };
+    let fold = |value: &str| {
+        value.split_whitespace().fold(String::with_capacity(value.len()), |mut result, word| {
+            if !result.is_empty() { result.push(' '); }
+            result.push_str(word);
+            result
+        }).to_lowercase()
+    };
+    let query = fold(query);
+    query.is_empty() || fold(text).contains(&query)
+}
+
 /// Hashes caller-owned bytes without JSON copies or a platform-specific digest.
 /// # Safety
 /// For nonzero length, data must point to length readable bytes for this call.

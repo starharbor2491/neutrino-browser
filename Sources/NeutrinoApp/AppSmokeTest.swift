@@ -493,6 +493,14 @@ enum AppSmokeTest {
                 if Date() > deadline { throw ValidationError("A Chromium isolation page did not load.") }
                 try await Task.sleep(for: .milliseconds(100))
             }
+            _ = try await RustShellAcceptance.waitForShell(in: window)
+            guard let page = model.activeWebTab as? ChromiumTab else { throw ValidationError("The isolation probe did not retain Chromium.") }
+            let mountDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+            while page.nativeView.window !== window || page.chromeWindow?.parent !== window || page.chromeWindow?.isVisible != true {
+                guard ContinuousClock.now < mountDeadline else { throw ValidationError("The loaded isolation page did not mount in its Neutrino window.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await ChromiumAcceptance.verifyChromeGeometry(page, ownerWindow: window)
             return (model, window)
         } catch { model.closeWindow(); window.close(); throw error }
     }

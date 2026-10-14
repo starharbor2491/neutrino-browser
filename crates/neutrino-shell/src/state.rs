@@ -210,6 +210,9 @@ impl Shell {
                         if self.menu == "discard-editor" {
                             self.pending_exit = None;
                         }
+                        if self.menu == "notes-scope" && flag(&request, "restoreFocus") {
+                            self.focus = "notes-scope-trigger".into();
+                        }
                         self.menu.clear();
                     } else if self.screen == "editor"
                         && self.draft.as_ref() != Some(&self.snapshot["configuration"])
@@ -819,6 +822,10 @@ impl Shell {
                         if action == "toggleFocus" {
                             self.screen = "browse".into();
                             self.menu.clear();
+                        }
+                        if action == "notesScope" {
+                            self.menu.clear();
+                            self.focus = "notes-scope-trigger".into();
                         }
                         if action == "deleteNote" || action == "credentialDelete" {
                             self.menu.clear();

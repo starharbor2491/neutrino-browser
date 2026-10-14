@@ -593,9 +593,9 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
                         && (flag(r, "all")
                             || text(v, "spaceID").is_empty()
                             || v["spaceID"] == r["spaceID"])
-                        && ["title", "sourceTitle", "sourceURL", "spaceName"]
+                        && (flag(v, "contentMatch") || ["title", "sourceTitle", "sourceURL", "spaceName"]
                             .iter()
-                            .any(|key| text(v, key).to_lowercase().contains(&query))
+                            .any(|key| text(v, key).to_lowercase().contains(&query)))
                 })
                 .collect();
             notes.sort_by(|a, b| {

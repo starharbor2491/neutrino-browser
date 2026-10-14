@@ -123,6 +123,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var selectedNoteID: UUID?
     private var allNotes = false
     private var notesQuery = ""
+    private var noteSearchQuery = ""
+    private var noteSearchCache: [UUID: (text: String, quote: String, matches: Bool)] = [:]
     private var librarySection = "bookmarks"
     private var selectedSettingsID = ""
     private var libraryPage = 0
@@ -280,6 +282,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         for item in center?.items ?? [] { item.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &downloadObservations) }
     }
     private func encoded<T: Encodable>(_ value: T) -> Any { (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)) ?? NSNull() }
+    private func matchesNoteContent(_ note: Note) -> Bool {
+        guard !notesQuery.isEmpty else { return false }
+        let quote = note.quotedText ?? ""
+        if let cached = noteSearchCache[note.id], cached.text == note.text, cached.quote == quote { return cached.matches }
+        let matches = RustCore.textContains(quote, query: notesQuery) || RustCore.textContains(note.text, query: notesQuery)
+        noteSearchCache[note.id] = (note.text, quote, matches)
+        return matches
+    }
     private func synchronize() -> [String: Any] {
         if let model {
             // A pristine selection has no page surface. Detach its anchor even
@@ -301,7 +311,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         if projectedProfileID != profileID {
             projectedProfileID = profileID; assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
             assistantResponse = ""; credentialMetadata = []; selectedNoteID = nil; libraryPage = 0; notesQuery=""; allNotes=false
+            noteSearchCache.removeAll()
         }
+        if noteSearchQuery != notesQuery { noteSearchQuery = notesQuery; noteSearchCache.removeAll() }
+        let searchableNoteIDs = Set(app.library.notes.filter { $0.profileID == profileID }.map(\.id))
+        for id in Array(noteSearchCache.keys) where !searchableNoteIDs.contains(id) { noteSearchCache.removeValue(forKey: id) }
         let space = model?.space
         observeDownloads(downloadCenter ?? model?.downloads)
         let regular = model?.isPrivate != true
@@ -309,7 +323,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         let noteIndex:[[String:Any]]=regular ? app.library.notes.map { note in
             ["id":note.id.uuidString,"profileID":note.profileID.uuidString,"spaceID":note.spaceID?.uuidString ?? "", "title":String(note.title.prefix(100)),
              "sourceURL":note.sourceURL?.absoluteString ?? "","sourceTitle":note.sourceTitle ?? "","modifiedAt":note.modifiedAt.timeIntervalSinceReferenceDate,
-             "spaceName":app.library.spaces?.first(where:{$0.id==note.spaceID})?.name ?? ""]
+             "spaceName":app.library.spaces?.first(where:{$0.id==note.spaceID})?.name ?? "",
+             "contentMatch":note.profileID == profileID && (allNotes || note.spaceID == nil || note.spaceID == model?.session.spaceID) && matchesNoteContent(note)]
         } : []
         let noteIDs=(try? RustCore.request(["op":"projectNotes","value":noteIndex,"profileID":profileID.uuidString,"spaceID":model?.session.spaceID?.uuidString ?? "","all":allNotes,"query":notesQuery]) as? [String]) ?? []
         let records=app.library.notes.reduce(into:[String:Note]()){$0[$1.id.uuidString]=$1}
@@ -320,10 +335,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         let offset = libraryPage * 40
         let selectedNote = notes.first { $0.id == selectedNoteID } ?? notes.first
         func noteContext(_ note:Note, content:Bool=false) -> [String:Any] {
+            let quote = note.quotedText ?? ""
             var value:[String:Any]=["id":note.id.uuidString,"title":String(note.title.prefix(100)),"sourceURL":note.sourceURL?.absoluteString ?? "",
              "sourceTitle":note.sourceTitle ?? "","spaceName":app.library.spaces?.first(where:{$0.id==note.spaceID})?.name ?? "",
-             "sourceTabID":note.sourceTabID?.uuidString ?? ""]
-            if content {value["text"]=String(note.text.prefix(200_000));value["quotedText"]=note.quotedText ?? ""}
+             "sourceTabID":note.sourceTabID?.uuidString ?? "",
+             "excerpt":String((quote.isEmpty ? note.text : quote).prefix(240))]
+            if content {value["text"]=String(note.text.prefix(200_000));value["quotedText"]=String(quote.prefix(16_000))}
             return value
         }
         var snapshot: [String: Any] = [
@@ -842,6 +859,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if let original=note.sourceTabID, model.session.tabs.contains(where:{$0.id==original && $0.url==url}) {model.selectTab(original)}
             else if let existing=model.session.tabs.first(where:{$0.url==url}) { model.selectTab(existing.id) }
             else { model.newTab(url:url) }
+            selectedNoteID = note.id; notesQuery = ""; libraryPage = 0
+            if note.spaceID != nil && note.spaceID != model.session.spaceID { allNotes = true }
         case "saveNote":
             guard model?.isPrivate != true, let id,
                   let value = command["value"] as? [String: String], let content = value["text"], let field = value["field"] else { return }

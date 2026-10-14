@@ -125,6 +125,7 @@ import NeutrinoCore
         guard restored.notes.contains(where: { $0.id == note.id && $0.quotedText == note.quotedText && $0.sourceURL == source && $0.spaceID == model.session.spaceID }) else {
             throw ValidationError("The quote did not survive a database reload.")
         }
+        try await verifyNoteRetrieval(app: app, model: model, web: web, note: note)
         let comparisonURL = source.appendingPathComponent("comparison")
         model.newTab(url: comparisonURL, engine: page.engineID)
         let comparison = model.session.selectedTabID
@@ -190,9 +191,15 @@ import NeutrinoCore
         guard complete.notes.contains(where:{$0.spaceID==researchSpace && $0.sourceURL==source && $0.id==note.id}),
               complete.notes.contains(where:{$0.id==other.id && $0.sourceURL==comparisonURL && $0.quotedText==other.quotedText}) else {throw ValidationError("The two-source workspace did not survive a storage reload.")}
         model.moveTab(originalID,toSpace:away)
+        try await action(["op":"native","action":"notesScope","value":"space"],web:web)
+        try await action(["op":"native","action":"notesQuery","value":"Local browser check"],web:web)
+        try await action(["op":"native","action":"selectNote","id":note.id.uuidString],web:web)
         try await action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:web)
         guard model.session.spaceID==away,model.session.selectedTabID==originalID,model.activeWebTab===page,
-              try await evaluatePage(page,"window.neutrinoResearchDraft")=="retained" else {throw ValidationError("Source recovery did not follow the original live tab after it moved to another Space.")}
+              try await evaluatePage(page,"window.neutrinoResearchDraft")=="retained",
+              (try await web.evaluateJavaScript("document.querySelector('.workspace-panel textarea')?.dataset.note")) as? String == note.id.uuidString,
+              (try await web.evaluateJavaScript("document.querySelector('.notes-scope .selected')?.textContent")) as? String == "All notes",
+              (try await web.evaluateJavaScript("document.querySelector('.notes-search')?.value")) as? String == "" else {throw ValidationError("Moved-source recovery lost the original live page or hid its selected project note.")}
         model.moveTab(originalID,toSpace:researchSpace)
         model.switchSpace(researchSpace);model.selectTab(originalID)
         try await action(["op":"native","action":"notesScope","value":"space"],web:web)
@@ -202,9 +209,40 @@ import NeutrinoCore
         try await verifyLargeNoteProjection(app:app,model:model,web:web)
         let receipt = output.deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
         var evidence = (try? JSONSerialization.jsonObject(with: Data(contentsOf: receipt))) as? [String: Any] ?? [:]
-        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true,"movedSourceRecovery":true,"largeNoteProjection":true]
+        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true,"movedSourceRecovery":true,"movedSourceNoteVisibility":true,"quoteSearch":true,"noteContentSearch":true,"distinctQuoteExcerpts":true,"largeNoteProjection":true]
         try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted,.sortedKeys]).write(to: receipt, options: .atomic)
         print("Neutrino research acceptance: \(page.engineID.rawValue) quote, source, durable note, retained split, and saved preset passed")
+    }
+    private static func verifyNoteRetrieval(app: AppState, model: BrowserModel, web: WKWebView, note: Note) async throws {
+        let original = app.library.notes
+        defer { app.library.notes = original }
+        var second = note; second.id = UUID()
+        second.quotedText = String(repeating: "Another quotation. ", count: 100) + "Unique quotation phrase"
+        second.text = String(repeating: "Research context. ", count: 100) + "Unique body phrase"
+        app.library.notes.append(second)
+        try await action(["op":"native","action":"notesQuery","value":""], web:web)
+        let excerpt = try await web.evaluateJavaScript("document.querySelector('[data-action=selectNote][data-id=\"\(second.id.uuidString)\"] .note-excerpt')?.textContent") as? String
+        guard excerpt?.contains("Another quotation") == true, excerpt != note.quotedText else { throw ValidationError("Same-source quotations have no distinctive bounded excerpts.") }
+        _ = try await web.evaluateJavaScript("document.querySelector('.note-quotation summary').click()")
+        try await action(["op":"native","action":"selectNote","id":note.id.uuidString], web:web)
+        guard (try await web.evaluateJavaScript("document.querySelector('.note-quotation')?.open")) as? Bool == true else { throw ValidationError("A passive note update collapsed the selected quotation.") }
+        try await action(["op":"native","action":"selectNote","id":second.id.uuidString], web:web)
+        guard (try await web.evaluateJavaScript("document.querySelector('.note-quotation')?.open")) as? Bool == false else { throw ValidationError("Quotation expansion leaked to a different note.") }
+        try await action(["op":"native","action":"notesQuery","value":"UNIQUE QUOTATION"], web:web)
+        guard (try await web.evaluateJavaScript("document.querySelector('.note-list button')?.dataset.id")) as? String == second.id.uuidString else { throw ValidationError("Quotation text beyond its list excerpt could not be found.") }
+        try await action(["op":"native","action":"notesQuery","value":"unique body phrase"], web:web)
+        // A repeated synchronization must reuse the match without losing it.
+        try await action(["op":"native","action":"selectNote","id":second.id.uuidString], web:web)
+        guard (try await web.evaluateJavaScript("document.querySelector('.note-list button')?.dataset.id")) as? String == second.id.uuidString else { throw ValidationError("Note content search lost its cached result.") }
+        try app.updateModuleNote(id:second.id, profileID:model.session.profileID, field:"text", value:"Changed body")
+        try await action(["op":"native","action":"selectNote","id":second.id.uuidString], web:web)
+        guard (try await web.evaluateJavaScript("document.querySelectorAll('.note-list button').length")) as? Int == 0 else { throw ValidationError("Edited note content retained a stale search match.") }
+        try app.updateModuleNote(id:second.id, profileID:model.session.profileID, field:"text", value:"Unique body phrase restored")
+        try await action(["op":"native","action":"selectNote","id":second.id.uuidString], web:web)
+        guard (try await web.evaluateJavaScript("document.querySelector('.note-list button')?.dataset.id")) as? String == second.id.uuidString else { throw ValidationError("Edited note content did not become searchable.") }
+        app.library.notes = original
+        try await action(["op":"native","action":"notesQuery","value":""], web:web)
+        try await action(["op":"native","action":"selectNote","id":note.id.uuidString], web:web)
     }
     private static func verifyLargeNoteProjection(app:AppState,model:BrowserModel,web:WKWebView) async throws {
         let original=app.library.notes,configuration=model.configuration

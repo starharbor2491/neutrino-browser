@@ -11,7 +11,7 @@ fn icon_definitions(s: &Shell) -> Markup {
         "back", "forward", "down", "close", "plus", "search", "reload", "check", "more", "sidebar",
         "split", "folder", "bookmark", "history", "download", "settings", "globe", "lock",
         "shield", "pin", "edit", "sun", "moon", "spark", "undo", "arrow", "user", "grid",
-        "external", "grip", "key", "book", "activity", "camera", "plug",
+        "external", "grip", "key", "book", "activity", "camera", "plug", "appearance", "quote",
     ];
     html! {svg class="icon-definitions" aria-hidden="true"{defs{@for name in names{
         @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules","plus"=>"newTab","download"=>"downloads","edit"=>"notes","book"=>"reader","activity"=>"resources","camera"=>"screenshot","moon"=>"focus",v=>v};
@@ -208,7 +208,7 @@ fn rail(s: &Shell, preview: bool) -> Markup {
         @else {div class="tabs-scroll"{(tab_groups(s,preview))}}
         @if bottom && !horizontal {div class="rail-bottom-nav"{(location(s))(rail_navigation(s))}}
         div class="rail-footer"{@for widget in array(&s.snapshot["startWidgets"]){details class="workspace-widget"{summary{(text(widget,"widgetTitle"))}p{(text(widget,"widgetBody"))}}}(spaces(s))(module_tools(s))nav class="rail-destinations" aria-label="Browser tools"{button class=(if s.screen=="library"{"selected"}else{""}) data-op="screen" data-value="library" data-section="bookmarks"{(icon("bookmark"))"Library"}button class=(if s.screen=="modules"{"selected"}else{""}) data-op="screen" data-value="modules"{(icon("grid"))"Modules"}}
-            div class="rail-tools"{button class="icon-button" data-op="screen" data-value="settings" aria-label="Settings"{(icon("settings"))}button class="icon-button" data-op="screen" data-value="extensions" title="Extensions" aria-label="Extensions"{(icon("plug"))}span class="spacer"{}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("edit"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(icon("user"))}}
+            div class="rail-tools"{button class="icon-button" data-op="screen" data-value="settings" aria-label="Settings"{(icon("settings"))}button class="icon-button" data-op="screen" data-value="extensions" title="Extensions" aria-label="Extensions"{(icon("plug"))}span class="spacer"{}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("appearance"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(icon("user"))}}
         }
     }}
 }
@@ -594,16 +594,16 @@ fn library(s: &Shell) -> Markup {
             "notes" => {
                 @if s.private() {(empty("Notes stay in regular windows","Private browsing does not create or change saved notes.","shield"))}
                 @else {
-                    div class="notes-scope"{button class=(if text(&s.snapshot,"notesScope")!="all"{"selected"}else{""}) data-op="native" data-action="notesScope" data-value="space"{"This Space"}button class=(if text(&s.snapshot,"notesScope")=="all"{"selected"}else{""}) data-op="native" data-action="notesScope" data-value="all"{"All notes"}}
-                    input class="notes-search" type="search" data-notes-query="true" placeholder="Search notes" value=(text(&s.snapshot,"notesQuery")) maxlength="160" aria-label="Search note titles, sources and Spaces";div class="note-actions"{button class="button" data-op="native" data-action="createNote"{(icon("plus"))"New"}button class="button quiet" data-op="native" data-action="noteFromPage" disabled[text(s.active(),"url").is_empty()]{"Save page"}button class="button quiet" data-op="native" data-action="quoteSelection" title="Quote text selected on the page" disabled[text(s.active(),"url").is_empty()]{"Quote"}}
-                    div class="note-list" {@for n in array(&s.snapshot["notes"]) {button class=(if n["id"]==s.snapshot["selectedNote"]["id"]{"selected"}else{""}) data-op="native" data-action="selectNote" data-id=(text(n,"id")){(icon("edit"))span{strong{(text(n,"title"))}@if !text(n,"sourceURL").is_empty(){small{(text(n,"sourceTitle"))" · "(host(text(n,"sourceURL")))}}@if text(&s.snapshot,"notesScope")=="all" && !text(n,"spaceName").is_empty(){small{(text(n,"spaceName"))}}}}}}
+                    div class="notes-toolbar"{div class="notes-scope"{button id="notes-scope-trigger" class="selected" data-op="menu" data-value="notes-scope" aria-haspopup="dialog" title="Choose which notes to show"{(if text(&s.snapshot,"notesScope")=="all"{"All notes"}else{"This Space"})(icon("down"))}}div class="note-actions"{button class="icon-button" data-op="native" data-action="createNote" aria-label="New note" title="New note"{(icon("plus"))}button class="icon-button" data-op="native" data-action="noteFromPage" aria-label="Save page as a note" title="Save page as a note" disabled[text(s.active(),"url").is_empty()]{(icon("bookmark"))}button class="icon-button" data-op="native" data-action="quoteSelection" aria-label="Quote selected text" title="Quote selected text" disabled[text(s.active(),"url").is_empty()]{(icon("quote"))}}}
+                    input class="notes-search" type="search" data-notes-query="true" placeholder="Search notes and quotations" value=(text(&s.snapshot,"notesQuery")) maxlength="160" aria-label="Search note text, quotations, titles, sources and Spaces";
+                    div class="note-list" {@for n in array(&s.snapshot["notes"]) {button class=(if n["id"]==s.snapshot["selectedNote"]["id"]{"selected"}else{""}) data-op="native" data-action="selectNote" data-id=(text(n,"id")){span{strong{(text(n,"title"))}@if !text(n,"excerpt").is_empty(){span class="note-excerpt"{(text(n,"excerpt").split_whitespace().collect::<Vec<_>>().join(" "))}}@if !text(n,"sourceURL").is_empty(){small{(host(text(n,"sourceURL")))}}@if text(&s.snapshot,"notesScope")=="all" && !text(n,"spaceName").is_empty(){small{(text(n,"spaceName"))}}}}}}
+                    @if array(&s.snapshot["notes"]).is_empty(){div class="notes-empty"{@if !text(&s.snapshot,"notesQuery").is_empty(){p{"No notes match this search."}button class="button quiet" data-op="native" data-action="notesQuery" data-value=""{"Clear search"}}@else{p{(if text(&s.snapshot,"notesScope")=="all"{"No saved notes yet."}else{"No notes in this Space yet."})}}}}
                     @let n=&s.snapshot["selectedNote"];
                     @if !n.is_null() {article class="note-card"{
-                        input class="note-title" value=(text(n,"title")) data-note=(text(n,"id")) data-note-field="title" maxlength="100" aria-label="Note title";
-                        @if !text(n,"sourceURL").is_empty(){button class="note-source" data-op="native" data-action="openNoteSource" data-id=(text(n,"id")) title=(format!("Open {} in {} · {}",text(n,"sourceTitle"),text(n,"spaceName"),text(n,"sourceURL"))){(icon("external"))span{(text(n,"sourceTitle"))small{(host(text(n,"sourceURL")))" · "(text(n,"spaceName"))}}"Open source"}}
-                        @if !text(n,"quotedText").is_empty(){blockquote class="note-quote"{(text(n,"quotedText"))}}
+                        div class="note-heading"{input class="note-title" value=(text(n,"title")) data-note=(text(n,"id")) data-note-field="title" maxlength="100" aria-label="Note title";button class="icon-button" data-op="menu" data-value=(format!("delete-note:{}",text(n,"id"))) aria-label="Note actions"{(icon("more"))}}
+                        @if !text(n,"sourceURL").is_empty(){button class="note-source" data-op="native" data-action="openNoteSource" data-id=(text(n,"id")) title=(format!("Open {} in {} · {}",text(n,"sourceTitle"),text(n,"spaceName"),text(n,"sourceURL"))){(icon("external"))span{(host(text(n,"sourceURL")))" · "(text(n,"spaceName"))}"Open source"}}
+                        @if !text(n,"quotedText").is_empty(){details class=(format!("note-quotation quote-{}",text(n,"id"))){summary{span{"Quotation"}span class="note-excerpt"{(text(n,"excerpt").split_whitespace().collect::<Vec<_>>().join(" "))}}blockquote class="note-quote"{(text(n,"quotedText"))}}}
                         textarea data-note=(text(n,"id")) data-note-field="body" maxlength="200000" aria-label="Note content" placeholder="Add your notes…"{(text(n,"text"))}
-                        div class="note-footer"{span{"Saved as you type"}button class="button quiet" data-op="menu" data-value=(format!("delete-note:{}",text(n,"id"))){"Delete note…"}}
                     }}
                 }
             }
@@ -757,8 +757,9 @@ fn menu_item(label: &str, op: &str, value: &str, glyph: &str) -> Markup {
 }
 fn menu(s: &Shell) -> Markup {
     let id = s.menu.split_once(':').map(|x| x.1).unwrap_or("");
-    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label="Browser options"{header{strong{(if s.menu.starts_with("tab:"){"Tab options"}else if s.menu.starts_with("folder:"){"Folder options"}else{"Neutrino"})}(button("Close menu","escape","close"))}
+    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.menu!="notes-scope"{header{strong{(if s.menu.starts_with("tab:"){"Tab options"}else if s.menu.starts_with("folder:"){"Folder options"}else{"Neutrino"})}(button("Close menu","escape","close"))}}
         @match s.menu.as_str(){
+            "notes-scope"=>{@for (value,label) in [("space","This Space"),("all","All notes")]{button class="menu-item" data-op="native" data-action="notesScope" data-value=(value){(icon(if text(&s.snapshot,"notesScope")==value{"check"}else{"folder"}))span{(label)}}}}
             "browser"=>{@for item in array(&s.snapshot["menuItems"]){@match text(item,"action"){
                 "newTab"=>{(menu_item(text(item,"title"),"newTab","","plus"))}
                 "bookmarks"|"history"|"downloads"=>{button class="menu-item" data-op="screen" data-value="library" data-section=(text(item,"action")){(icon("bookmark"))(text(item,"title"))}}

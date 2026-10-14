@@ -1023,7 +1023,7 @@ svg {
   display: none;
 }
 .workspace-panel .note-list {
-  max-height: 140px;
+  max-height: 80px;
   flex: none;
 }
 .workspace-panel .note-card {
@@ -1391,7 +1391,9 @@ svg {
   gap: 8px;
   min-height: 36px;
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 8px;
+  text-align: left;
+  flex: none;
   color: var(--muted);
 }
 .note-list button.selected {
@@ -1419,21 +1421,6 @@ svg {
   line-height: 1.7;
   background: var(--hover);
   border: 0;
-}
-.note-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.note-footer > span {
-  flex: 1;
-}
-.note-footer .button {
-  font-size: 11px;
-  min-height: 32px;
 }
 .reader-content {
   padding: 24px 40px;
@@ -2734,6 +2721,9 @@ svg {
   inset: 0;
   pointer-events: none;
   z-index: 35;
+  display: block;
+  padding: 0;
+  background: transparent;
 }
 .popover-menu {
   position: absolute;
@@ -2741,7 +2731,7 @@ svg {
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 24px);
   overflow: auto;
-  border-radius: 10px;
+  border-radius: var(--component-radius, 6px);
   padding: 6px;
   background: var(--elevated);
   box-shadow: 0 8px 30px #0004;
@@ -2749,7 +2739,7 @@ svg {
   font-size: 12px;
   animation: command-in 110ms ease;
 }
-.menu-scrim > .popover-menu {
+.modal-menu > .popover-menu {
   position: relative;
   max-width: 440px;
   padding: 20px;
@@ -3131,12 +3121,24 @@ svg {
   min-height: calc(36px * var(--tabs-spacing, 1));
 }
 
-.notes-scope { display:flex; gap:4px; padding:0 16px 12px; }
-.notes-scope button { min-height:32px; flex:1; font-size:12px; border-radius:var(--component-radius,6px); color:var(--muted); }
-.notes-scope button.selected { background:var(--selected); color:var(--text); }
+.notes-toolbar {display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px}
+.notes-scope {display:flex;min-width:0}
+.notes-scope button {display:flex;align-items:center;gap:4px;padding:0 8px;min-height:34px;font-size:12px;border-radius:var(--component-radius,6px);color:var(--muted)}
+.notes-scope .icon {width:12px}
+.notes-toolbar .note-actions {flex-wrap:nowrap}
+.notes-scope button.selected { background:var(--selected); color:var(--ink); }
 .note-source { display:flex; align-items:center; gap:8px; text-align:left; min-height:36px; font-size:12px; color:var(--accent); }
 .note-source span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
-.note-quote { margin:8px 0; padding:12px; white-space:pre-wrap; overflow:auto; max-height:240px; background:var(--selected); border-radius:var(--component-radius,6px); font-size:13px; line-height:1.6; }
+.note-quote { margin:8px 0; padding:12px; white-space:pre-wrap; background:var(--hover); border-radius:var(--component-radius,6px); font-size:13px; line-height:1.6; }
+.note-heading {display:flex;align-items:center;gap:4px}
+.note-heading .note-title {flex:1;min-width:0;margin:4px 0;padding:6px 0}
+.note-quotation {margin:8px 0}
+.note-quotation summary {cursor:pointer;padding:8px 10px;background:var(--hover);border-radius:var(--component-radius,6px);font-size:11px;color:var(--muted)}
+.note-quotation summary .note-excerpt {margin-top:4px;color:var(--ink)}
+.workspace-panel .note-quotation summary .note-excerpt {-webkit-line-clamp:1}
+.note-list .note-excerpt,.note-quotation .note-excerpt {display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow:hidden;overflow-wrap:anywhere;font-size:12px;line-height:1.5;color:var(--ink)}
+.notes-empty {padding:16px 8px;color:var(--muted);font-size:12px;text-align:center}
+.notes-empty .button {margin:8px auto 0}
 
 .note-list strong,.note-list small {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-list strong {font-size:12px;font-weight:500}

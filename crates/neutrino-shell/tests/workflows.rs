@@ -690,6 +690,55 @@ fn note_search_is_profile_and_space_scoped_with_newest_first() {
 }
 
 #[test]
+fn note_content_matches_remain_scoped_and_excerpts_distinguish_same_source() {
+    let notes = json!([
+        {"id":"one","profileID":"p1","spaceID":"s1","title":"An article","sourceURL":"https://example.org","excerpt":"First quotation","contentMatch":true},
+        {"id":"two","profileID":"p1","spaceID":"s1","title":"An article","sourceURL":"https://example.org","excerpt":"Second quotation","contentMatch":false},
+        {"id":"away","profileID":"p1","spaceID":"s2","contentMatch":true},
+        {"id":"secret","profileID":"p2","spaceID":"s1","contentMatch":true}
+    ]);
+    let project = |all| neutrino_shell::core_request(json!({"op":"projectNotes","value":notes,"profileID":"p1","spaceID":"s1","all":all,"query":"phrase in body"})).unwrap();
+    assert_eq!(project(false), json!(["one"]));
+    assert_eq!(project(true), json!(["away", "one"]));
+    let mut s = shell();
+    s.snapshot["notes"] = json!([notes[0], notes[1]]);
+    s.snapshot["selectedNote"] = json!({"id":"one","title":"An article","excerpt":"First quotation","quotedText":"First quotation","text":"draft"});
+    let r = s.dispatch(json!({"op":"section","value":"notes"}));
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("First quotation") && html.contains("Second quotation"));
+    assert!(html.contains("note-quotation quote-one") && html.contains("Note actions"));
+    assert!(!html.contains("Saved as you type"));
+    for reference in html.split("href=\"#glyph-").skip(1) {
+        let name = reference.split('"').next().unwrap();
+        assert!(html.contains(&format!("id=\"glyph-{name}\"")), "Unresolved icon: {name}");
+    }
+    s.dispatch(json!({"op":"menu","value":"notes-scope"}));
+    let scope = s.dispatch(json!({"op":"native","action":"notesScope","value":"all"}));
+    assert_eq!(commands(&scope)[0]["op"], "notesScope");
+    assert!(s.menu.is_empty());
+    assert_eq!(scope["focus"], "notes-scope-trigger");
+    s.dispatch(json!({"op":"menu","value":"notes-scope"}));
+    assert_eq!(s.dispatch(json!({"op":"escape","restoreFocus":true}))["focus"], "notes-scope-trigger");
+    s.dispatch(json!({"op":"menu","value":"notes-scope"}));
+    assert_eq!(s.dispatch(json!({"op":"escape"}))["focus"], "");
+}
+
+#[test]
+fn borrowed_note_search_handles_unicode_whitespace_nuls_and_bounds() {
+    let search = |text: &[u8], query: &[u8]| unsafe {
+        neutrino_shell::neutrino_text_contains(text.as_ptr().cast(), text.len(), query.as_ptr().cast(), query.len())
+    };
+    assert!(search("ÜBER\n  source\t漢字\0 preserved".as_bytes(), "über source 漢字".as_bytes()));
+    assert!(search(b"before\0after", b"after"));
+    assert!(!search(b"quotation", b"missing"));
+    assert!(!search(&[0xff], b"anything"));
+    assert!(!search(b"anything", &vec![b'x'; 1025]));
+    assert!(!search(&vec![b'x'; 1_048_577], b"x"));
+    let body = format!("{}needle at the end", "漢".repeat(200_000));
+    assert!(search(body.as_bytes(), b"NEEDLE AT THE END"));
+}
+
+#[test]
 fn crashed_receipt_writes_do_not_block_future_package_transactions() {
     let root = std::env::temp_dir().join(format!("neutrino-receipt-{}", uuid::Uuid::new_v4()));
     let container = root;

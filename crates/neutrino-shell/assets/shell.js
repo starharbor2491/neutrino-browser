@@ -418,14 +418,17 @@
     if (!menu) return;
     const rail = root.querySelector(".workspace-rail"),
       r = rail?.getBoundingClientRect();
-    const width = r?.width ? Math.max(180, r.width - 20) : 260;
+    const scope = menu.dataset.menu === "notes-scope"
+      ? document.getElementById("notes-scope-trigger")?.getBoundingClientRect()
+      : null;
+    const width = scope ? 220 : r?.width ? Math.max(180, r.width - 20) : 260;
     menu.style.width = Math.min(width, innerWidth - 24) + "px";
-    const anchor = menuAnchor || { x: r?.left || 10, y: 44 };
+    const anchor = scope ? { x: scope.left, y: scope.bottom + 4 } : menuAnchor || { x: r?.left || 10, y: 44 };
     menu.style.left =
       Math.max(
         12,
         Math.min(
-          r?.width ? r.left + 10 : anchor.x,
+          !scope && r?.width ? r.left + 10 : anchor.x,
           innerWidth - menu.offsetWidth - 12,
         ),
       ) + "px";
@@ -787,7 +790,7 @@
         finishResize(false);
         return;
       }
-      send({ op: "escape" });
+      send({ op: "escape", restoreFocus: true });
       return;
     }
     if (e.key === "Tab") {

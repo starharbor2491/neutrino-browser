@@ -4,6 +4,13 @@ import NeutrinoRust
 
 /// Typed ownership boundary for portable Rust services. No website controls this ABI.
 public enum RustCore {
+    public static func textContains(_ text: String, query: String) -> Bool {
+        text.withCString { content in
+            query.withCString { term in
+                neutrino_text_contains(content, text.utf8.count, term, query.utf8.count)
+            }
+        }
+    }
     public static func encoded<T: Encodable>(_ value: T) throws -> Any {
         try JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)
     }

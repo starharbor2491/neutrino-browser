@@ -5,6 +5,8 @@ pub fn outline(name: &str) -> &'static str {
         "plus"=>"M12 5v14M5 12h14", "search"=>"M20 20l-5-5M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14",
         "reload"=>"M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12l-2-6", "check"=>"m5 12 4 4L19 6", "more"=>"M5 12h.01M12 12h.01M19 12h.01",
         "sidebar"=>"M4 4h16v16H4zM9 4v16", "split"=>"M4 4h16v16H4zM12 4v16", "folder"=>"M3 7V5h7l2 3h9v12H3V7z",
+        "appearance"=>"M4 4h16v16H4zM4 9h16M9 9v11",
+        "quote"=>"M4 5h6v7H6v7H3v-7l1-7zM14 5h6v7h-4v7h-3v-7l1-7z",
         "bookmark"=>"M6 3h12v18l-6-4-6 4V3z", "history"=>"M3 11a9 9 0 1 1 2 7M3 5v6h6M12 7v5l3 2",
         "download"=>"M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5", "settings"=>"M4 7h16M4 17h16M8 4v6M16 14v6",
         "globe"=>"M3 12h18M12 3c-6 5-6 13 0 18 6-5 6-13 0-18M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18",
