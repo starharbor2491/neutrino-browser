@@ -77,7 +77,7 @@ The harness is for interaction testing; it does not certify native engine behavi
 | macOS windows, WKWebView/CEF ownership, Keychain, native framework adapters | Swift / Objective-C++ |
 | SDK builds, packaging, signing, release and acceptance automation | Python / shell |
 
-The former Swift percentage included native adapters, DTOs, tests, and acceptance harnesses as well as portable policy. The latter now runs in Rust: session/Space/profile transformations, module storage/recovery, setup management, individual note mutations/indexing, module requirements and output validation, imports, and release/identity validation. Swift still supplies macOS framework calls and adapter orchestration; remaining portable adapter decisions are tracked in the architecture document. Python files build, package, sign, and test releases; **no Python runtime ships in the app**. See [architecture](docs/RUST_ARCHITECTURE.md) and [verified feature coverage](docs/PARITY.md).
+Rust owns the interface and portable services. Swift and Objective-C++ connect them to macOS frameworks and the browser engines. Python handles repository automation; **no Python runtime ships in the app**. See [architecture](docs/RUST_ARCHITECTURE.md) and [verified feature coverage](docs/PARITY.md).
 
 ## Contributing
 

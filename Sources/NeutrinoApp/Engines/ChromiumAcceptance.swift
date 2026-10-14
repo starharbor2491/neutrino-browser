@@ -995,14 +995,16 @@ enum ChromiumAcceptance {
         _ = try await evaluate(options, "String((await chrome.tabs.update(\(initialTabID),{active:true})).id)")
         let returnedDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while !blank.isShowingStartPage || blank.url != nil || browser.selectedTab.url != nil ||
-            !browser.address.isEmpty || blank.chromiumSessionPages?.first?.url != nil {
-            guard ContinuousClock.now < returnedDeadline else { throw ValidationError("Returning to the untouched blank tab retained the sibling's URL, address, or saved selection.") }
+            !browser.address.isEmpty || blank.chromiumSessionPages?.first?.url != nil ||
+            blank.nativeView.window != nil || blank.hasNativeNavigationChrome {
+            guard ContinuousClock.now < returnedDeadline else { throw ValidationError("Returning to the untouched blank tab did not settle its page visibility, address, and saved selection.") }
             try await Task.sleep(for: .milliseconds(100))
         }
-        guard Set(try await nativeBrowsers(blank).filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int }) == initialIDs,
+        let returnedIDs = Set(try await nativeBrowsers(blank).filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int })
+        guard returnedIDs == initialIDs,
               blank.nativeView.window == nil, !blank.hasNativeNavigationChrome,
               browser.selectedTab.chromiumPages?.last?.url == targetURL else {
-            throw ValidationError("Returning to the pristine tab lost the selected browser identity or hid its surviving sibling.")
+            throw ValidationError("Returning to the pristine tab lost identity or sibling state (selected=\(returnedIDs.sorted()), expected=\(initialIDs.sorted()), mount=\(blank.nativeView.window?.windowNumber ?? -1), sibling=\(browser.selectedTab.chromiumPages?.last?.url?.absoluteString ?? "nil")).")
         }
         let historyData = try await blank.request("Page.getNavigationHistory", parameters: [:])
         guard let history = try JSONSerialization.jsonObject(with: historyData) as? [String: Any],

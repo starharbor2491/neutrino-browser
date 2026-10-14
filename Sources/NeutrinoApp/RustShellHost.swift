@@ -71,6 +71,11 @@ final class RustShellContainer: NSView {
     }
     override func layout() { super.layout(); chrome.frame = bounds }
     func hidePages() { for page in mounted.values { page.isHidden = true } }
+    func retainPages(_ ids: Set<UUID>) {
+        for id in Array(mounted.keys) where !ids.contains(id) {
+            if let view = mounted.removeValue(forKey: id) { view.unmount(); view.removeFromSuperview() }
+        }
+    }
     func nativeHit(_ point: NSPoint) -> Bool {
         mounted.values.contains { !$0.isHidden && $0.frame.contains(point) } || dragRegions.contains { $0.frame.contains(point) }
     }
@@ -276,6 +281,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func encoded<T: Encodable>(_ value: T) -> Any { (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)) ?? NSNull() }
     private func synchronize() -> [String: Any] {
+        if let model {
+            // A pristine selection has no page surface. Detach its anchor even
+            // while an overlay is open; the adapter retains its live browser
+            // group and will remount when a navigated sibling is selected.
+            container.retainPages(Set(model.session.tabs.filter { $0.url != nil }.map(\.id)))
+        }
         if let center = downloadCenter {
             // Auxiliary windows receive only their own download capability. They
             // must not inherit the default Profile when no BrowserModel exists.
@@ -578,9 +589,6 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
         }
         for (id, view) in container.mounted where !visible.contains(id) { view.isHidden = true }
-        for id in Array(container.mounted.keys) where !model.session.tabs.contains(where: { $0.id == id }) {
-            if let view = container.mounted.removeValue(forKey: id) { view.unmount(); view.removeFromSuperview() }
-        }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard !stopped, webView === container.chrome else { return }
