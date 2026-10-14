@@ -88,7 +88,10 @@ fn toggle(label: &str, detail: &str, key: &str, value: bool, setup: bool) -> Mar
     html! {button class="toggle-row" data-op=(if setup{"setup-field"}else{"preference"}) data-key=(key) data-value=((!value).to_string()) data-type="bool" role="switch" aria-checked=(value.to_string()) {span {strong{(label)}@if !detail.is_empty(){small{(detail)}}} span class=(if value{"switch on"}else{"switch"}) {span{}}}}
 }
 fn tab_visible(tab: &Value, s: &Shell) -> bool {
-    if text(tab, "url").is_empty() && text(tab, "title") == "New tab" {
+    if text(tab, "url").is_empty()
+        && text(tab, "title") == "New tab"
+        && array(&s.snapshot["chromePages"][text(tab, "id")]).len() < 2
+    {
         return false;
     }
     if !flag(&s.config()["layout"], "treeTabs") {
@@ -142,10 +145,13 @@ fn tab_row(t: &Value, s: &Shell, preview: bool) -> Markup {
         && s.tabs().iter().any(|x| x["parentID"] == t["id"]);
     html! {div class=(if selected{"tab-row active"}else{"tab-row"}) data-tab=(text(t,"id")) data-group=(group) data-folder=(text(t,"folderID")) draggable=((!preview).to_string()) {
         @if children {button class="branch" data-op="toggleBranch" data-id=(text(t,"id")) aria-label=(format!("{} {}",if flag(t,"collapsed"){"Expand"}else{"Collapse"},text(t,"title"))) {(icon(if flag(t,"collapsed"){"forward"}else{"down"}))}}
-        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] title=(text(t,"url")) {(site(t)) span{(text(t,"title"))}}
+        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] title=(text(t,"url")) {(site(t)) span{(if text(t,"url").is_empty(){"Extension pages"}else{text(t,"title")})}}
         button class="tab-close" data-op="closeTab" data-id=(text(t,"id")) aria-label=(format!("Close {}",text(t,"title"))) {(icon("close"))}
         button class="tab-menu" data-op="menu" data-value=(format!("tab:{}",text(t,"id"))) aria-label=(format!("Options for {}",text(t,"title"))) {(icon("more"))}
-    }}
+    }
+    @for page in array(&s.snapshot["chromePages"][text(t,"id")]).iter().filter(|p|!flag(p,"selected") && !text(p,"url").is_empty() && !text(p,"url").starts_with("chrome://")) {
+        div class="chrome-page-row" {button class="tab-select" data-op="chrome-page" data-id=(text(t,"id")) data-page=(page["id"].as_i64().unwrap_or(0)) title=(text(page,"url")){(site(page))span{(if text(page,"title").is_empty(){host(text(page,"url"))}else{text(page,"title").into()})}}button class="tab-close" data-op="chrome-page-close" data-id=(text(t,"id")) data-page=(page["id"].as_i64().unwrap_or(0)) aria-label=(format!("Close {}",text(page,"title"))){(icon("close"))}}
+    } }
 }
 fn tab_groups(s: &Shell, preview: bool) -> Markup {
     html! {
@@ -412,7 +418,7 @@ fn editor(s: &Shell) -> Markup {
     html! {div class=(if s.expanded_preview{"editor expanded-preview"}else{"editor"}) {
         header class="editor-header"{div{h1{"Customize"}}div class="editor-actions"{label class="save-scope"{span{"Apply to"}select data-scope="true" aria-label="Where to apply appearance"{option value="true" selected[s.apply_space]{"This Space"}option value="false" selected[!s.apply_space]{"Browser default"}}}(action("Cancel","escape",false))(action("Save changes","editor-save",true))}}
         div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · live layout"}button class="preview-size" data-op="editor-preview-size" aria-expanded=((!s.expanded_preview).to_string()) aria-controls="appearance-controls"{(icon(if s.expanded_preview{"sidebar"}else{"external"}))(if s.expanded_preview{"Show controls"}else{"Expand preview"})}}
-            div class="editor-preview"{div class="preview-canvas" inert="" {(browser(s,true))}div class="edit-selection tabs-selection" draggable="true" data-component="tabs" data-op="editor-select" data-value="tabs" role="button" tabindex="0" aria-label="Edit tabs"{}div class="edit-selection nav-selection" draggable="true" data-component="navigation" data-op="editor-select" data-value="navigation" role="button" tabindex="0" aria-label="Edit navigation"{}@for region in ["leading","trailing","top","bottom"]{div class=(format!("dock-target dock-{region}")) data-dock=(region){span{(match region{"leading"=>"Left","trailing"=>"Right","top"=>"Top",_=>"Bottom"})}}}}
+            div class="editor-preview"{div class="preview-canvas" inert="" {(browser(s,true))}button type="button" class="edit-selection tabs-selection" draggable="true" data-component="tabs" data-op="editor-select" data-value="tabs" aria-label="Edit tabs"{}button type="button" class="edit-selection nav-selection" draggable="true" data-component="navigation" data-op="editor-select" data-value="navigation" aria-label="Edit navigation"{}button type="button" class="edit-selection panel-selection" draggable="true" data-component="panels" data-op="editor-select" data-value="panels" aria-label="Edit Library panel"{}@for region in ["leading","trailing","top","bottom"]{div class=(format!("dock-target dock-{region}")) data-dock=(region){span{(match region{"leading"=>"Left","trailing"=>"Right","top"=>"Top",_=>"Bottom"})}}}}
             div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span class="editor-feedback" role="status"{(if !text(&s.snapshot,"notice").is_empty(){text(&s.snapshot,"notice")}else if !s.notice.is_empty(){s.notice.as_str()}else{"Changes apply when you save."})}}
         }
         aside class="editor-inspector" id="appearance-controls" hidden[s.expanded_preview]{div class="inspector-section"{h2{"Arrange"}p{"Drag a component, or choose its position."}

@@ -472,6 +472,7 @@
     for (const [selector, target] of [
       [".tabs-selection", ".workspace-rail"],
       [".nav-selection", ".page-toolbar"],
+      [".panel-selection", ".workspace-panel"],
     ]) {
       const selection = frame.querySelector(selector);
       let source = canvas.querySelector(target);
@@ -481,8 +482,11 @@
         getComputedStyle(source).visibility === "hidden"
       )
         source = canvas.querySelector(".horizontal-tabs");
-      if (selection && source) {
-        const rect = source.getBoundingClientRect();
+      if (!selection) continue;
+      const rect = source?.getBoundingClientRect();
+      selection.hidden = !rect || !rect.width || !rect.height ||
+        getComputedStyle(source).visibility === "hidden";
+      if (!selection.hidden) {
         selection.style.left = rect.left - frameRect.left + "px";
         selection.style.top = rect.top - frameRect.top + "px";
         selection.style.width = rect.width + "px";
@@ -560,6 +564,7 @@
     if (r.op === "editor-scope" || el.dataset.type === "bool")
       r.value = r.value === "true";
     if (r.index !== undefined) r.index = Number(r.index);
+    if (r.page !== undefined) r.page = Number(r.page);
     return r;
   }
   document.addEventListener("click", (e) => {

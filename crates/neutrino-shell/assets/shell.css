@@ -3019,6 +3019,7 @@ svg {
   border-radius: 6px;
   cursor: pointer;
 }
+.edit-selection[hidden] { display: none; }
 .edit-selection:hover,
 .edit-selection:focus-visible {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -3158,3 +3159,7 @@ svg {
 .editing-preview.with-panel:is(.placement-leading,.placement-trailing)>.browser-main {grid-column:2}
 .editing-preview.with-panel>.rail-resizer {display:none}
 }
+
+.chrome-page-row {display:flex;align-items:center;margin-left:16px;min-height:34px;border-radius:4px}
+.chrome-page-row:hover {background:var(--hover)}
+.chrome-page-row:hover .tab-close,.chrome-page-row:focus-within .tab-close {opacity:1}

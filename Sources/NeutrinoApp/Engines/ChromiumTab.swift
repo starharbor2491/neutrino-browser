@@ -39,6 +39,11 @@ final class ChromiumTab: BrowserEngineTab {
     private var pageTitle: String?
     private var restoringPages = false
     private var sessionPages: [ChromiumSessionPage] = []
+    private(set) var interfacePages: [[String:Any]] = []
+    func selectInterfacePage(_ id: Int, close: Bool = false) {
+        guard interfacePages.contains(where: { $0["id"] as? Int == id }) else { return }
+        command(Int(close ? NEUTRINO_CEF_CLOSE_INNER_PAGE : NEUTRINO_CEF_SELECT_INNER_PAGE),value:Double(id))
+    }
     private var nextRequest = 1
     private struct PendingRequest {
         let continuation: CheckedContinuation<Data, any Error>
@@ -68,9 +73,9 @@ final class ChromiumTab: BrowserEngineTab {
         restoringPages || !activeContentKnown || sessionPages.isEmpty ? nil : sessionPages
     }
     override func restoreChromiumSessionPages(_ pages: [ChromiumSessionPage]) {
-        // Each Neutrino tab has one WebContents. Do not recreate grouped
-        // Chrome-native tabs from the previous window-hosting integration.
-        if let first = pages.first?.url { load(first) }
+        let addresses = ChromiumSessionPage.normalized(pages).map { $0.url?.absoluteString ?? "" }
+        guard !addresses.isEmpty, let data = try? JSONSerialization.data(withJSONObject:addresses), let text = String(data:data,encoding:.utf8) else { return }
+        command(Int(NEUTRINO_CEF_RESTORE_TABS),text:text)
     }
     override var engineID: BrowserEngineID { .chromium }
 
@@ -364,11 +369,14 @@ final class ChromiumTab: BrowserEngineTab {
             if let restoring = value["restoring"] as? Bool { restoringPages = restoring }
             if let pages = value["innerPages"] as? [[String: Any]], pages.count <= 200 {
                 let ordered = pages.filter { $0["selected"] as? Bool == true } + pages.filter { $0["selected"] as? Bool != true }
+                interfacePages = ordered.map { item in
+                    ["id":item["id"] as? Int ?? 0,"title":boundedPageTitle(item["title"] as? String ?? "Page"),"url":item["url"] as? String ?? "","selected":item["selected"] as? Bool ?? false]
+                }
                 sessionPages = ordered.map { item in
                     let candidate = (item["url"] as? String).flatMap(URL.init(string:))
                     let url = candidate.flatMap { AddressResolver.isWebURL($0) && $0.absoluteString.utf8.count <= 8192 ? $0 : nil }
                     let title = url == nil ? "New tab" : boundedPageTitle(item["title"] as? String ?? "Untitled")
-                    return ChromiumSessionPage(url: url, title: title)
+                    return ChromiumSessionPage(url:url,title:title)
                 }
             }
             if let chrome = value["chromeStyle"] as? Bool { chromeStyle = chrome }

@@ -813,14 +813,14 @@ fn portable_note_mutations_keep_sources_and_profile_boundaries() {
     let note = json!({"id":"n","profileID":"p","title":"Note","text":"draft","modifiedAt":1,"sourceURL":"https://example.com","sourceTabID":"t","quotedText":"immutable"});
     let update = |profile: &str, field: &str, output: Value| {
         neutrino_shell::core_request(
-            json!({"op":"moduleNote","action":"update","id":"n","profileID":profile,"field":field,"output":output,"value":[note]}),
+            json!({"op":"moduleNote","action":"update","id":"n","profileID":profile,"field":field,"output":output,"value":note}),
         )
     };
     assert!(update("other", "text", json!({"value":"changed"})).is_err());
     assert!(update("p", "sourceURL", json!({"value":"changed"})).is_err());
     let result = update("p", "text", json!({"value":"annotation"})).unwrap();
-    assert_eq!(result["notes"][0]["quotedText"], "immutable");
-    assert_eq!(result["notes"][0]["sourceTabID"], "t");
-    assert_eq!(result["notes"][0]["text"], "annotation");
-    assert!(neutrino_shell::core_request(json!({"op":"moduleNote","action":"delete","id":"n","profileID":"p","output":{"delete":false},"value":[note]})).is_err());
+    assert_eq!(result["note"]["quotedText"], "immutable");
+    assert_eq!(result["note"]["sourceTabID"], "t");
+    assert_eq!(result["note"]["text"], "annotation");
+    assert!(neutrino_shell::core_request(json!({"op":"moduleNote","action":"delete","id":"n","profileID":"p","output":{"delete":false},"value":note})).is_err());
 }

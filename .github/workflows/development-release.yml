@@ -131,8 +131,8 @@ jobs:
           cp dist/installed-smoke.json dist/shell-acceptance.json
           if [[ -f dist/research-acceptance.json ]]; then cp dist/research-acceptance.json dist/research-webkit.json; fi
           mv dist/smoke-data dist/shell-smoke-data
-      # Full parity remains mandatory for consumer releases. Preview notes and
-      # the attached failed/passed receipt expose this independent result.
+      # Studio previews require their advertised native workflows.
+      # Consumer releases additionally require the manual parity/streaming gates.
       - name: Record full Blink and extension acceptance
         id: blink
         continue-on-error: true
@@ -148,6 +148,21 @@ jobs:
           if [[ -f dist/smoke-app.log ]]; then cp dist/smoke-app.log dist/blink-acceptance.log; fi
           if [[ -f dist/research-acceptance.json ]]; then cp dist/research-acceptance.json dist/research-blink.json; fi
           if [[ -f dist/shell-acceptance.json ]]; then cp dist/shell-acceptance.json dist/installed-smoke.json; fi
+      - name: Require Blink and both research workflows before publication
+        env:
+          BLINK_ACCEPTANCE: ${{ steps.blink.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          if os.environ['BLINK_ACCEPTANCE'] != 'success':
+              raise SystemExit('Full Blink/extension acceptance failed; retain diagnostics and refuse publication')
+          required = ('quoteWithSource', 'twoDistinctSources', 'sourceTabIdentity', 'movedSourceRecovery', 'databaseReload', 'retainedPageThroughSplit', 'namedSetupReload', 'largeNoteProjection')
+          for engine, key in (('webkit', 'webkit'), ('blink', 'chromium')):
+              receipt = json.loads(Path('dist/research-' + engine + '.json').read_text())
+              if any(receipt.get(key, {}).get(check) is not True for check in required):
+                  raise SystemExit(engine + ' research acceptance failed')
+          PY
       - name: Assemble update catalog and preview notes
         env:
           BLINK_ACCEPTANCE: ${{ steps.blink.outcome }}

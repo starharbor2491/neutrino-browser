@@ -431,6 +431,16 @@ impl Shell {
                         self.screen = "browse".into();
                     }
                 }
+                "chrome-page" | "chrome-page-close" => {
+                    if self.tabs().iter().any(|t| t["id"] == request["id"])
+                        && array(&self.snapshot["chromePages"][text(&request, "id")])
+                            .iter()
+                            .any(|p| p["id"] == request["page"])
+                    {
+                        commands.push(json!({"op":if op=="chrome-page"{"selectChromePage"}else{"closeChromePage"},"id":request["id"],"page":request["page"]}));
+                        self.close_screen();
+                    }
+                }
                 "move-tab" => self.move_tab(&request, &mut commands),
                 "space-step" => {
                     if !self.private() {

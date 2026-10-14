@@ -16,7 +16,7 @@ Local development builds have no update subscription. Published previews explici
 
 ## GitHub releases and automatic updates
 
-Dispatch **Publish Neutrino preview** with a version such as `1.0.1-preview.1`, push a matching `v*-preview.*` tag, or merge an intentional version bump in `PREVIEW_VERSION` to main. Only changes to that file trigger preview publication from main. It builds the complete app on Apple Silicon, requires native tests, real updater replacement/data-preservation tests, and installed shell launch/normal-quit acceptance. It also runs full Blink/extension acceptance independently and attaches the result, including a failed receipt/log if parity is incomplete. Only the consumer workflow can publish a core-accepted production release; its full Blink, streaming, signing and manual acceptance gates remain required.
+Dispatch **Publish Neutrino preview** with a version such as `1.0.1-preview.1`, push a matching `v*-preview.*` tag, or merge an intentional version bump in `PREVIEW_VERSION` to main. Only changes to that file trigger preview publication from main. It builds the complete app on Apple Silicon, requires native tests, real updater replacement/data-preservation tests, and installed shell launch/normal-quit acceptance. It also requires research acceptance in both engines and full Blink/extension acceptance against the packaged app; the receipts and log are attached. Only the consumer workflow can publish a core-accepted production release; its full Blink, streaming, signing and manual acceptance gates remain required.
 
 Both publishing workflows attach `.app.zip`, DMG, `SHA256SUMS`, package metadata, and `catalog.json`. The archive is generated from the final sealed/stapled bundle; installed acceptance expands the actual ZIP and verifies its sealed code and metadata against the app in the DMG. **Add compiled apps to release assets** backfills ZIPs from actual existing DMGs without rebuilding or changing old versions, skips historical Intel payloads, and runs on release publication or manual dispatch with `tag=all`.
 
@@ -30,7 +30,7 @@ The retained consumer service verifies bounded download bytes/digest, read-only 
 
 The verified helper waits for genuine process exit, verifies the copied candidate again, and uses a journaled sibling rename with rollback/recovery. Preview candidates must match the advertised CDHash throughout staging/copy/activation. Consumer candidates must retain the same Developer ID publisher and notarization. No update removes quarantine or disables Gatekeeper.
 
-The new host requires ABI 7 / `chromeViews`; predecessor runtime packages must fail compatibility checks.
+The new host requires ABI 8 / `chromeClipped`; predecessor runtime packages must fail compatibility checks.
 
 ## Production prerequisites
 

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -122,15 +123,25 @@ static NSView* PageContentView(NSView* view) {
   if (!self.arrangingChrome) {
     self.arrangingChrome=YES;
     NSView* document=self.chromeClip.documentView;
-    if (NSView* page=PageContentView(document)) {
-      const NSRect pageRect=[page convertRect:page.bounds toView:document];
-      const CGFloat inset=document.isFlipped ? NSMinY(pageRect)-NSMinY(document.bounds) : NSMaxY(document.bounds)-NSMaxY(pageRect);
-      if (inset>=0 && inset<=220) self.chromeInset=inset;
-    }
     const NSSize viewport=self.chromeClip.bounds.size;
-    const NSRect frame=NSMakeRect(0,0,viewport.width,viewport.height+self.chromeInset);
-    if (!NSEqualRects(document.frame,frame)) document.frame=frame;
-    [self.chromeClip scrollToPoint:NSMakePoint(0,document.isFlipped ? self.chromeInset : 0)];
+    for (int pass=0;pass<3;++pass) {
+      if (NSView* page=PageContentView(document)) {
+        const NSRect rect=[page convertRect:page.bounds toView:document];
+        const CGFloat inset=document.isFlipped ? NSMinY(rect)-NSMinY(document.bounds) : NSMaxY(document.bounds)-NSMaxY(rect);
+        if (inset>=0 && inset<=220) self.chromeInset=inset;
+      }
+      const NSRect frame=NSMakeRect(0,0,viewport.width,viewport.height+self.chromeInset);
+      if (NSEqualRects(document.frame,frame)) break;
+      document.frame=frame;
+      [document layoutSubtreeIfNeeded];
+    }
+    // Layout may change the Cocoa page origin when resizing the root view.
+    // Scroll to its final rectangle, rather than a pre-layout toolbar estimate.
+    if (NSView* page=PageContentView(document)) {
+      const NSRect rect=[page convertRect:page.bounds toView:document];
+      const CGFloat y=document.isFlipped ? NSMinY(rect) : NSMaxY(rect)-viewport.height;
+      [self.chromeClip scrollToPoint:NSMakePoint(NSMinX(rect),y)];
+    }
     self.arrangingChrome=NO;
   }
   if (!child.visible) [child orderFront:nil];
@@ -164,6 +175,7 @@ void SynchronizeViews();
 bool initialized = false;
 bool stopped = false;
 bool final_quit_frozen = false;
+unsigned internal_chrome_commands = 0;
 std::string last_error;
 std::string data_root;
 NSTimer* pump_timer = nil;
@@ -519,6 +531,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
       return true;
     }
     if (final_quit_frozen) return true;
+    if (internal_chrome_commands) return false;
     SetActive(page_);
     const struct { const char* chromium; const char* native; } commands[] = {
       {"IDC_NEW_WINDOW","newWindow"}, {"IDC_NEW_INCOGNITO_WINDOW","privateWindow"},
@@ -946,6 +959,10 @@ void FinishEmptyGroup(Page* owner) {
   for (Page* member : members) if (member!=owner && pages.count(member)) Destroy(member);
   if (pages.count(owner)) Destroy(owner);
 }
+void ExecuteInternal(CefRefPtr<CefBrowser> browser,int command) {
+  struct Scope { Scope(){++internal_chrome_commands;} ~Scope(){--internal_chrome_commands;} } scope;
+  browser->GetHost()->ExecuteChromeCommand(command,CEF_WOD_CURRENT_TAB);
+}
 void RestoreInnerPages(Page* owner) {
   if (!owner->restoring || owner->restore_failed || owner->closing) return;
   if (CFAbsoluteTimeGetCurrent()>owner->restore_deadline) {
@@ -978,7 +995,7 @@ void RestoreInnerPages(Page* owner) {
     const int command=cef_id_for_command_id_name("IDC_NEW_TAB");
     if (!member->browser->GetHost()->CanExecuteChromeCommand(command)) return;
     owner->awaiting_restore_browser=true;
-    member->browser->GetHost()->ExecuteChromeCommand(command,CEF_WOD_CURRENT_TAB);
+    ExecuteInternal(member->browser,command);
     return;
   }
   // The saved selection occupies the fresh window's first tab; IDC_NEW_TAB
@@ -987,7 +1004,7 @@ void RestoreInnerPages(Page* owner) {
   if (!member->browser->IsSame(owner->restore_selection)) {
     const int command=cef_id_for_command_id_name("IDC_SELECT_TAB_0");
     if (member->browser->GetHost()->CanExecuteChromeCommand(command))
-      member->browser->GetHost()->ExecuteChromeCommand(command,CEF_WOD_CURRENT_TAB);
+      ExecuteInternal(member->browser,command);
     return;
   }
   owner->restore_selection=nullptr; owner->restoring=false;
@@ -1297,7 +1314,7 @@ int NativeTabCommand(void* opaque,int command) {
   const int id=cef_id_for_command_id_name(name);
   auto host=page->browser->GetHost();
   if (!host->CanExecuteChromeCommand(id)) return 0;
-  host->ExecuteChromeCommand(id,CEF_WOD_CURRENT_TAB);
+  ExecuteInternal(page->browser,id);
   return 1;
 }
 void Command(void* opaque,int command,const char* text,double value) {
@@ -1351,6 +1368,15 @@ void Command(void* opaque,int command,const char* text,double value) {
     }
     owner->restoring=true; owner->restore_failed=false;
     owner->restore_deadline=CFAbsoluteTimeGetCurrent()+30;
+    return;
+  }
+  if (command==NEUTRINO_CEF_SELECT_INNER_PAGE || command==NEUTRINO_CEF_CLOSE_INNER_PAGE) {
+    if (final_quit_frozen || owner->admission_closed || !std::isfinite(value) || value<1 || value>INT_MAX || std::floor(value)!=value) return;
+    for (Page* member : Members(owner)) if (member->browser && member->browser_id==static_cast<int>(value)) {
+      if (command==NEUTRINO_CEF_CLOSE_INNER_PAGE) member->browser->GetHost()->CloseBrowser(false);
+      else member->browser->GetHost()->ExecuteDevToolsMethod(0,"Page.bringToFront",nullptr);
+      return;
+    }
     return;
   }
   ReconcileWindows(); if (!pages.count(owner)) return;
@@ -1503,6 +1529,11 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
         std::abs(NSWidth(pageRect)-NSWidth(viewport))<2 && std::abs(NSHeight(pageRect)-NSHeight(viewport))<2;
     result->SetBool("customHost",owner->view.chromeClip && window.contentView==owner->view.chromeClip);
     result->SetBool("chromeClipped",clipped);
+    result->SetString("contentRect",NSStringFromRect(pageRect).UTF8String);
+    result->SetString("viewportRect",NSStringFromRect(viewport).UTF8String);
+    result->SetString("documentFrame",NSStringFromRect(document.frame).UTF8String);
+    result->SetString("documentBounds",NSStringFromRect(document.bounds).UTF8String);
+    result->SetBool("documentFlipped",document.isFlipped);
     result->SetDouble("chromeInset",owner->view.chromeInset);
     result->SetBool("windowVisible",window.visible);
     result->SetBool("windowActive",window.keyWindow);
@@ -1589,6 +1620,6 @@ int Shutdown() {
 }
 const char* Error() { return last_error.c_str(); }
 void SetFinalQuitFrozen(int frozen) { final_quit_frozen=frozen!=0; }
-const neutrino_cef_api api={7,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
+const neutrino_cef_api api={8,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
 }
 extern "C" __attribute__((visibility("default"))) const neutrino_cef_api* neutrino_cef_get_api() { return &api; }

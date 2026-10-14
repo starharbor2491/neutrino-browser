@@ -110,13 +110,20 @@ extension AppState {
         let result = try RustCore.decode(CaptureSpecification.self,from:RustCore.request(["op":"captureSpecification","output":RustCore.encoded(output)]))
         return (result.filename,result.visibleOnly)
     }
-    private struct NoteMutation: Decodable { let notes: [Note]; let id: UUID? }
+    private struct NoteMutation: Decodable { let note: Note?; let remove: Bool }
     private func mutateModuleNote(action: String, profileID: UUID, output: [String:ModuleValue], id: UUID? = nil, field: String = "") throws -> UUID? {
-        var request: [String:Any] = ["op":"moduleNote","action":action,"profileID":profileID.uuidString,"profiles":library.profiles.map { $0.id.uuidString },"value":try RustCore.encoded(library.notes),"output":try RustCore.encoded(output),"field":field]
+        let index = library.notes.firstIndex { $0.id == id && $0.profileID == profileID }
+        var request: [String:Any] = ["op":"moduleNote","action":action,"profileID":profileID.uuidString,"profiles":library.profiles.map { $0.id.uuidString },"output":try RustCore.encoded(output),"field":field]
+        if let index { request["value"] = try RustCore.encoded(library.notes[index]) }
         if let id { request["id"] = id.uuidString }
         let result = try RustCore.decode(NoteMutation.self,from:RustCore.request(request))
-        library.notes = result.notes
-        return result.id
+        if result.remove { library.notes.removeAll { $0.id == id && $0.profileID == profileID } }
+        else if let note = result.note {
+            if let index { library.notes[index] = note }
+            else { library.notes.append(note) }
+            return note.id
+        }
+        return nil
     }
     func createModuleNote(profileID: UUID) throws -> UUID {
         let output = try behaviorResult(.notes,event:"create")

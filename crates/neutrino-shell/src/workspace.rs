@@ -536,10 +536,11 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
     let id = text(r, "id");
     Ok(match text(r, "op") {
         "moduleNote" => {
-            let mut notes = array(&s).to_vec();
+            // Only the edited record crosses the ABI. Typing must never copy
+            // unrelated note bodies or return the entire notebook.
             let profile = &r["profileID"];
             let output = &r["output"];
-            let mut created = Value::Null;
+            let mut note = s;
             match text(r, "action") {
                 "create" => {
                     if !array(&r["profiles"]).contains(profile) {
@@ -554,18 +555,16 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
                     if title.chars().count() > 100 || body.chars().count() > 200_000 {
                         return Err("The Notes package returned invalid note fields.");
                     }
-                    created = json!(self::id());
-                    notes.push(json!({"id":created,"profileID":profile,"title":title,"text":body,"modifiedAt":now()}));
+                    note = json!({"id":self::id(),"profileID":profile,"title":title,"text":body,"modifiedAt":now()});
                 }
                 "update" => {
                     let field = text(r, "field");
-                    if !["title", "text"].contains(&field) {
+                    if !["title", "text"].contains(&field)
+                        || note["id"] != r["id"]
+                        || note["profileID"] != *profile
+                    {
                         return Err("This note no longer exists in this profile.");
                     }
-                    let note = notes
-                        .iter_mut()
-                        .find(|v| v["id"] == r["id"] && v["profileID"] == *profile)
-                        .ok_or("This note no longer exists in this profile.")?;
                     let value = output["value"]
                         .as_str()
                         .ok_or("The Notes package returned an oversized field.")?;
@@ -579,11 +578,11 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
                     if output["delete"] != true {
                         return Err("The Notes package did not approve this operation.");
                     }
-                    notes.retain(|v| !(v["id"] == r["id"] && v["profileID"] == *profile));
+                    return Ok(json!({"remove":true}));
                 }
                 _ => return Err("Unknown note operation."),
             }
-            json!({"notes":notes,"id":created})
+            json!({"note":note,"remove":false})
         }
         "projectNotes" => {
             let query = text(r, "query").trim().to_lowercase();

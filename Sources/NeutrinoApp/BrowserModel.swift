@@ -72,6 +72,12 @@ final class BrowserModel: ObservableObject {
     var profile: Profile { app.library.profiles.first(where: { $0.id == session.profileID }) ?? app.library.profiles[0] }
     var activeWebTab: BrowserEngineTab { webTab(session.selectedTabID) }
     var hasPage: Bool { selectedTab.url != nil }
+    var chromePageSnapshots: [String:[[String:Any]]] {
+        Dictionary(uniqueKeysWithValues:session.tabs.compactMap { tab in
+            guard let engine = webTabs[tab.id] as? ChromiumTab, engine.interfacePages.count > 1 else { return nil }
+            return (tab.id.uuidString,engine.interfacePages)
+        })
+    }
     var hasNativeTabs: Bool { webTabs[session.selectedTabID]?.hasNativeNavigationChrome == true }
     var bookmarks: [Bookmark] { app.library.bookmarks.filter { $0.profileID == session.profileID } }
     init(app: AppState, isPrivate: Bool) {

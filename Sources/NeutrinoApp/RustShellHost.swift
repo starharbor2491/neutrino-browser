@@ -347,6 +347,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 if (projectedSession.tabs[i].faviconDataURL?.utf8.count ?? 0) > 12_000 { projectedSession.tabs[i].faviconDataURL = nil }
             }
             snapshot["session"] = encoded(projectedSession)
+            snapshot["chromePages"] = model.chromePageSnapshots
             snapshot["pageBackdrops"] = Dictionary(uniqueKeysWithValues:model.visibleEngineTabs.compactMap {entry -> (String,String)? in
                 guard backdropRevisions[entry.id]==entry.page.navigationRevision,let image=pageBackdrops[entry.id.uuidString] else{return nil}
                 return (entry.id.uuidString,image)
@@ -467,12 +468,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func dispatchAction(_ request: [String:Any]) -> [String:Any] {
         let result=handle.dispatch(request)
-        if let id = result["moduleSettingsID"] as? String, id != selectedSettingsID { selectedSettingsID = id; return synchronize() }
+        var needsSync = false
+        if let id = result["moduleSettingsID"] as? String, id != selectedSettingsID { selectedSettingsID = id; needsSync = true }
         if let commands=result["commands"] as? [[String:Any]],!commands.isEmpty {
             for command in commands {perform(command)}
-            return synchronize()
+            needsSync = true
         }
-        return stamped(result)
+        return needsSync ? synchronize() : stamped(result)
     }
     private func prepareAction(_ request: [String:Any],completion:@escaping @MainActor ([String:Any])->Void) {
         if ["escape","focus-address","screen","selectTab","switchSpace"].contains(request["op"] as? String ?? "") {backdropTask?.cancel()}
@@ -595,6 +597,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             model?.newTab(url:url, parentID:(command["parentID"] as? String).flatMap(UUID.init(uuidString:)))
             pendingPageFocus=model?.session.selectedTabID
         case "selectTab": if let id { model?.selectTab(id) }
+        case "selectChromePage", "closeChromePage":
+            guard let id, let model, model.session.tabs.contains(where:{$0.id==id}), let pageID = command["page"] as? Int else { return }
+            model.selectTab(id)
+            (model.activeWebTab as? ChromiumTab)?.selectInterfacePage(pageID,close:operation=="closeChromePage")
+            pendingPageFocus = id
         case "closeTab": if let id { model?.requestCloseTab(id) }
         case "duplicateTab":
             if let model, let tab = model.session.tabs.first(where: { $0.id == id }) { model.newTab(url: tab.url, engine: tab.engineID) }

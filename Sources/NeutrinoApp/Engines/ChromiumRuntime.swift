@@ -162,7 +162,7 @@ final class ChromiumRuntime: ObservableObject {
         library = handle
         guard let symbol = dlsym(handle, "neutrino_cef_get_api") else { throw ValidationError("This runtime has no Neutrino engine API.") }
         let getter = unsafeBitCast(symbol, to: neutrino_cef_get_api_function.self)
-        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 7 else {
+        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 8 else {
             throw ValidationError("This runtime uses an incompatible Neutrino engine API.")
         }
         let loadedAPI = pointer.pointee

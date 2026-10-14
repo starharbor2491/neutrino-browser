@@ -1,34 +1,25 @@
-# Neutrino rebuild status
+# Neutrino Studio release status
 
-Neutrino is being rebuilt against [the confirmed brief](PRODUCT_PLAN.md). No Neutrino core release or complete parity claim has been verified.
+[Compiled Apple Silicon previews](https://github.com/starharbor2491/neutrino-browser/releases) contain `Neutrino.app` in a ZIP and a complete offline DMG. Blink, WebKit support, bundled modules, and the updater ship inside the app. Browser data stays outside the replaceable application bundle.
 
-[Compiled Apple Silicon previews](https://github.com/starharbor2491/neutrino-browser/releases) include an app ZIP and an offline DMG containing Blink, WebKit support, built-in modules, and the updater. Publication requires installed shell launch, normal quit, and external-data preservation against the exact ZIP/DMG; each release includes its acceptance receipts. Published previews automatically check GitHub, download compatible newer releases, and replace only the app after quitting. These are ad-hoc signed development builds; consumer/core acceptance remains incomplete.
+Studio implements command-first destinations without a new-tab page, six familiar onboarding layouts, direct tab/folder/Space manipulation, source-linked project notes beside live pages, split comparisons, SVG icon packs, and a docking/appearance editor with reusable setups. Modules contribute workspace controls, menus, widgets, styling, or removable feature workers. Named setup saves wait for native confirmation; rejected saves retain the draft.
 
-The active Rust rebuild replaces the previous SwiftUI screen collection with custom browser chrome, seven-step setup, command search, a docking editor, and draggable tab/folder/Space organization. SQLite transactions, bookmark exchange, address resolution, blocking rules, reader-feed parsing and AI validation now run in Rust. Native engine ownership, Keychain, modules/workers, downloads, networking and distribution adapters remain. See [Rust architecture](RUST_ARCHITECTURE.md) and the [gauntlet record](GAUNTLET.md).
+## Evidence
 
-The retained services include shared tabs, per-Space configurations, recoverable archiving, local passwords/manual filling, starter blocking, BYOK/local page assistance and OpenAI account plumbing. Detailed style/component editing, named-setup management, module-specific settings and the organization proposal review/apply interface still need full integration in the Rust frontend; a retained model or service does not count as a complete workflow.
+Source `9df79ea` passed native WebKit CI and the research workflow in both engines: selected quotations, source identity across Space moves, separate same-URL tabs, durable SQLite notes, live split retention, presets, named setups, and large-note UI projection. Its complete Blink gate failed at extension action popups. The subsequent host uses a normal upstream Chromium window with native chrome clipped above the Neutrino viewport, tagged ABI 8 / `chromeClipped`. This change requires fresh installed geometry, extension-popup and shutdown verification before publication.
 
-Blink now uses Chrome-style CEF Views without Chrome's navigation toolbar. ABI 7 and runtime style `chromeViews` deliberately reject old hosting packages. Prior native checks verify rendering, Neutrino tab/address commands, retained documents, popup POST/opener behavior, Profile/private isolation, Reader/capture and genuine Web Store installation. Full extension acceptance fails because `chrome.action.openPopup` requires a browser toolbar; a Neutrino-owned replacement still needs engine integration. That failed result is attached to the preview and still blocks consumer/core release acceptance.
+The current portable checks pass 41 Rust workflows, 71 Swift adapter/core tests, package validation, and packaging/update regressions. The [testing record](TESTING.md) separates fixture interactions, native tests, installed artifacts, and historical results. Screenshots and parser tests do not certify browser compatibility.
 
-Build/package scripts target Apple Silicon and include Blink by default. Explicit WebKit-only development builds are incomplete. Consumer signing/notarization still require configured credentials.
+Preview publication now requires installed launch, ordinary quit, external-data preservation, research acceptance in both engines, and complete Blink/MV3 acceptance against the exact packaged app. Consumer publishing additionally requires the manual core, protected streaming, signing, and clean-Mac gates.
 
-## Verification boundary
+## Remaining release gates
 
-Portable Swift tests cover storage, module integrity/transactions, privacy records, workspace normalization, ownership, archiving, endpoint validation, and organization boundaries. The released pre-Rust source passed 161 tests in debug and 90 native tests in release; current-revision results are recorded in TESTING.md. Native tests launch the real updater, compare its code hash with release packaging, wait for parent exit, replace a sealed app and retain external Profile files. Installed acceptance expands the actual app ZIP, verifies it against the DMG, and checks launch, ordinary quit and preserved external user data. Sixteen Python regressions pass; all 18 module packages validate. Exact source and CI evidence are recorded in [TESTING.md](TESTING.md).
+- Developer ID signing/notarization and clean-Mac Gatekeeper acceptance. Without configured Apple credentials, previews are ad-hoc signed and may require Open Anyway.
+- A configured Sparkle publisher key and signed feed. The verified GitHub updater remains active until a keyed build is published; previously compiled binaries receive it through that bridge.
+- Licensed CDM/codecs and representative protected streaming playback.
+- Complete password/autofill and filter-list coverage; broader extension compatibility and advanced parity beyond the retained fixtures.
+- VoiceOver/manual accessibility, OpenAI account inference/refresh/revocation, and supported xAI account registration/entitlements.
 
-Outstanding gates:
-- Interactive setup/editor acceptance, accessibility and clean-Mac verification.
-- Full Blink extension/API compatibility, action popup integration and installed shutdown/restart acceptance.
-- Widevine/CDM licensing, codec distribution, and protected streaming playback.
-- Native OpenAI sign-in/refresh/revocation/model discovery/inference; xAI registration/entitlements.
-- Developer ID/notarization and clean-Mac consumer installer acceptance.
+The concrete customer hypothesis is local research: quotes retain provenance, notes stay beside the live source, moved sources return without losing their document, and saved setups preserve the comparison context. Native acceptance validates that workflow; it is not evidence that Neutrino universally replaces Arc, Brave, or Chrome. No core-release or 100% parity claim is made.
 
-See [TESTING.md](TESTING.md) and [PARITY.md](PARITY.md). [AUDIT.md](AUDIT.md) and [1.0.0 notes](RELEASE_NOTES_1.0.0.md) are historical predecessor records; they do not validate Neutrino.
-
-Consumer publishing requires exact-installer installed acceptance and publisher-recorded core checks, including protected streaming. Preview publishing requires native/updater and independent installed-shell acceptance, and attaches the full Blink result without treating a failure as core acceptance. No passing Neutrino core receipt is supplied.
-
-## Violet preview
-
-Neutrino Violet uses the supplied icon unchanged, a charcoal/violet Rust interface, inline browsing fields, anchored menus, a directly accessible module manager, larger controls and restrained motion. Module settings and selected providers reach the shell; Resources and Focus have visible entry/recovery paths. Setup is animated, retains choices and offers built-in module configuration.
-
-The 1.0.3 preview is packaged as one Apple Silicon app ZIP plus a complete offline DMG. Whole-app updates carry the pinned Chromium engine and retain external data. Daily upstream refresh must compile/test/package a candidate and pass installed acceptance before publication; failed publication is retried and incomplete assets stay in drafts. Signing availability is recorded separately. Finished parity, DRM, extension action popups and clean-Mac notarized consumer acceptance remain unverified gates.
+[Confirmed brief](PRODUCT_PLAN.md) · [Feature coverage](PARITY.md) · [Distribution](DISTRIBUTION.md) · [Gauntlet](GAUNTLET.md)

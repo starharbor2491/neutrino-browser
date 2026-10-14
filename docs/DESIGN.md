@@ -37,3 +37,5 @@ Modules are directly accessible from the sidebar and Settings. Installed provide
 The first setup screen offers Neutrino, Arc, Chrome, Safari, Brave, and Opera GX inspired configurations. Presets set real tab/navigation placement, color mode, density, accent, icons and optional monitor/bookmark surfaces. They ease transition without claiming affiliation or exact feature parity.
 
 Research notes retain the selected quotation, source address/title, source tab identity, and project Space. Open source locates the original document across the same Profile's Spaces before URL fallback. The project note stays in its original Space even if its live source moves. Notes can be filtered by title, source and Space, and newest captures appear first. At narrow window widths, opening a research panel hides the tab rail; Return to tabs restores it.
+
+The editor preview responds to its own canvas width. A narrow preview temporarily hides a vertical rail when a panel is open so the page remains visible. Selection overlays follow only visible components; tabs, navigation, and the Library panel support pointer dragging and keyboard activation.

@@ -14,7 +14,9 @@ Neutrino keeps pages, reference tabs, and local notes together in a workspace. S
 
 **Development preview.** This is an actively developed browser, with incomplete compatibility and release gates. See the [release status](docs/RELEASE_STATUS.md) before replacing your everyday browser. Downloadable releases contain `Neutrino.app` as a ZIP and a complete offline DMG.
 
-![Neutrino workspace](docs/images/neutrino-shell.png)
+![Neutrino research workspace](docs/images/neutrino-shell.png)
+
+*Native macOS capture: split research pages and source-linked Notes with the Chrome-inspired layout.*
 
 ## A workspace for actual work
 
@@ -74,7 +76,7 @@ The harness is for interaction testing; it does not certify native engine behavi
 | macOS windows, WKWebView/CEF ownership, Keychain, native framework adapters | Swift / Objective-C++ |
 | SDK builds, packaging, signing, release and acceptance automation | Python / shell |
 
-The former Swift percentage included native adapters, DTOs, tests, and acceptance harnesses as well as portable policy. The latter now runs in Rust: session/Space/profile transformations, module storage/recovery, setup management, note indexing, imports, and release/identity validation. Swift still supplies macOS framework calls and adapter orchestration; remaining portable adapter decisions are tracked in the architecture document. Python files build, package, sign, and test releases; **no Python runtime ships in the app**. See [architecture](docs/RUST_ARCHITECTURE.md) and [verified feature coverage](docs/PARITY.md).
+The former Swift percentage included native adapters, DTOs, tests, and acceptance harnesses as well as portable policy. The latter now runs in Rust: session/Space/profile transformations, module storage/recovery, setup management, individual note mutations/indexing, module requirements and output validation, imports, and release/identity validation. Swift still supplies macOS framework calls and adapter orchestration; remaining portable adapter decisions are tracked in the architecture document. Python files build, package, sign, and test releases; **no Python runtime ships in the app**. See [architecture](docs/RUST_ARCHITECTURE.md) and [verified feature coverage](docs/PARITY.md).
 
 ## Contributing
 
