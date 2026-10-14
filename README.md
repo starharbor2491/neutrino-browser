@@ -16,7 +16,7 @@ Neutrino keeps pages, reference tabs, and local notes together in a workspace. S
 
 ![Neutrino research workspace](docs/images/neutrino-shell.png)
 
-*Native macOS capture: split research pages and source-linked Notes with the Chrome-inspired layout.*
+*Native macOS/WebKit capture: two local sample articles beside source-linked Notes, using a dark vertical layout.*
 
 ## A workspace for actual work
 
