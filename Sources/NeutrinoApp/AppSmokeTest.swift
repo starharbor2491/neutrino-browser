@@ -243,6 +243,13 @@ enum AppSmokeTest {
             }
         }
         CFRunLoopWakeUp(runLoop)
+        if ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_DEBUGGER"] == "attach",
+           ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil {
+            // Run the full WindowServer/input workload before attaching. A
+            // debugger-launched process cannot acquire native focus on CI.
+            trace("NEUTRINO_SMOKE_ATTACH_READY")
+            _ = raise(SIGSTOP)
+        }
     }
     private static func captureOnboarding(app: AppState, output: URL) async throws {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1100, height: 780), styleMask: [.titled, .closable], backing: .buffered, defer: false)
