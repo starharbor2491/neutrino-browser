@@ -173,25 +173,7 @@ extension AppState {
         if let url = tab.url, !AddressResolver.isWebURL(url) { tab.url = nil; tab.title = "New tab" }
         return tab
     }
-    func prepareForChromiumRemoval() {
-        windows.values.compactMap(\.model).forEach { $0.captureChromiumSessions() }
-        library = libraryPreparedForChromiumRemoval()
-        for model in windows.values.compactMap(\.model) {
-            model.disposeEngineTabs(engine: .chromium)
-            for tab in model.session.tabs where tab.engineID == .chromium {
-                if let url = tab.url, !AddressResolver.isWebURL(url), let index = model.session.tabs.firstIndex(where: { $0.id == tab.id }) {
-                    model.session.tabs[index].url = nil; model.session.tabs[index].title = "New tab"
-                }
-                model.changeEngine(tab.id, to: .webkit)
-            }
-            for index in model.closedTabs.indices where model.closedTabs[index].engineID == .chromium {
-                model.closedTabs[index].engineID = .webkit
-                model.closedTabs[index].chromiumPages = nil
-                if let url = model.closedTabs[index].url, !AddressResolver.isWebURL(url) { model.closedTabs[index].url = nil; model.closedTabs[index].title = "New tab" }
-            }
-            model.address = model.selectedTab.url?.absoluteString ?? ""
-        }
-    }
+
 }
 
 @MainActor

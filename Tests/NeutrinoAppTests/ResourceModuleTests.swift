@@ -58,12 +58,15 @@ struct ResourceModuleTests {
             defer { CFRunLoopTimerInvalidate(timer) }
 
             if rollback {
-                #expect(throws: (any Error).self) {
+                var repaired = false
+                do {
                     try app.withAtomicModuleChanges(for: [package.id]) {
                         try app.reinstallApprovedWorker(package.id)
+                        repaired = true
                         throw ValidationError("Reject this fixture transaction after its real repair.")
                     }
-                }
+                    #expect(Bool(false), "The fixture transaction did not roll back.")
+                } catch { #expect(repaired, Comment(rawValue: "Repair failed before the intended rollback: " + error.localizedDescription)) }
             } else { try app.reinstallApprovedWorker(package.id) }
             #expect(probe.fired && probe.duringWorkerStop)
             #expect(probe.rejection != nil)

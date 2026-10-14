@@ -49,6 +49,7 @@ private struct ChatGPTCredentials: Codable, Sendable {
   }
   func cancelSignIn() {
     credentialGeneration += 1
+    refreshTask?.cancel()
     listener?.cancel()
     listener = nil
   }

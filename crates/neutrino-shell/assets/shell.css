@@ -3128,3 +3128,10 @@ svg {
 .tab-menu {
   min-height: calc(36px * var(--tabs-spacing, 1));
 }
+
+.notes-scope { display:flex; gap:4px; padding:0 16px 12px; }
+.notes-scope button { min-height:32px; flex:1; font-size:12px; border-radius:var(--component-radius,6px); color:var(--muted); }
+.notes-scope button.selected { background:var(--selected); color:var(--text); }
+.note-source { display:flex; align-items:center; gap:8px; text-align:left; min-height:36px; font-size:12px; color:var(--accent); }
+.note-source span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+.note-quote { margin:8px 0; padding:12px; white-space:pre-wrap; overflow:auto; max-height:240px; background:var(--selected); border-radius:var(--component-radius,6px); font-size:13px; line-height:1.6; }

@@ -83,7 +83,7 @@ extension AppState {
         guard let repository, let module = installedModules.first(where: {
             $0.enabled && $0.manifest.capability == capability && $0.manifest.runtime == .declarative
         }) else { return nil }
-        guard let definition = try? repository.definition(for: module.id), (try? validateDefinitionForPlatform(definition)) != nil else { return nil }
+        guard let definition = try? repository.definition(for: module.id) else { return nil }
         return definition
     }
     var startWidgets: [ModuleDefinition] {
@@ -146,24 +146,9 @@ extension AppState {
         case .nativeReaderWorker, .nativeResourceWorker:
             _ = try validatedWorkerPackage(id: module.id, requireEnabled: requireEnabled)
         case .behaviorProgram: _ = try repository.behaviorProgram(for: module.id, requireEnabled: requireEnabled)
-        case .declarative: try validateDefinitionForPlatform(repository.definition(for: module.id, requireEnabled: requireEnabled))
+        case .declarative: _ = try repository.definition(for: module.id, requireEnabled: requireEnabled)
         case nil: throw ValidationError("This legacy descriptor no longer provides a feature. Update or replace it in Modules.")
         }
-    }
-    func validateDefinitionForPlatform(_ definition: ModuleDefinition) throws {
-        if let icons = definition.icons, !icons.values.allSatisfy({ NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil }) {
-            throw ValidationError("This icon package contains symbols unavailable on this Mac.")
-        }
-    }
-    func moduleInstallationPlan(for ids: [String]) throws -> [ModuleManifest] {
-        guard ids.count <= 64, let repository else { throw ValidationError("Repair module storage before installing setup requirements.") }
-        var seen = Set<String>(), result: [ModuleManifest] = []
-        for id in ids {
-            for manifest in try repository.installationPlan(for: id, catalog: catalog) where seen.insert(manifest.id).inserted {
-                result.append(manifest)
-            }
-        }
-        return result
     }
     func moduleManifestCandidate(_ id: String) -> ModuleManifest? {
         let available = catalog.first(where: { $0.id == id }), existing = installedModules.first(where: { $0.id == id })?.manifest
@@ -188,7 +173,7 @@ extension AppState {
                 } else {
                     guard let payload = modulePayloads[manifest.id] else { throw ValidationError("The catalog is missing \(manifest.name)'s package payload.") }
                     if manifest.runtime == .behaviorProgram { try ModuleProgram.decode(payload).validate(capability: manifest.capability) }
-                    else if manifest.runtime == .declarative { try validateDefinitionForPlatform(ModuleDefinition.decode(payload, capability: manifest.capability)) }
+                    else if manifest.runtime == .declarative { _ = try ModuleDefinition.decode(payload, capability: manifest.capability) }
                     else { guard manifest.runtime?.isNative == true, bundledModuleIDs.contains(manifest.id), !payload.isEmpty, payload.count <= 8 * 1024 * 1024 else { throw ValidationError("This native package is not a trusted bundled worker.") } }
                 }
                 result.append(manifest)

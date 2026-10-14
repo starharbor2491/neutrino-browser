@@ -5,6 +5,7 @@ mod appearance;
 mod bookmarks;
 mod core;
 mod icons;
+mod module_repository;
 mod modules;
 mod storage;
 mod uninstall;

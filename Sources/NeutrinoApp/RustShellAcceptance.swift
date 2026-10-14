@@ -101,12 +101,13 @@ import NeutrinoCore
         let count = app.library.notes.count
         _ = try await evaluatePage(page, "window.neutrinoResearchDraft='retained'; const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);'selected'")
         try await action(["op":"section","value":"notes"], web: web)
-        _ = try await web.evaluateJavaScript("document.querySelector('[data-op=quoteSelection]').click()")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-op=native][data-action=quoteSelection]').click()")
         let deadline = ContinuousClock.now.advanced(by: .seconds(8))
         while app.library.notes.count == count && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(40)) }
         try await Task.sleep(for: .milliseconds(160))
         guard let note = app.library.notes.last, app.library.notes.count == count + 1,
-              note.text.contains("Local browser check"), note.text.contains(source.absoluteString),
+              note.quotedText?.contains("Local browser check") == true, note.sourceURL == source,
+              note.spaceID == model.session.spaceID,
               note.profileID == model.session.profileID,
               (try await web.evaluateJavaScript("!!document.querySelector('.workspace-panel textarea')")) as? Bool == true,
               model.activeWebTab === page, !page.nativeView.isHidden else {
@@ -115,14 +116,21 @@ import NeutrinoCore
         guard await app.flush() else { throw ValidationError("The quote could not be saved.") }
         let database = try LibraryDatabase(url: app.dataDirectory.appendingPathComponent("library.sqlite"))
         let restored = try await database.load()
-        guard restored.notes.contains(where: { $0.id == note.id && $0.text == note.text }) else {
+        guard restored.notes.contains(where: { $0.id == note.id && $0.quotedText == note.quotedText && $0.sourceURL == source && $0.spaceID == model.session.spaceID }) else {
             throw ValidationError("The quote did not survive a database reload.")
         }
-        model.newTab(url: source, engine: page.engineID)
+        let comparisonURL = source.appendingPathComponent("comparison")
+        model.newTab(url: comparisonURL, engine: page.engineID)
         let comparison = model.session.selectedTabID
         defer { model.endSplit(); model.closeTab(comparison); model.selectTab(originalID); app.applyConfiguration(originalConfiguration, to: model.session.spaceID) }
         let secondDeadline = ContinuousClock.now.advanced(by: .seconds(12))
         while (model.activeWebTab.loading || model.activeWebTab.title != "Neutrino HTTP fixture") && ContinuousClock.now < secondDeadline { try await Task.sleep(for: .milliseconds(40)) }
+        _ = try await evaluatePage(model.activeWebTab,"const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);'selected'")
+        try await action(["op":"native","action":"quoteSelection"], web:web)
+        let quoteDeadline = ContinuousClock.now.advanced(by:.seconds(8))
+        while app.library.notes.count == count+1 && ContinuousClock.now < quoteDeadline { try await Task.sleep(for:.milliseconds(40)) }
+        guard let other=app.library.notes.last,app.library.notes.count==count+2,other.sourceURL==comparisonURL,
+              other.quotedText=="Second research source",other.spaceID==note.spaceID else {throw ValidationError("The second source quote lost its project or source context.")}
         try await action(["op":"split-with","id":originalID.uuidString], web: web)
         guard model.session.split?.contains(originalID) == true,
               model.webTab(originalID) === page,
@@ -140,12 +148,25 @@ import NeutrinoCore
         }
         app.applyConfiguration(originalConfiguration, to: model.session.spaceID)
         model.endSplit()
+        let researchSpace = model.session.spaceID
+        guard let away = app.createSpace(name:"Acceptance scratch " + page.engineID.rawValue,profileID:model.session.profileID) else { throw ValidationError("The research Space round-trip could not start.") }
+        model.switchSpace(away)
+        try await Task.sleep(for:.milliseconds(160))
+        guard (try await web.evaluateJavaScript("!document.querySelector('.note-quote')")) as? Bool == true else { throw ValidationError("Research quotes leaked into another Space.") }
+        model.switchSpace(researchSpace)
+        try await action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:web)
+        guard model.session.selectedTabID==originalID,model.activeWebTab===page,
+              try await evaluatePage(page,"window.neutrinoResearchDraft")=="retained" else {throw ValidationError("Opening the source after a Space round-trip did not recover the retained page.")}
+        guard await app.flush() else {throw ValidationError("The complete research workspace could not be saved.")}
+        let complete = try await database.load()
+        guard complete.notes.contains(where:{$0.spaceID==researchSpace && $0.sourceURL==source && $0.id==note.id}),
+              complete.notes.contains(where:{$0.id==other.id && $0.sourceURL==comparisonURL && $0.quotedText==other.quotedText}) else {throw ValidationError("The two-source workspace did not survive a storage reload.")}
         try await action(["op":"section","value":"notes"], web: web)
         try await Task.sleep(for: .milliseconds(200))
         await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-research-\(page.engineID.rawValue).png"))
         let receipt = output.deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
         var evidence = (try? JSONSerialization.jsonObject(with: Data(contentsOf: receipt))) as? [String: Any] ?? [:]
-        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true]
+        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true]
         try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted,.sortedKeys]).write(to: receipt, options: .atomic)
         print("Neutrino research acceptance: \(page.engineID.rawValue) quote, source, durable note, retained split, and saved preset passed")
     }

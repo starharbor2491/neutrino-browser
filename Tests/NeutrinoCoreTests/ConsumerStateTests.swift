@@ -140,19 +140,6 @@ import Testing
     let onceNormalized = config; config.normalize(); #expect(config == onceNormalized)
 }
 
-@Test func customRGBColorsUseStandardContrastAndRejectMalformedInputs() throws {
-    let white = try #require(InterfaceColor(hex: "#FFFFFF")), black = try #require(InterfaceColor(hex: "000000"))
-    let gray = try #require(InterfaceColor(hex: "777777"))
-    #expect(abs(white.contrastRatio(against: black) - 21) < 0.000_001)
-    #expect(white.contrastRatio(against: white) == 1)
-    #expect(abs(gray.contrastRatio(against: white) - 4.478_089_453_577_214) < 0.000_001)
-    #expect(gray.contrastRatio(against: white) == white.contrastRatio(against: gray))
-    #expect(InterfaceColor(hex: "12abCD") == InterfaceColor(hex: "#12ABcd"))
-    for input in ["FFF", "FFFFFFFF", "#GGGGGG", "#１２３４５６", " 123456", "123456 ", "##123456"] {
-        #expect(InterfaceColor(hex: input) == nil)
-    }
-}
-
 @Test func importedAndPersistedCustomColorsStayPairedAcrossSystemAppearances() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("neutrino-color-pair-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

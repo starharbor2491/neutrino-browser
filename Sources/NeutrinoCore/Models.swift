@@ -6,16 +6,7 @@ public enum SearchProvider: String, Codable, CaseIterable, Sendable {
     public var label: String {
         switch self { case .duckDuckGo: "DuckDuckGo"; case .google: "Google"; case .bing: "Bing" }
     }
-    public func searchURL(_ text: String) -> URL {
-        let base = switch self {
-        case .duckDuckGo: "https://duckduckgo.com/"
-        case .google: "https://www.google.com/search"
-        case .bing: "https://www.bing.com/search"
-        }
-        var parts = URLComponents(string: base)!
-        parts.queryItems = [URLQueryItem(name: "q", value: text)]
-        return parts.url!
-    }
+
 }
 
 public enum AddressResolver {
@@ -203,6 +194,10 @@ public struct Note: Identifiable, Codable, Equatable, Sendable {
     public var title: String
     public var text: String
     public var modifiedAt: Date
+    public var spaceID: UUID?
+    public var sourceURL: URL?
+    public var sourceTitle: String?
+    public var quotedText: String?
     public init(id: UUID = UUID(), profileID: UUID, title: String = "Untitled note", text: String = "") {
         self.id = id; self.profileID = profileID; self.title = title; self.text = text; self.modifiedAt = Date()
     }
@@ -222,32 +217,12 @@ public enum BarPlacement: String, Codable, CaseIterable, Sendable { case top, bo
 public enum SidebarPlacement: String, Codable, CaseIterable, Sendable { case leading, trailing, hidden }
 public enum SplitAxis: String, Codable, CaseIterable, Sendable { case sideBySide, stacked }
 public enum InterfaceTypeface: String, Codable, CaseIterable, Sendable { case system, rounded, serif, monospaced }
-public enum InterfaceIconStyle: String, Codable, CaseIterable, Sendable { case outline, filled }
 public struct ComponentAppearance: Codable, Equatable, Sendable {
     public var density: Density?
     public var fontScale: Double?
     public var cornerRadius: Double?
     public init() {}
-    public mutating func normalize() {
-        if let value = fontScale { fontScale = value.isFinite ? min(1.4, max(0.85, value)) : 1 }
-        if let value = cornerRadius { cornerRadius = value.isFinite ? min(24, max(0, value)) : 10 }
-    }
-}
-public struct InterfaceColor: Equatable, Sendable {
-    public let red: Double, green: Double, blue: Double
-    public init?(hex: String) {
-        let value = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        guard value.count == 6, value.allSatisfy({ $0.isASCII && $0.isHexDigit }), let rgb = UInt32(value, radix: 16) else { return nil }
-        red = Double((rgb >> 16) & 255) / 255; green = Double((rgb >> 8) & 255) / 255; blue = Double(rgb & 255) / 255
-    }
-    public func contrastRatio(against other: InterfaceColor) -> Double {
-        func luminance(_ color: InterfaceColor) -> Double {
-            func linear(_ value: Double) -> Double { value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4) }
-            return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
-        }
-        let a = luminance(self), b = luminance(other)
-        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
-    }
+
 }
 public enum ToolbarRegion: String, Codable, CaseIterable, Sendable {
     case beforeAddress, afterAddress, top, bottom, overflow
@@ -286,7 +261,6 @@ public struct Theme: Codable, Equatable, Sendable {
     public var textHex: String?
     public var borderWidth: Double?
     public var shadowStrength: Double?
-    public var iconStyle: InterfaceIconStyle?
     public var iconPack: String?
     public var iconStroke: Double?
     public var preset: String?

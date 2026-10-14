@@ -11,6 +11,7 @@ final class BrowserModel: ObservableObject {
         return ids.map { ($0, webTab($0)) }
     }
     var shellAction: (([String: Any]) -> Void)?
+    var stopInterface: (() -> Void)?
     @Published var session: WindowSession {
         didSet {
             guard !restoringFrozenSession else { return }
@@ -32,14 +33,6 @@ final class BrowserModel: ObservableObject {
     @Published var focusMode = false { didSet { if !focusMode { focusHiddenComponents = []; focusProviderID = nil } } }
     @Published var focusHiddenComponents = Set<String>()
     var focusProviderID: String?
-    func closeSecondarySidebar() {
-        if var preview = app.previewConfiguration {
-            preview.layout.secondaryPanel = nil; app.previewConfiguration = preview
-        } else {
-            var configuration = self.configuration
-            configuration.layout.secondaryPanel = nil; app.applyConfiguration(configuration, to: session.spaceID)
-        }
-    }
     func enterFocus() {
         app.perform {
             let requested = try app.requestedFocusPresentation()

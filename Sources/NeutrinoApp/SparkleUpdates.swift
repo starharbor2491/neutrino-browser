@@ -45,7 +45,4 @@ final class SparkleUpdates: NSObject, SPUUpdaterDelegate {
         scheduledInstallation = true
         return false
     }
-    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-        scheduledInstallation = false
-    }
 }

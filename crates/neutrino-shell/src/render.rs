@@ -20,8 +20,8 @@ fn icon_definitions(s: &Shell) -> Markup {
         @let path = if (pack=="module" || pack.is_empty()) && crate::icons::valid_path(custom){custom}else{crate::icons::path(name,pack)};
         @let filled = pack=="solid";
         symbol id=(format!("glyph-{name}")) viewBox="0 0 24 24"{
-            @if filled && ["back","forward","reload"].contains(&name){circle cx="12" cy="12" r="10" fill="currentColor" stroke="none";path d=(path) stroke="var(--rail)" fill="none";}
-            @else {path d=(path) fill=(if filled && ["bookmark","grid","folder","pin"].contains(&name){"currentColor"}else{"none"});}
+            @if filled && ["back","forward","reload"].contains(&name){circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"{}path d=(path) stroke="var(--rail)" fill="none"{}}
+            @else {path d=(path) fill=(if filled && ["bookmark","grid","folder","pin"].contains(&name){"currentColor"}else{"none"}){}}
         }
     }}}}
 }
@@ -464,7 +464,7 @@ fn appearance_controls(s: &Shell) -> Markup {
             (segments("editor-value","typography",text(&s.config()["theme"],"typography"),&[("system","System"),("rounded","Rounded"),("monospaced","Mono")]))
         }
         div class="inspector-section"{h2{"SVG icons"}
-            div class="icon-pack-grid"{@for (key,label) in [("outline","Outline"),("precision","Precision"),("solid","Solid"),("module","Module")] {button class=(if text(&s.config()["theme"],"iconPack")==key{"icon-pack selected"}else{"icon-pack"}) data-op="editor-value" data-key="iconPack" data-value=(key) aria-pressed=((text(&s.config()["theme"],"iconPack")==key).to_string()){span{svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" fill=(if key=="solid"{"currentColor"}else{"none"}){path d=(crate::icons::path("folder",key));}svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" fill="none"{path d=(crate::icons::path("search",key));}}(label)}}}
+            div class="icon-pack-grid"{@for (key,label) in [("outline","Outline"),("precision","Precision"),("solid","Solid"),("module","Module")] {button class=(if text(&s.config()["theme"],"iconPack")==key{"icon-pack selected"}else{"icon-pack"}) data-op="editor-value" data-key="iconPack" data-value=(key) aria-pressed=((text(&s.config()["theme"],"iconPack")==key).to_string()){span{svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" fill=(if key=="solid"{"currentColor"}else{"none"}){path d=(crate::icons::path("folder",key)){}}svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" fill="none"{path d=(crate::icons::path("search",key)){}}}(label)}}}
             (slider(s,"Stroke","iconStroke","theme",1.,2.5,0.1,1.7))
         }
         div class="inspector-section"{h2{"Page tools"}
@@ -530,8 +530,22 @@ fn settings(s: &Shell) -> Markup {
                     button class="button primary" type="submit"{"Save login"}
                 }}}
             }
-            "updates"|"engines"=>{h2{"Updates"}p class="section-description"{(text(&s.snapshot["updates"],"version"))}(toggle("Automatic updates","Update Neutrino and Chromium together after you quit. Your data stays in place.","automaticUpdates",flag(&s.snapshot["updates"],"automatic"),false))div class="settings-group"{p{(text(&s.snapshot["updates"],"message"))}div class="button-row"{button class="button primary" data-op="checkUpdates" disabled[flag(&s.snapshot["updates"],"busy")]{(if flag(&s.snapshot["updates"],"busy"){"Checking…"}else{"Check for updates"})}@if flag(&s.snapshot["updates"],"pending"){(action("Restart and install","restartUpdate",false))}@if flag(&s.snapshot["updates"],"busy"){(action("Cancel","cancelUpdate",false))}}}h2{"Website engines"}p class="section-description"{"Blink is the default. WebKit uses separate website sign-ins and does not support Chrome extensions."}div class="list-row"{(icon("globe"))div{strong{"Blink / Chromium"}small{(if flag(&s.snapshot,"blinkAvailable"){format!("Chromium {} · updates with Neutrino",text(&s.snapshot,"engineVersion"))}else{"Not present in this development build".into()})}}}div class="list-row"{(icon("globe"))div{strong{"WebKit"}small{"Provided by macOS"}}}}
-            _=>{h2{"Browsing"}label class="control-label"{"Default search engine"}(segments("preference","search",text(prefs,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))(toggle("Pick up where you left off","Restore regular tabs when you reopen Neutrino.","restoreSession",flag(prefs,"restoreSession"),false))div class="list-row"{div{strong{"Default browser"}small{"Open links in Neutrino."}}(action("Set as default","defaultBrowser",false))}div class="list-row"{div{strong{"Your bookmarks"}small{"Bring over an HTML bookmarks export."}}(action("Import","importBookmarks",false))}}
+            "updates"|"engines"=>{h2{"Updates"}p class="section-description"{(text(&s.snapshot["updates"],"version"))}(toggle("Automatic updates","Update Neutrino and Chromium together after you quit. Your data stays in place.","automaticUpdates",flag(&s.snapshot["updates"],"automatic"),false))div class="settings-group"{
+                p{(text(&s.snapshot["updates"],"message"))}
+                div class="button-row"{
+                    button class="button" data-op="checkUpdates" disabled[flag(&s.snapshot["updates"],"busy")]{(if flag(&s.snapshot["updates"],"busy"){"Checking…"}else{"Check for updates"})}
+                    @if !text(&s.snapshot["updates"],"available").is_empty() && !flag(&s.snapshot["updates"],"pending"){button class="button primary" data-op="downloadUpdate" disabled[flag(&s.snapshot["updates"],"busy")]{"Download "(text(&s.snapshot["updates"],"available"))}}
+                    @if flag(&s.snapshot["updates"],"pending"){(action("Restart and install","restartUpdate",false))}
+                    @if flag(&s.snapshot["updates"],"busy"){(action("Cancel","cancelUpdate",false))}
+                    @if flag(&s.snapshot["updates"],"pending") || flag(&s.snapshot["updates"],"invalid"){button class="button" data-op="discardUpdate" disabled[flag(&s.snapshot["updates"],"busy")]{"Discard download"}}
+                }
+                button class="button" data-op="importInstaller" disabled[flag(&s.snapshot["updates"],"busy")]{(icon("folder"))"Import offline installer…"}
+            }
+            h2{"Website engines"}p class="section-description"{"Blink is the default. WebKit uses separate website sign-ins and does not support Chrome extensions."}
+            div class="list-row"{(icon("globe"))div{strong{"Blink / Chromium"}small{(if flag(&s.snapshot,"blinkAvailable"){format!("Chromium {} · updates with Neutrino",text(&s.snapshot,"engineVersion"))}else{"Not present in this development build".into()})}}}
+            div class="list-row"{(icon("globe"))div{strong{"WebKit"}small{"Provided by macOS"}}}}
+
+            _=>{h2{"Browsing"}label class="control-label"{"Default search engine"}(segments("preference","search",text(prefs,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))(toggle("Pick up where you left off","Restore regular tabs when you reopen Neutrino.","restoreSession",flag(prefs,"restoreSession"),false))div class="list-row"{div{strong{"Default browser"}small{"Open links in Neutrino."}}(action("Set as default","defaultBrowser",false))}div class="list-row"{div{strong{"Your bookmarks"}small{"Bring over an HTML bookmarks export."}}(action("Import","importBookmarks",false))}div class="list-row"{div{strong{"Uninstall Neutrino"}small{"Erase this app and its browser data."}}button class="button danger" data-op="uninstall"{"Uninstall…"}}}
         }}
     }}
 }
@@ -571,12 +585,15 @@ fn library(s: &Shell) -> Markup {
             "notes" => {
                 @if s.private() {(empty("Notes stay in regular windows","Private browsing does not create or change saved notes.","shield"))}
                 @else {
+                    div class="notes-scope"{button class=(if text(&s.snapshot,"notesScope")!="all"{"selected"}else{""}) data-op="native" data-action="notesScope" data-value="space"{"This Space"}button class=(if text(&s.snapshot,"notesScope")=="all"{"selected"}else{""}) data-op="native" data-action="notesScope" data-value="all"{"All notes"}}
                     div class="note-actions"{button class="button" data-op="native" data-action="createNote"{(icon("plus"))"New"}button class="button quiet" data-op="native" data-action="noteFromPage" disabled[text(s.active(),"url").is_empty()]{"Save page"}button class="button quiet" data-op="native" data-action="quoteSelection" title="Quote text selected on the page" disabled[text(s.active(),"url").is_empty()]{"Quote"}}
                     div class="note-list" {@for n in array(&s.snapshot["notes"]) {button class=(if n["id"]==s.snapshot["selectedNote"]["id"]{"selected"}else{""}) data-op="native" data-action="selectNote" data-id=(text(n,"id")){(icon("edit"))span{(text(n,"title"))}}}}
                     @let n=&s.snapshot["selectedNote"];
                     @if !n.is_null() {article class="note-card"{
                         input class="note-title" value=(text(n,"title")) data-note=(text(n,"id")) data-note-field="title" maxlength="100" aria-label="Note title";
-                        textarea data-note=(text(n,"id")) data-note-field="body" maxlength="200000" aria-label="Note content"{(text(n,"text"))}
+                        @if !text(n,"sourceURL").is_empty(){button class="note-source" data-op="native" data-action="openNoteSource" data-id=(text(n,"id")) title=(text(n,"sourceURL")){(icon("external"))span{(host(text(n,"sourceURL")))}"Open source"}}
+                        @if !text(n,"quotedText").is_empty(){blockquote class="note-quote"{(text(n,"quotedText"))}}
+                        textarea data-note=(text(n,"id")) data-note-field="body" maxlength="200000" aria-label="Note content" placeholder="Add your notes…"{(text(n,"text"))}
                         div class="note-footer"{span{"Saved as you type"}button class="button quiet" data-op="menu" data-value=(format!("delete-note:{}",text(n,"id"))){"Delete note…"}}
                     }}
                 }
@@ -692,7 +709,7 @@ fn module_details(s: &Shell, m: &Value) -> Markup {
         @if flag(m,"enabled"){div class="module-use"{@match text(m,"capability"){
             "resourceMonitor"=>{button class="button primary" data-op="screen" data-value="resources"{(icon("activity"))"Open monitor"}}
             "focusMode"=>{button class="button primary" data-op="native" data-action="toggleFocus"{(icon("moon"))(if flag(&s.snapshot,"focusMode"){"Exit Focus"}else{"Enter Focus"})}}
-            "notes"=>{button class="button primary" data-op="panel" data-value="notes"{(icon("edit"))"Open beside page"}}
+            "notes"=>{button class="button primary" data-op="open-panel" data-value="notes"{(icon("edit"))"Open beside page"}}
             "reader"=>{button class="button primary" data-op="reader" disabled[text(s.active(),"url").is_empty()]{(icon("book"))"Read current page"}}
             "screenshot"=>{button class="button primary" data-op="capture" disabled[text(s.active(),"url").is_empty()]{(icon("camera"))"Capture current page"}}
             "theme" | "layout" | "icons" | "tabSystem"=>{button class="button primary" data-op="screen" data-value="editor"{(icon("edit"))"Customize workspace"}}

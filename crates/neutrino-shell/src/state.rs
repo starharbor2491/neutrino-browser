@@ -351,7 +351,7 @@ impl Shell {
                         );
                     }
                 }
-                "panel" => {
+                "panel" | "open-panel" => {
                     let value = text(&request, "value");
                     if [
                         "",
@@ -363,11 +363,12 @@ impl Shell {
                     ]
                     .contains(&value)
                     {
-                        self.panel = if value.is_empty() || self.panel_key() == value {
-                            "closed".into()
-                        } else {
-                            value.into()
-                        };
+                        self.panel =
+                            if value.is_empty() || (op == "panel" && self.panel_key() == value) {
+                                "closed".into()
+                            } else {
+                                value.into()
+                            };
                         if self.panel != "resources" && self.panel != "closed" {
                             self.section = self.panel.clone();
                             commands.push(json!({"op":"projectLibrary","section":self.panel}));
@@ -680,7 +681,8 @@ impl Shell {
                     }
                 }
                 "back" | "forward" | "reload" | "stop" | "bookmark" | "reopenTab" | "split"
-                | "unsplit" | "checkUpdates" | "restartUpdate" | "cancelUpdate" | "newWindow"
+                | "unsplit" | "checkUpdates" | "downloadUpdate" | "importInstaller"
+                | "discardUpdate" | "restartUpdate" | "cancelUpdate" | "newWindow"
                 | "privateWindow" | "importModule" | "installExtension" | "webStore" | "reader"
                 | "capture" | "exportBookmarks" | "clearHistory" | "signIn" | "disconnectAI"
                 | "disableAI" | "cancelAI" | "restoreLayout" | "resetModules" | "retrySave"
@@ -751,6 +753,8 @@ impl Shell {
                         "deleteNote",
                         "createNote",
                         "selectNote",
+                        "notesScope",
+                        "openNoteSource",
                         "noteFromPage",
                         "quoteSelection",
                         "libraryPage",
@@ -767,10 +771,14 @@ impl Shell {
                                 "createNote",
                                 "noteFromPage",
                                 "quoteSelection",
+                                "openNoteSource",
                                 "credentialDelete",
                             ]
                             .contains(&action))
                     {
+                        if action == "openNoteSource" {
+                            self.close_screen();
+                        }
                         commands
                             .push(json!({"op":action,"id":request["id"],"value":request["value"]}));
                         if action == "toggleFocus" {
@@ -822,7 +830,9 @@ impl Shell {
         json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
     }
     pub fn panel_key(&self) -> &str {
-        if self.panel == "closed" {
+        if self.screen == "editor" {
+            text(&self.config()["layout"], "secondaryPanel")
+        } else if self.panel == "closed" {
             ""
         } else if !self.panel.is_empty() {
             &self.panel

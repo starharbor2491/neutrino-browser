@@ -107,6 +107,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private weak var observedDownloads: DownloadCenter?
     private var observedDownloadIDs: [UUID] = []
     private var selectedNoteID: UUID?
+    private var allNotes = false
     private var librarySection = "bookmarks"
     private var libraryPage = 0
     private var engineObservations = Set<AnyCancellable>()
@@ -190,7 +191,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 // receives a DOM key event. Own tab closing on the browser window,
                 // including the address palette and the empty new-tab surface.
                 if closeTab, self.ready, let model = self.model, !model.isClosed {
-                    self.sendAction(["op":"closeTab","id":model.session.selectedTabID.uuidString])
+                    self.sendAction(["op":"closeCurrent"])
                     return true
                 }
                 return false
@@ -223,6 +224,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }.store(in: &subscriptions)
         }
         model?.shellAction = { [weak self] request in self?.sendAction(request) }
+        model?.stopInterface = { [weak self] in self?.stop() }
         chrome.load(URLRequest(url: URL(string: "neutrino-ui://shell/index.html")!))
     }
     func stop() {
@@ -231,7 +233,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         resourceWorker.stop()
         editingEngines.forEach { $0.setInterfaceEditing(false, owner: editingOwner) }; editingEngines.removeAll()
         if let editingInputMonitor { NSEvent.removeMonitor(editingInputMonitor) }; editingInputMonitor = nil
-        pendingSync?.cancel(); assistantTask?.cancel(); model?.shellAction = nil; subscriptions.removeAll(); downloadObservations.removeAll(); engineObservations.removeAll(); observedEngines.removeAll()
+        pendingSync?.cancel(); assistantTask?.cancel(); model?.shellAction = nil; model?.stopInterface = nil; subscriptions.removeAll(); downloadObservations.removeAll(); engineObservations.removeAll(); observedEngines.removeAll()
         container.chrome.configuration.userContentController.removeScriptMessageHandler(forName: "neutrino", contentWorld: .page)
         container.chrome.navigationDelegate = nil
         container.unmount()
@@ -273,12 +275,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         observeDownloads(downloadCenter ?? model?.downloads)
         let regular = model?.isPrivate != true
         let bookmarks = regular ? app.library.bookmarks.filter { $0.profileID == profileID } : []
-        let notes = regular ? app.library.notes.filter { $0.profileID == profileID } : []
+        let notes = regular ? app.library.notes.filter { $0.profileID == profileID && (allNotes || $0.spaceID == nil || $0.spaceID == model?.session.spaceID) } : []
         let history = regular ? Array(app.library.history.filter { $0.profileID == profileID }.reversed()) : []
         let count = librarySection == "notes" ? notes.count : librarySection == "history" ? history.count : bookmarks.count
         libraryPage = min(libraryPage, max(0, (count - 1) / 40))
         let offset = libraryPage * 40
-        let selectedNote = notes.first { $0.id == selectedNoteID }
+        let selectedNote = notes.first { $0.id == selectedNoteID } ?? notes.first
         var snapshot: [String: Any] = [
             "completedOnboarding": !isPreview && app.library.preferences.completedOnboarding,
             "smoke": model != nil && CommandLine.arguments.contains("--smoke-test"),
@@ -293,8 +295,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "folders": encoded(space?.folders ?? []), "archived": (space?.archivedTabs ?? []).prefix(200).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String(($0.url?.absoluteString ?? "").prefix(8192))] },
             "bookmarks": bookmarks.dropFirst(librarySection == "bookmarks" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
             "history": history.dropFirst(librarySection == "history" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
-            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100))] },
-            "selectedNote": selectedNote.map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100)), "text": String($0.text.prefix(200_000))] } as Any? ?? NSNull(),
+            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100)),"sourceURL": $0.sourceURL?.absoluteString ?? ""] },
+            "notesScope": allNotes ? "all" : "space",
+            "selectedNote": selectedNote.map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100)), "text": String($0.text.prefix(200_000)),"sourceURL":$0.sourceURL?.absoluteString ?? "","sourceTitle":$0.sourceTitle ?? "","quotedText":$0.quotedText ?? ""] } as Any? ?? NSNull(),
             "libraryPage": libraryPage, "libraryCount": count,
             "account": ["connected": ChatGPTAccount.shared.connected, "busy": ChatGPTAccount.shared.busy, "status": ChatGPTAccount.shared.status ?? "", "models": ChatGPTAccount.shared.models],
             "notice": app.notice ?? "", "defaultStatus": defaultStatus, "imported": imported,
@@ -302,7 +305,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "engineVersion": ChromiumRuntime.cefVersion.components(separatedBy:"chromium-").last ?? "unavailable",
             "assistantResponse": assistantResponse, "assistantBusy": assistantTask != nil,
             "updates": ["version": "Neutrino " + (update.current?.version ?? "development"), "automatic": update.automaticUpdates,
-                        "message": update.message ?? "Updates are downloaded from GitHub. Your browsing data is kept.", "busy": update.busy, "pending": update.pending != nil],
+                        "message": update.message ?? "Updates are downloaded from GitHub. Your browsing data is kept.", "busy": update.busy, "pending": update.pending != nil,
+                        "available": update.available.first?.release.version ?? "", "invalid": update.pendingRecordInvalid],
             "modules": moduleSnapshot(), "moduleCatalogs": app.communityCatalogNames,
             "menuItems": encoded(app.declarativeDefinition(.menu)?.menu ?? []),
             "svgIcons": app.declarativeDefinition(.icons)?.svgIcons ?? [:],
@@ -669,6 +673,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if let id, let space = model?.session.spaceID { app.restoreArchivedTab(id, spaceID: space); model?.selectTab(id) }
         case "defaultBrowser": setDefaultBrowser()
         case "checkUpdates": DistributionManager.shared.checkForUpdates(dataDirectory: app.dataDirectory)
+        case "downloadUpdate":
+            if let asset = DistributionManager.shared.available.first { DistributionManager.shared.install(asset, dataDirectory: app.dataDirectory) }
+        case "importInstaller": DistributionManager.shared.importInstaller(dataDirectory: app.dataDirectory)
+        case "discardUpdate": DistributionManager.shared.discardPending()
         case "restartUpdate": DistributionManager.shared.requestRestart()
         case "cancelUpdate": DistributionManager.shared.cancel()
         case "newWindow": openWindow?(false)
@@ -727,6 +735,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                         let noteID=try app.createModuleNote(profileID:profile)
                         try app.updateModuleNote(id:noteID,profileID:profile,field:"title",value:prepared["title"] ?? title)
                         try app.updateModuleNote(id:noteID,profileID:profile,field:"text",value:prepared["text"] ?? "")
+                        if let index = app.library.notes.firstIndex(where:{$0.id==noteID}) {
+                            app.library.notes[index].spaceID = model.session.spaceID
+                            app.library.notes[index].sourceURL = URL(string: prepared["sourceURL"] ?? "")
+                            app.library.notes[index].sourceTitle = prepared["sourceTitle"]
+                            app.library.notes[index].quotedText = prepared["quote"]
+                        }
                         selectedNoteID=noteID
                     } catch {app.library.notes=original;throw error}
                     scheduleSync()
@@ -734,7 +748,17 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
         case "createNote":
             guard model?.isPrivate != true else { return }
-            app.perform { selectedNoteID = try app.createModuleNote(profileID: profileID) }
+            app.perform {
+                selectedNoteID = try app.createModuleNote(profileID: profileID)
+                if let index=app.library.notes.firstIndex(where:{$0.id==selectedNoteID}) { app.library.notes[index].spaceID=model?.session.spaceID }
+            }
+        case "notesScope": allNotes = command["value"] as? String == "all"; libraryPage = 0
+        case "openNoteSource":
+            guard model?.isPrivate != true, let model, let id,
+                  let note=app.library.notes.first(where:{$0.id==id && $0.profileID==profileID}),
+                  let url=note.sourceURL, AddressResolver.isWebURL(url) else{return}
+            if let existing=model.session.tabs.first(where:{$0.url==url}) { model.selectTab(existing.id) }
+            else { model.newTab(url:url) }
         case "saveNote":
             guard model?.isPrivate != true, let id,
                   let value = command["value"] as? [String: String], let content = value["text"], let field = value["field"] else { return }

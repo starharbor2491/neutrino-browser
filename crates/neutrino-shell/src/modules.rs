@@ -3,6 +3,215 @@
 use crate::state::text;
 use serde_json::{json, Value};
 
+pub fn json_bounds(data: &str) -> Result<(), &'static str> {
+    let (mut depth, mut quoted, mut escaped) = (0i32, false, false);
+    for b in data.bytes() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                quoted = false;
+            }
+        } else if b == b'"' {
+            quoted = true;
+        } else if b == b'{' || b == b'[' {
+            depth += 1;
+            if depth > 64 {
+                return Err("Module JSON exceeds the nesting limit.");
+            }
+        } else if b == b'}' || b == b']' {
+            depth -= 1;
+            if depth < 0 {
+                return Err("Module JSON is malformed.");
+            }
+        }
+    }
+    if depth != 0 || quoted {
+        return Err("Module JSON is incomplete.");
+    }
+    Ok(())
+}
+pub fn svg_icons(icons: &Value) -> Result<(), &'static str> {
+    let icons = icons
+        .as_object()
+        .ok_or("An icon set needs named SVG paths.")?;
+    const KEYS: &[&str] = &[
+        "back",
+        "forward",
+        "reload",
+        "newTab",
+        "home",
+        "bookmark",
+        "bookmarks",
+        "history",
+        "notes",
+        "resources",
+        "downloads",
+        "modules",
+        "customize",
+        "settings",
+        "sidebar",
+        "reader",
+        "screenshot",
+        "focus",
+        "search",
+        "close",
+        "grid",
+        "folder",
+        "user",
+        "shield",
+        "key",
+        "split",
+        "pin",
+        "edit",
+        "globe",
+        "lock",
+        "sun",
+        "moon",
+        "spark",
+        "undo",
+        "arrow",
+        "grip",
+        "book",
+        "activity",
+        "camera",
+        "plug",
+        "more",
+        "down",
+        "check",
+        "external",
+    ];
+    if icons.is_empty()
+        || icons.len() > 64
+        || icons.iter().any(|(k, p)| {
+            !KEYS.contains(&k.as_str()) || !p.as_str().is_some_and(crate::icons::valid_path)
+        })
+    {
+        return Err("Icon sets accept known icons as bounded SVG path data; scripts, markup, images, and external resources are not supported.");
+    }
+    Ok(())
+}
+fn equivalent(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Value::Object(a), Value::Object(b)) => a.keys().chain(b.keys()).all(|k| {
+            equivalent(
+                a.get(k).unwrap_or(&Value::Null),
+                b.get(k).unwrap_or(&Value::Null),
+            )
+        }),
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(v, w)| equivalent(v, w))
+        }
+        _ => a == b,
+    }
+}
+fn luminance(hex: &str) -> Result<f64, &'static str> {
+    if !crate::appearance::hex(hex) {
+        return Err("Invalid theme colors.");
+    }
+    let rgb = u32::from_str_radix(hex.trim_start_matches('#'), 16)
+        .map_err(|_| "Invalid theme colors.")?;
+    let linear = |v: u32| {
+        let n = (v & 255) as f64 / 255.;
+        if n <= 0.04045 {
+            n / 12.92
+        } else {
+            ((n + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    Ok(0.2126 * linear(rgb >> 16) + 0.7152 * linear(rgb >> 8) + 0.0722 * linear(rgb))
+}
+pub fn definition(d: &Value, capability: &str) -> Result<(), &'static str> {
+    let populated = [
+        "treeTabs",
+        "theme",
+        "layout",
+        "svgIcons",
+        "icons",
+        "menu",
+        "widgetTitle",
+    ]
+    .iter()
+    .filter(|k| !d[**k].is_null())
+    .count();
+    if d["formatVersion"] != 1 || populated != 1 {
+        return Err("A declarative package must define exactly one compatible role.");
+    }
+    match capability {
+        "tabSystem" if d["treeTabs"].is_boolean() => {}
+        "theme" if d["theme"].is_object() => {
+            let theme = &d["theme"];
+            if theme["surfaceHex"].is_null() != theme["textHex"].is_null() {
+                return Err("Custom theme surface and text colors must be supplied together.");
+            }
+            if !equivalent(theme, &crate::appearance::normalize_theme(theme.clone())) {
+                return Err("Theme values exceed Neutrino's supported ranges.");
+            }
+            if !theme["surfaceHex"].is_null() {
+                let a = luminance(text(theme, "surfaceHex"))?;
+                let b = luminance(text(theme, "textHex"))?;
+                if (a.max(b) + 0.05) / (a.min(b) + 0.05) < 4.5 {
+                    return Err(
+                        "Theme text must meet the 4.5:1 contrast threshold against its surface.",
+                    );
+                }
+            }
+        }
+        "layout" if d["layout"].is_object() => {
+            if !equivalent(
+                &d["layout"],
+                &crate::appearance::normalize_layout(d["layout"].clone()),
+            ) {
+                return Err("Layout values exceed Neutrino's supported ranges.");
+            }
+        }
+        "icons" => {
+            if !d["icons"].is_null() {
+                return Err("Icon modules must supply SVG paths. Replace native symbol definitions with an SVG icon set.");
+            }
+            svg_icons(&d["svgIcons"])?;
+        }
+        "menu" => {
+            let items = d["menu"].as_array().ok_or("Invalid menu items.")?;
+            if items.is_empty()
+                || items.len() > 16
+                || items.iter().any(|i| {
+                    text(i, "title").is_empty()
+                        || text(i, "title").chars().count() > 80
+                        || ![
+                            "newTab",
+                            "bookmarks",
+                            "history",
+                            "downloads",
+                            "modules",
+                            "customize",
+                            "settings",
+                            "recovery",
+                        ]
+                        .contains(&text(i, "action"))
+                })
+            {
+                return Err("Invalid menu items.");
+            }
+        }
+        "startWidget" => {
+            if text(d, "widgetTitle").is_empty()
+                || text(d, "widgetTitle").chars().count() > 100
+                || d["widgetBody"]
+                    .as_str()
+                    .is_none_or(|v| v.chars().count() > 1000)
+            {
+                return Err("Invalid workspace widget.");
+            }
+        }
+        _ => return Err("This role cannot use this declarative package."),
+    }
+    Ok(())
+}
+
 pub fn key(v: &str) -> bool {
     !v.is_empty()
         && v.len() <= 64

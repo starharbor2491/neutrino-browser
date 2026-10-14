@@ -112,39 +112,7 @@ public struct ModuleDefinition: Codable, Equatable, Sendable {
         try definition.validate(capability: capability); return definition
     }
     public func validate(capability: ModuleCapability) throws {
-        guard formatVersion == 1 else { throw ValidationError("This declarative module is incompatible with Neutrino.") }
-        let populated = [treeTabs != nil, theme != nil, layout != nil, icons != nil || svgIcons != nil, menu != nil, widgetTitle != nil || widgetBody != nil].filter { $0 }.count
-        guard populated == 1 else { throw ValidationError("A declarative package must define exactly one role.") }
-        switch capability {
-        case .tabSystem: guard treeTabs != nil else { throw ValidationError("A tab system must choose its tab presentation.") }
-        case .theme:
-            guard let theme else { throw ValidationError("Invalid theme values.") }
-            guard (theme.surfaceHex == nil) == (theme.textHex == nil) else { throw ValidationError("Custom theme surface and text colors must be supplied together.") }
-            var normalized = theme; normalized.normalize()
-            guard normalized == theme else { throw ValidationError("Theme values exceed Neutrino's supported ranges.") }
-            if let surface = theme.surfaceHex, let text = theme.textHex,
-               let a = InterfaceColor(hex: surface), let b = InterfaceColor(hex: text) {
-                guard a.contrastRatio(against: b) >= 4.5 else { throw ValidationError("Theme text must meet the 4.5:1 contrast threshold against its surface.") }
-            }
-        case .layout:
-            guard let layout else { throw ValidationError("Invalid layout values.") }
-            var normalized = layout; normalized.normalize()
-            guard normalized == layout else { throw ValidationError("Layout values exceed Neutrino's supported ranges.") }
-        case .icons:
-            if let svgIcons {
-                _ = try RustCore.request(["op":"validateSVGIcons","icons":svgIcons])
-                guard icons == nil else {throw ValidationError("Choose SVG paths or native symbol names, not both.")}
-                return
-            }
-            let supported = Set(ToolbarCommand.allCases.map(\.rawValue)).union(["bookmarks", "history", "notes", "resources"])
-            guard let icons, !icons.isEmpty, icons.count <= 32, Set(icons.keys).isSubset(of: supported),
-                  icons.values.allSatisfy({ !$0.isEmpty && $0.count <= 80 && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") } }) else { throw ValidationError("Invalid native symbol names.") }
-        case .menu:
-            guard let menu, !menu.isEmpty, menu.count <= 16, menu.allSatisfy({ !$0.title.isEmpty && $0.title.count <= 80 }) else { throw ValidationError("Invalid menu items.") }
-        case .startWidget:
-            guard let widgetTitle, let widgetBody, !widgetTitle.isEmpty, widgetTitle.count <= 100, widgetBody.count <= 1000 else { throw ValidationError("Invalid start-page widget.") }
-        default: throw ValidationError("This role cannot use a declarative package.")
-        }
+        _ = try RustCore.request(["op":"validateDefinition","definition":RustCore.encoded(self),"capability":capability.rawValue])
     }
 }
 
@@ -203,21 +171,7 @@ public struct DeclarativeModuleCatalog: Codable, Sendable {
 /// Bound nesting before recursive Codable decoding can allocate or recurse.
 public enum ModuleJSONBounds {
     public static func validate(_ data: Data) throws {
-        var depth = 0, quoted = false, escaped = false
-        for byte in data {
-            if quoted {
-                if escaped { escaped = false }
-                else if byte == 92 { escaped = true }
-                else if byte == 34 { quoted = false }
-            } else if byte == 34 { quoted = true }
-            else if byte == 123 || byte == 91 {
-                depth += 1
-                guard depth <= 64 else { throw ValidationError("Module JSON exceeds the nesting limit.") }
-            } else if byte == 125 || byte == 93 {
-                depth -= 1
-                guard depth >= 0 else { throw ValidationError("Module JSON is malformed.") }
-            }
-        }
-        guard depth == 0, !quoted else { throw ValidationError("Module JSON is incomplete.") }
+        guard let json = String(data:data,encoding:.utf8) else { throw ValidationError("Module JSON is not valid UTF-8.") }
+        _ = try RustCore.request(["op":"moduleJSONBounds","json":json])
     }
 }

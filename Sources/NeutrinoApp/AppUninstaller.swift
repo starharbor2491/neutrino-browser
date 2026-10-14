@@ -39,6 +39,8 @@ enum AppUninstaller {
         let paths: [URL]
         do { paths = try plannedPaths(app); try validatePaths(paths) }
         catch { return [error.localizedDescription] }
+        ChatGPTAccount.shared.cancelSignIn()
+        app.webKitDataStores.removeAll()
         // Engines and workers have exited, and application writes are frozen.
         let identifiers:[UUID]=await withCheckedContinuation {continuation in WKWebsiteDataStore.fetchAllDataStoreIdentifiers {continuation.resume(returning:$0)}}
         for id in identifiers {
