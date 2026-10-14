@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
 import SwiftUI
+@preconcurrency import WebKit
 import NeutrinoCore
 
 /// Executed only by the packaged application's isolated native smoke test.
@@ -1049,6 +1050,94 @@ enum ChromiumAcceptance {
             throw ValidationError("Closing the inactive sibling discarded its original pristine browser or persisted a different Start surface.")
         }
         print("Neutrino Chromium acceptance: pristine pane preserved inactive extension tab identity, exposed and selected its Neutrino subrow, saved both entries, and returned to Start after removal")
+        try await verifyInnerPageNoteSource(options:options,browser:browser,window:window,shell:shell,
+                                           nativeWindowID:nativeWindowID,fixtureURL:fixtureURL)
+    }
+    private static func verifyInnerPageNoteSource(options:ChromiumTab,browser:BrowserModel,window:NSWindow,
+                                                  shell:WKWebView,nativeWindowID:Int,fixtureURL:URL) async throws {
+        let app=browser.app,groupID=browser.session.selectedTabID
+        guard let sourceSpace=app.createSpace(name:"Inner source acceptance",profileID:options.profileID),
+              let movedSpace=app.createSpace(name:"Moved inner source",profileID:options.profileID),
+              let page=browser.activeWebTab as? ChromiumTab else {throw ValidationError("Inner source workspace could not start.")}
+        let previousNotes=Set(app.library.notes.map(\.id))
+        defer {
+            app.library.notes.removeAll{!previousNotes.contains($0.id) && $0.profileID==options.profileID}
+            app.library.spaces?.removeAll{$0.id==sourceSpace || $0.id==movedSpace}
+        }
+        browser.session.spaceID=sourceSpace
+        let address=String(decoding:try JSONSerialization.data(withJSONObject:fixtureURL.absoluteString,options:[.fragmentsAllowed]),as:UTF8.self)
+        _ = try await evaluate(options,"String((await chrome.tabs.create({windowId:\(nativeWindowID),active:true,url:\(address)})).id)")
+        let loaded=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.url != fixtureURL || page.loading || page.selectedSourcePageToken == nil {
+            guard ContinuousClock.now < loaded else {throw ValidationError("Original inner source did not load.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        let originalToken=page.selectedSourcePageToken
+        _ = try await evaluate(page,"(()=>{window.neutrinoSourceDraft='original';const input=document.querySelector('input');input.value='retained original form';const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));getSelection().removeAllRanges();getSelection().addRange(range);return 'ready';})()")
+        try await RustShellAcceptance.action(["op":"section","value":"notes"],web:shell)
+        try await RustShellAcceptance.action(["op":"native","action":"quoteSelection"],web:shell)
+        let captured=ContinuousClock.now.advanced(by:.seconds(8))
+        while app.library.notes.count==previousNotes.count && ContinuousClock.now < captured {try await Task.sleep(for:.milliseconds(50))}
+        guard let note=app.library.notes.last,!previousNotes.contains(note.id),note.sourceTabID==groupID,
+              note.sourcePageToken==originalToken,originalToken != nil else {throw ValidationError("The quote did not retain its inner source identity.")}
+        _ = try await evaluate(options,"String((await chrome.tabs.create({windowId:\(nativeWindowID),active:true,url:\(address)})).id)")
+        let sibling=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.loading || page.selectedSourcePageToken==originalToken || page.url != fixtureURL {
+            guard ContinuousClock.now < sibling else {throw ValidationError("An equal-URL sibling did not become active.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        _ = try await evaluate(page,"(window.neutrinoSourceDraft='duplicate', 'ready')")
+        browser.moveTab(groupID,toSpace:movedSpace)
+        guard let expectedIDs=app.library.spaces?.first(where:{$0.id==movedSpace})?.tabs.map(\.id) else {throw ValidationError("The source group was not moved.")}
+        browser.switchSpace(sourceSpace)
+        try await RustShellAcceptance.action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:shell)
+        let recovered=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.selectedSourcePageToken != originalToken {
+            guard ContinuousClock.now < recovered else {throw ValidationError("Open source selected the wrong equal-URL inner page.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.session.spaceID==movedSpace,browser.session.selectedTabID==groupID,browser.activeWebTab===page,
+              browser.session.tabs.map(\.id)==expectedIDs,
+              try await evaluate(page,"window.neutrinoSourceDraft")=="original",
+              try await evaluate(page,"document.querySelector('input').value")=="retained original form" else {
+            throw ValidationError("Moved inner-source recovery duplicated a page or lost its live form/document.")
+        }
+        try await verifyChromeGeometry(page,ownerWindow:window)
+        // Model a group which has not been instantiated after relaunch: its
+        // saved selected URL differs from the note, and no engine is cached.
+        let otherURL=fixtureURL.appendingPathComponent("comparison")
+        let otherAddress=String(decoding:try JSONSerialization.data(withJSONObject:otherURL.absoluteString,options:[.fragmentsAllowed]),as:UTF8.self)
+        _ = try await evaluate(options,"String((await chrome.tabs.create({windowId:\(nativeWindowID),active:true,url:\(otherAddress)})).id)")
+        let otherLoaded=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.url != otherURL || page.loading {
+            guard ContinuousClock.now < otherLoaded else {throw ValidationError("The cold-source comparison page did not load.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        browser.captureChromiumSessions();browser.switchSpace(sourceSpace)
+        browser.disposeEngineTabs(engine:.chromium)
+        let disposed=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.chromeWindow != nil {
+            guard ContinuousClock.now < disposed else {throw ValidationError("The cold-source engine did not close.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.cachedEngineTab(groupID,profileID:options.profileID)==nil else {throw ValidationError("The cold-source fixture kept a cached engine.")}
+        try await RustShellAcceptance.action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:shell)
+        let restored=ContinuousClock.now.advanced(by:.seconds(30))
+        while browser.activeWebTab.url != fixtureURL || browser.activeWebTab.loading {
+            guard ContinuousClock.now < restored else {throw ValidationError("The source page was not selected in its restored original group.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.session.spaceID==movedSpace,browser.session.selectedTabID==groupID,
+              browser.session.tabs.map(\.id)==expectedIDs,browser.activeWebTab !== page else {
+            throw ValidationError("Cold-source recovery created a duplicate outer tab.")
+        }
+        guard let output=ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_OUTPUT"] else {throw ValidationError("Missing research receipt directory.")}
+        let receipt=URL(fileURLWithPath:output).deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
+        var evidence=(try JSONSerialization.jsonObject(with:Data(contentsOf:receipt))) as? [String:Any] ?? [:]
+        var chromium=evidence["chromium"] as? [String:Any] ?? [:]
+        chromium["innerPageSourceIdentity"]=true;chromium["innerPageSourceRestore"]=true;evidence["chromium"]=chromium
+        try JSONSerialization.data(withJSONObject:evidence,options:[.prettyPrinted,.sortedKeys]).write(to:receipt,options:.atomic)
+        print("Neutrino Chromium acceptance: equal-URL inner quote source recovered its original live form across a Space move without duplicating the group")
     }
     private static func fixtureState(_ tab: ChromiumTab) async throws -> [String: String] {
         if tab.loading { return [:] }

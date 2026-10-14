@@ -894,3 +894,55 @@ fn extension_pages_have_owned_controls_and_reject_unknown_native_ids() {
         json!({"op":"closeChromePage","id":"a","page":11})
     );
 }
+
+#[test]
+fn source_recovery_distinguishes_equal_url_pages_and_follows_the_original_group() {
+    let mut request = json!({"op":"resolveNoteSource","profileID":"p1","spaceID":"s1",
+        "spaces":[{"id":"s1","profileID":"p1"},{"id":"s2","profileID":"p1"},{"id":"private","profileID":"p2"}],
+        "note":{"profileID":"p1","spaceID":"s1","sourceTabID":"original","sourceURL":"https://example.com/a","sourcePageToken":"process-one:42"},
+        "candidates":[{"id":"unrelated","profileID":"p1","spaceID":"s1","url":"https://example.com/a"},
+            {"id":"original","profileID":"p2","spaceID":"private","url":"https://example.com/a"},
+            {"id":"original","profileID":"p1","spaceID":"s2","url":"https://example.com/b","pages":[
+                {"id":43,"url":"https://example.com/a","token":"process-one:43"},
+                {"id":42,"url":"https://example.com/a","token":"process-one:42"}]}]});
+    let result = neutrino_shell::core_request(request.clone()).unwrap();
+    assert_eq!(
+        result,
+        json!({"spaceID":"s2","tabID":"original","pageID":42})
+    );
+    // A new process may reuse 42 for a different URL. Old tokens must not
+    // override URL verification; the matching restored URL remains usable.
+    request["candidates"][2]["pages"] = json!([
+        {"id":42,"url":"https://example.com/b","token":"process-two:42"},
+        {"id":99,"url":"https://example.com/a","token":"process-two:99"}]);
+    assert_eq!(
+        neutrino_shell::core_request(request.clone()).unwrap()["pageID"],
+        99
+    );
+    request["candidates"][2]["pages"] = json!([]);
+    request["candidates"][2]["restorableURLs"] = json!(["https://example.com/b", "https://example.com/a"]);
+    assert_eq!(neutrino_shell::core_request(request.clone()).unwrap(),
+        json!({"spaceID":"s2","tabID":"original","restoreURL":"https://example.com/a"}));
+    request["note"]["profileID"] = json!("p2");
+    assert!(neutrino_shell::core_request(request).is_err());
+}
+
+#[test]
+fn source_recovery_falls_back_to_an_existing_safe_destination_or_reopens() {
+    let mut request = json!({"op":"resolveNoteSource","profileID":"p1","spaceID":"current",
+        "spaces":[{"id":"current","profileID":"p1"},{"id":"old","profileID":"p2"}],
+        "note":{"profileID":"p1","spaceID":"old","sourceTabID":"gone","sourceURL":"https://example.com/a"},
+        "candidates":[{"id":"foreign","profileID":"p2","spaceID":"old","url":"https://example.com/a"},
+            {"id":"local","profileID":"p1","spaceID":"current","url":"https://example.com/a"}]});
+    assert_eq!(
+        neutrino_shell::core_request(request.clone()).unwrap(),
+        json!({"spaceID":"current","tabID":"local"})
+    );
+    request["candidates"] = json!([]);
+    assert_eq!(
+        neutrino_shell::core_request(request.clone()).unwrap(),
+        json!({"spaceID":"current"})
+    );
+    request["note"]["sourceURL"] = json!("file:///private/source");
+    assert!(neutrino_shell::core_request(request).is_err());
+}

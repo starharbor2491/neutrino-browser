@@ -105,6 +105,9 @@ import CSQLite
     var state = try await database.load()
     let profileID = state.profiles[0].id
     state.bookmarks = [Bookmark(profileID: profileID, title: "An apostrophe's & Unicode 你好", url: URL(string: "https://example.com")!)]
+    var sourceNote=Note(profileID:profileID,title:"Live source")
+    sourceNote.sourcePageToken="\(UUID().uuidString):42"
+    state.notes=[sourceNote]
     try await database.save(state, revision: 4)
     var stale = state; stale.bookmarks = []
     try await database.save(stale, revision: 3)

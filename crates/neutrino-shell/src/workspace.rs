@@ -351,6 +351,9 @@ fn library(mut s: Value) -> Value {
             if let Some(t) = n["sourceTitle"].as_str() {
                 n["sourceTitle"] = json!(title(t));
             }
+            if text(n, "sourcePageToken").len() > 64 {
+                n["sourcePageToken"] = Value::Null;
+            }
         }
     }
     s["preferences"]["configuration"] = configuration(s["preferences"]["configuration"].clone());
@@ -531,6 +534,67 @@ fn webkit_library(mut s: Value) -> Value {
     s["bookmarks"] = json!(bookmarks);
     s
 }
+fn note_source(r: &Value) -> Result<Value, &'static str> {
+    let note = &r["note"];
+    let profile = text(r, "profileID");
+    let address = text(note, "sourceURL");
+    if profile.is_empty() || text(note, "profileID") != profile || !web(address) {
+        return Err("This source is not available in the current profile.");
+    }
+    let spaces: HashSet<_> = array(&r["spaces"])
+        .iter()
+        .filter(|s| text(s, "profileID") == profile)
+        .map(|s| text(s, "id"))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let candidates: Vec<_> = array(&r["candidates"])
+        .iter()
+        .filter(|c| text(c, "profileID") == profile && spaces.contains(text(c, "spaceID")))
+        .collect();
+    if let Some(original) = candidates
+        .iter()
+        .find(|c| text(c, "id") == text(note, "sourceTabID"))
+    {
+        let pages: Vec<_> = array(&original["pages"])
+            .iter()
+            .take(200)
+            .filter(|p| {
+                text(p, "url") == address
+                    && p["id"]
+                        .as_i64()
+                        .is_some_and(|id| id > 0 && id <= i32::MAX as i64)
+            })
+            .collect();
+        let token = text(note, "sourcePageToken");
+        let page = pages
+            .iter()
+            .find(|p| !token.is_empty() && token.len() <= 64 && text(p, "token") == token)
+            .or_else(|| pages.first());
+        if let Some(page) = page {
+            return Ok(
+                json!({"spaceID":original["spaceID"],"tabID":original["id"],"pageID":page["id"]}),
+            );
+        }
+        if text(original, "url") == address {
+            return Ok(json!({"spaceID":original["spaceID"],"tabID":original["id"]}));
+        }
+        if array(&original["restorableURLs"]).iter().any(|url| url.as_str() == Some(address)) {
+            return Ok(json!({"spaceID":original["spaceID"],"tabID":original["id"],"restoreURL":address}));
+        }
+    }
+    let space = [text(note, "spaceID"), text(r, "spaceID")]
+        .into_iter()
+        .find(|id| spaces.contains(id))
+        .unwrap_or("");
+    if let Some(existing) = candidates
+        .iter()
+        .find(|c| text(c, "spaceID") == space && text(c, "url") == address)
+    {
+        return Ok(json!({"spaceID":space,"tabID":existing["id"]}));
+    }
+    Ok(json!({"spaceID":space}))
+}
+
 pub fn request(r: &Value) -> Result<Value, &'static str> {
     let s = r["value"].clone();
     let id = text(r, "id");
@@ -584,6 +648,7 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
             }
             json!({"note":note,"remove":false})
         }
+        "resolveNoteSource" => note_source(r)?,
         "projectNotes" => {
             let query = text(r, "query").trim().to_lowercase();
             let mut notes: Vec<_> = array(&s)
@@ -593,9 +658,10 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
                         && (flag(r, "all")
                             || text(v, "spaceID").is_empty()
                             || v["spaceID"] == r["spaceID"])
-                        && (flag(v, "contentMatch") || ["title", "sourceTitle", "sourceURL", "spaceName"]
-                            .iter()
-                            .any(|key| text(v, key).to_lowercase().contains(&query)))
+                        && (flag(v, "contentMatch")
+                            || ["title", "sourceTitle", "sourceURL", "spaceName"]
+                                .iter()
+                                .any(|key| text(v, key).to_lowercase().contains(&query)))
                 })
                 .collect();
             notes.sort_by(|a, b| {

@@ -131,6 +131,7 @@ public struct Note: Identifiable, Codable, Equatable, Sendable {
     public var sourceURL: URL?
     public var sourceTitle: String?
     public var sourceTabID: UUID?
+    public var sourcePageToken: String?
     public var quotedText: String?
     public init(id: UUID = UUID(), profileID: UUID, title: String = "Untitled note", text: String = "") {
         self.id = id; self.profileID = profileID; self.title = title; self.text = text; self.modifiedAt = Date()

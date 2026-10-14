@@ -121,6 +121,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private weak var observedDownloads: DownloadCenter?
     private var observedDownloadIDs: [UUID] = []
     private var selectedNoteID: UUID?
+    private var sourceRestoreTask: Task<Void,Never>?
     private var allNotes = false
     private var notesQuery = ""
     private var noteSearchQuery = ""
@@ -190,12 +191,17 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 guard let self, !self.stopped,
                       let window = self.container.window, ownedWindowIDs.contains(ObjectIdentifier(window)) else { return false }
                 if mouseDown {
+                    if let screenPoint {
+                        let point=self.container.convert(window.convertPoint(fromScreen:screenPoint),from:nil)
+                        if self.container.nativeHit(point) { self.sourceRestoreTask?.cancel() }
+                    }
                     if let menu = self.nonModalMenuRect, let screenPoint {
                         let point = self.container.convert(window.convertPoint(fromScreen:screenPoint),from:nil)
                         if !menu.contains(point), self.container.nativeHit(point) { self.sendAction(["op":"escape"]) }
                     }
                     return false
                 }
+                if event.type == .keyDown,originWindowID != ObjectIdentifier(window) { self.sourceRestoreTask?.cancel() }
                 if escape, self.ready, self.model?.focusMode == true, window.attachedSheet==nil, NSApp.modalWindow==nil {
                     self.sendAction(["op":"escape"]); return true
                 }
@@ -252,14 +258,16 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         chrome.load(URLRequest(url: URL(string: "neutrino-ui://shell/index.html")!))
     }
     private func stopAndWait() async {
-        let assistant=assistantTask, backdrop=backdropTask, account=accountTask
+        let assistant=assistantTask, backdrop=backdropTask, account=accountTask, source=sourceRestoreTask
         stop()
         await assistant?.value
         await backdrop?.value
         await account?.value
+        await source?.value
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        sourceRestoreTask?.cancel();sourceRestoreTask=nil
         if accountTask != nil {accountTask?.cancel();ChatGPTAccount.shared.cancelSignIn()}
         backdropTask?.cancel();backdropTask=nil;pageBackdrops=[:];backdropRevisions=[:]
         resourceWorker.stop()
@@ -626,6 +634,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private func perform(_ command: [String: Any]) {
         guard !app.finalQuitDataFrozen, let operation = command["op"] as? String else { return }
         if downloadCenter != nil && !["downloadCancel","downloadReveal","downloadOpen"].contains(operation) { return }
+        if ["navigate","newTab","selectTab","selectChromePage","closeChromePage","closeTab","duplicateTab",
+            "reopenTab","back","forward","reload","stop","switchSpace","switchProfile","moveTabToSpace",
+            "useWebKit","openNoteSource"].contains(operation) { sourceRestoreTask?.cancel() }
         let id = (command["id"] as? String).flatMap(UUID.init(uuidString:))
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         switch operation {
@@ -824,6 +835,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "noteFromPage", "quoteSelection":
             guard let model,!model.isPrivate,let url=model.selectedTab.url else{return}
             let tab=model.activeWebTab,revision=tab.navigationRevision,profile=model.session.profileID,title=model.selectedTab.title
+            let sourcePageToken=(tab as? ChromiumTab)?.selectedSourcePageToken
             Task { @MainActor in
                 do {
                     let quote=operation=="quoteSelection" ? try await tab.selectedText() : ""
@@ -838,6 +850,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                         if let index = app.library.notes.firstIndex(where:{$0.id==noteID}) {
                             app.library.notes[index].spaceID = model.session.spaceID
                             app.library.notes[index].sourceTabID = model.session.selectedTabID
+                            app.library.notes[index].sourcePageToken = sourcePageToken
                             app.library.notes[index].sourceURL = URL(string: prepared["sourceURL"] ?? "")
                             app.library.notes[index].sourceTitle = prepared["sourceTitle"]
                             app.library.notes[index].quotedText = prepared["quote"]
@@ -859,12 +872,34 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard model?.isPrivate != true, let model, let id,
                   let note=app.library.notes.first(where:{$0.id==id && $0.profileID==profileID}),
                   let url=note.sourceURL, AddressResolver.isWebURL(url) else{return}
-            let sourceSpace=app.library.spaces?.first(where:{$0.profileID==profileID && $0.tabs.contains(where:{$0.id==note.sourceTabID && $0.url==url})})?.id ?? note.spaceID
-            if let spaceID=sourceSpace, app.library.spaces?.contains(where:{$0.id==spaceID && $0.profileID==profileID}) == true,
+            guard let target=noteSourceTarget(note,model:model) else{return}
+            if let raw=target["spaceID"] as? String,let spaceID=UUID(uuidString:raw),
+               app.library.spaces?.contains(where:{$0.id==spaceID && $0.profileID==profileID}) == true,
                model.session.spaceID != spaceID { model.switchSpace(spaceID) }
-            if let original=note.sourceTabID, model.session.tabs.contains(where:{$0.id==original && $0.url==url}) {model.selectTab(original)}
-            else if let existing=model.session.tabs.first(where:{$0.url==url}) { model.selectTab(existing.id) }
-            else { model.newTab(url:url) }
+            if let raw=target["tabID"] as? String,let tabID=UUID(uuidString:raw),model.session.tabs.contains(where:{$0.id==tabID}) {
+                model.selectTab(tabID)
+                if let nativeID=target["pageID"] as? Int { (model.activeWebTab as? ChromiumTab)?.selectInterfacePage(nativeID) }
+                else if target["restoreURL"] != nil,let page=model.activeWebTab as? ChromiumTab {
+                    sourceRestoreTask=Task { @MainActor [weak self,weak model] in
+                        let deadline=ContinuousClock.now.advanced(by:.seconds(30))
+                        while ContinuousClock.now < deadline {
+                            guard !Task.isCancelled,let self,!self.stopped,let model,!app.finalQuitDataFrozen,!model.isClosed,
+                                  model.session.profileID==profileID,model.session.selectedTabID==tabID,
+                                  model.activeWebTab===page,self.selectedNoteID==note.id,
+                                  app.library.notes.contains(where:{$0.id==note.id && $0.profileID==profileID}) else{return}
+                            if page.isReadyForEngineSwitch,page.noteSourcePages.contains(where:{$0["url"] as? String == url.absoluteString}),
+                               let resolved=self.noteSourceTarget(note,model:model),
+                               resolved["tabID"] as? String == tabID.uuidString,let nativeID=resolved["pageID"] as? Int {
+                                page.selectInterfacePage(nativeID);self.scheduleSync();return
+                            }
+                            do {try await Task.sleep(for:.milliseconds(100))} catch{return}
+                        }
+                        guard !Task.isCancelled,let self,!self.stopped,let model,!self.app.finalQuitDataFrozen,
+                              !model.isClosed,model.session.profileID==profileID,self.selectedNoteID==note.id else{return}
+                        self.app.notice="The source page could not be restored. Retry Open source when the tab finishes loading."
+                    }
+                }
+            } else { model.newTab(url:url) }
             selectedNoteID = note.id; notesQuery = ""; libraryPage = 0
             if note.spaceID != nil && note.spaceID != model.session.spaceID { allNotes = true }
         case "saveNote":
@@ -943,6 +978,27 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
         default: app.notice = "This action is unavailable in the current browsing context."
         }
+    }
+    private func noteSourceTarget(_ note:Note,model:BrowserModel) -> [String:Any]? {
+        guard let url=note.sourceURL else{return nil}
+        let profileID=model.session.profileID
+        let live=note.sourceTabID.flatMap { tabID in
+            app.tabOwnership.owner(of:tabID).flatMap { app.windows[$0]?.model?.cachedEngineTab(tabID,profileID:profileID) } as? ChromiumTab
+        }
+        let profileSpaces=(app.library.spaces ?? []).filter{$0.profileID==profileID}
+        let spaces=profileSpaces.map{["id":$0.id.uuidString,"profileID":$0.profileID.uuidString]}
+        let candidates=profileSpaces.flatMap { space in
+            space.tabs.filter{$0.id==note.sourceTabID || $0.url==url}.map { tab -> [String:Any] in
+                ["id":tab.id.uuidString,"profileID":space.profileID.uuidString,"spaceID":space.id.uuidString,
+                 "url":tab.url?.absoluteString ?? "","pages":tab.id==note.sourceTabID ? live?.noteSourcePages ?? [] : [],
+                 "restorableURLs":tab.id==note.sourceTabID ? tab.chromiumPages?.compactMap{$0.url?.absoluteString} ?? [] : []]
+            }
+        }
+        return try? RustCore.request(["op":"resolveNoteSource","profileID":profileID.uuidString,
+            "spaceID":model.session.spaceID?.uuidString ?? "","spaces":spaces,"candidates":candidates,
+            "note":["profileID":note.profileID.uuidString,"spaceID":note.spaceID?.uuidString ?? "",
+                    "sourceTabID":note.sourceTabID?.uuidString ?? "","sourceURL":url.absoluteString,
+                    "sourcePageToken":note.sourcePageToken ?? ""]]) as? [String:Any]
     }
     private func refreshCredentialMetadata(profileID: UUID) {
         guard model?.isPrivate != true else { credentialMetadata = []; return }

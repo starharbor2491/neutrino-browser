@@ -162,6 +162,8 @@ jobs:
               receipt = json.loads(Path('dist/research-' + engine + '.json').read_text())
               if any(receipt.get(key, {}).get(check) is not True for check in required):
                   raise SystemExit(engine + ' research acceptance failed')
+              if key == 'chromium' and any(receipt.get(key, {}).get(check) is not True for check in ('innerPageSourceIdentity', 'innerPageSourceRestore')):
+                  raise SystemExit('Blink inner-page source recovery acceptance failed')
           PY
       - name: Assemble update catalog and preview notes
         env:

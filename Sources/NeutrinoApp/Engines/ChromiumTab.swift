@@ -40,6 +40,17 @@ final class ChromiumTab: BrowserEngineTab {
     private var restoringPages = false
     private var sessionPages: [ChromiumSessionPage] = []
     private(set) var interfacePages: [[String:Any]] = []
+    var noteSourcePages: [[String:Any]] {
+        interfacePages.compactMap { item in
+            guard let id=item["id"] as? Int,id>0,let address=item["url"] as? String,
+                  let url=URL(string:address),AddressResolver.isWebURL(url) else{return nil}
+            return ["id":id,"url":address,"token":"\(runtime.sourceProcessID.uuidString):\(id)"]
+        }
+    }
+    var selectedSourcePageToken: String? {
+        guard let id=interfacePages.first(where:{$0["selected"] as? Bool == true})?["id"] as? Int else{return nil}
+        return noteSourcePages.first(where:{$0["id"] as? Int == id})?["token"] as? String
+    }
     func selectInterfacePage(_ id: Int, close: Bool = false) {
         guard interfacePages.contains(where: { $0["id"] as? Int == id }) else { return }
         command(Int(close ? NEUTRINO_CEF_CLOSE_INNER_PAGE : NEUTRINO_CEF_SELECT_INNER_PAGE),value:Double(id))

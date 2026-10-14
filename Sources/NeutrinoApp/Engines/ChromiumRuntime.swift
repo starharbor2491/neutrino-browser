@@ -11,6 +11,9 @@ import SwiftUI
 @MainActor
 final class ChromiumRuntime: ObservableObject {
     static let shared = ChromiumRuntime()
+    // CEF numeric browser IDs can repeat after process restart. A source token
+    // must never select an unrelated newly created page using an old number.
+    let sourceProcessID = UUID()
     nonisolated static let cefVersion: String = {
         let file=Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/CEF-Version.json")
         guard let size=try? file.resourceValues(forKeys:[.fileSizeKey]).fileSize,size>0,size<=4096,

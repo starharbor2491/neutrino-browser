@@ -63,6 +63,10 @@ final class BrowserModel: ObservableObject {
     }
     private var webTabs: [UUID: BrowserEngineTab] = [:]
     private var tabProfiles: [UUID: UUID] = [:]
+    func cachedEngineTab(_ id: UUID, profileID: UUID) -> BrowserEngineTab? {
+        guard !isPrivate, tabProfiles[id] == profileID else { return nil }
+        return webTabs[id]
+    }
     private var movedTabPlaceholders: [UUID: BrowserEngineTab] = [:]
     private var spacePresentations: [UUID: WindowSession] = [:]
     var space: BrowserSpace? { app.library.spaces?.first { $0.id == session.spaceID } }
