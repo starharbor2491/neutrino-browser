@@ -1146,7 +1146,17 @@ class PaneWindowDelegate final : public CefWindowDelegate {
 class PaneBrowserDelegate final : public CefBrowserViewDelegate {
  public:
   cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
-  ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NONE; }
+  // Chromium's MV3 action APIs require a toolbar provider even when the embedder
+  // owns every visible control. Retain that upstream provider, hide its view,
+  // and let Neutrino supply navigation and extension launch surfaces.
+  ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NORMAL; }
+  void OnBrowserCreated(CefRefPtr<CefBrowserView> view,CefRefPtr<CefBrowser>) override {
+    if (auto toolbar=view->GetChromeToolbar()) {
+      toolbar->SetVisible(false);
+      toolbar->SetSize(CefSize(0,0));
+      view->InvalidateLayout();
+    }
+  }
   CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(
       CefRefPtr<CefBrowserView>, const CefBrowserSettings&, CefRefPtr<CefClient>, bool) override {
     return new PaneBrowserDelegate();

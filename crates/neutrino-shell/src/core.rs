@@ -26,6 +26,30 @@ pub const BLOCKED_DOMAINS: &[&str] = &[
 ];
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
+        "moduleID"=>json!(crate::modules::id(text(&r,"value"))),
+        "validateManifest"=>{crate::modules::manifest(&r["manifest"])?;json!(true)},
+        "validateSetting"=>{crate::modules::setting(&r["setting"],&r["value"])?;json!(true)},
+        "installationPlan"=>crate::modules::plan(text(&r,"id"),&r["catalog"],&r["installed"],flag(&r,"includeInstalled"))?,
+        "uninstallPaths"=>crate::uninstall::paths(text(&r,"home"),text(&r,"dataDirectory"))?,
+        "uninstallKeychainService"=>json!(crate::uninstall::service(text(&r,"service"))),
+        "prepareNote" => {
+            let url=resolve_address(text(&r,"url"),"").ok_or("Open a website before saving a page note.")?;
+            let title=text(&r,"title").chars().take(100).collect::<String>();
+            let quote=text(&r,"quote").chars().take(16_000).collect::<String>();
+            json!({"title":title,"text":format!("{}\n{}\n\n{}",title,url,quote)})
+        },
+        "moduleValue" => {crate::modules::value(&r["value"],r["depth"].as_u64().unwrap_or(0) as usize)?;json!(true)},
+        "moduleKey" => json!(crate::modules::key(text(&r,"value"))),
+        "validateProgram" => {crate::modules::validate(&r["program"],text(&r,"capability"))?;json!(true)},
+        "runProgram" => crate::modules::run(&r["program"],text(&r,"event"),&r["input"] )?,
+        "appearancePreset" => crate::appearance::preset(text(&r,"id")).ok_or("Unknown browser preset.")?,
+        "normalizeTheme" => crate::appearance::normalize_theme(r["value"].clone()),
+        "normalizeLayout" => crate::appearance::normalize_layout(r["value"].clone()),
+        "validateSVGIcons" => {
+            let icons=r["icons"].as_object().ok_or("An icon set needs named SVG paths.")?;
+            if icons.is_empty() || icons.len()>64 || icons.iter().any(|(key,path)| !["back","forward","reload","newTab","home","bookmark","bookmarks","history","notes","resources","downloads","modules","customize","settings","sidebar","reader","screenshot","focus","search","close","grid","folder","user","shield","key","split","pin","edit","globe","lock","sun","moon","spark","undo","arrow","grip","book","activity","camera","plug","more","down","check","external"].contains(&key.as_str()) || !path.as_str().is_some_and(crate::icons::valid_path)) {return Err("Icon sets accept up to 64 known icons as bounded SVG path data; scripts, markup, images, and external resources are not supported.");}
+            json!(true)
+        }
         "parseBookmarks" => crate::bookmarks::parse(text(&r,"html"))?,
         "exportBookmarks" => crate::bookmarks::export(&r["bookmarks"]),
         "resolveAddress" => json!(resolve_address(text(&r,"input"), text(&r,"search"))),

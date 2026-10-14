@@ -287,23 +287,15 @@ public struct Theme: Codable, Equatable, Sendable {
     public var borderWidth: Double?
     public var shadowStrength: Double?
     public var iconStyle: InterfaceIconStyle?
+    public var iconPack: String?
+    public var iconStroke: Double?
+    public var preset: String?
     public var tabsAppearance: ComponentAppearance?
     public var navigationAppearance: ComponentAppearance?
     public var sidebarAppearance: ComponentAppearance?
     public init() {}
     public mutating func normalize() {
-        cornerRadius = cornerRadius.isFinite ? min(24, max(0, cornerRadius)) : 6
-        if let value = fontScale { fontScale = value.isFinite ? min(1.4, max(0.85, value)) : 1 }
-        if let value = spacingScale { spacingScale = value.isFinite ? min(1.5, max(0.75, value)) : 1 }
-        if let value = borderWidth { borderWidth = value.isFinite ? min(2, max(0, value)) : 1 }
-        if let value = shadowStrength { shadowStrength = value.isFinite ? min(1, max(0, value)) : 0 }
-        if let value = accentHex, InterfaceColor(hex: value) == nil { accentHex = nil }
-        if let value = surfaceHex, InterfaceColor(hex: value) == nil { surfaceHex = nil }
-        if let value = textHex, InterfaceColor(hex: value) == nil { textHex = nil }
-        // Imported and persisted configurations need the same paired colors as
-        // the editor; one custom color cannot safely follow system appearance.
-        if (surfaceHex == nil) != (textHex == nil) { surfaceHex = nil; textHex = nil }
-        tabsAppearance?.normalize(); navigationAppearance?.normalize(); sidebarAppearance?.normalize()
+        if let normalized = try? RustCore.transform(self, operation: "normalizeTheme") { self = normalized }
     }
 }
 public struct BrowserLayout: Codable, Equatable, Sendable {
@@ -323,15 +315,7 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
     public var secondaryPanel: String?
     public init() {}
     public mutating func normalize() {
-        sidebarWidth = sidebarWidth.isFinite ? min(360, max(180, sidebarWidth)) : 240
-        if treeTabs == true && (tabs == .top || tabs == .bottom) { tabs = .leading }
-        if let value = addressWidth { addressWidth = value.isFinite ? min(1, max(0.4, value)) : 1 }
-        if let value = tabsWidth { tabsWidth = value.isFinite ? min(340, max(200, value)) : 190 }
-        if let components = toolbarComponents {
-            var ids = Set<UUID>(), commands = Set<ToolbarCommand>()
-            toolbarComponents = Array(components.filter { ids.insert($0.id).inserted && ($0.command == .separator || commands.insert($0.command).inserted) }.prefix(32))
-        }
-        if let secondaryPanel, !["bookmarks", "history", "downloads", "notes", "resources"].contains(secondaryPanel) { self.secondaryPanel = nil }
+        if let normalized = try? RustCore.transform(self, operation: "normalizeLayout") { self = normalized }
     }
 }
 public struct Configuration: Codable, Equatable, Sendable {

@@ -64,6 +64,7 @@ fn contributions(shell: &mut Shell) {
         .unwrap_or_default();
     let mut widgets = vec![];
     shell.snapshot["icons"] = json!({});
+    shell.snapshot["svgIcons"] = json!({});
     shell.snapshot["menuItems"] = json!([]);
     for m in modules.iter().filter(|m| m["enabled"] == true) {
         if let Ok(bytes) = std::fs::read(
@@ -72,6 +73,9 @@ fn contributions(shell: &mut Shell) {
                 .join("definition.json"),
         ) {
             if let Ok(d) = serde_json::from_slice::<Value>(&bytes) {
+                if d["svgIcons"].is_object() {
+                    shell.snapshot["svgIcons"] = d["svgIcons"].clone();
+                }
                 if d["icons"].is_object() {
                     shell.snapshot["icons"] = d["icons"].clone();
                 }
@@ -99,7 +103,7 @@ fn effects(shell: &mut Shell, commands: &[Value]) {
                         .unwrap()
                         .as_nanos()
                 );
-                tabs.push(json!({"id":id,"title":"New tab","pinned":false}));
+                tabs.push(json!({"id":id,"title":c["url"],"url":c["url"],"parentID":c["parentID"],"pinned":false}));
                 snapshot["session"]["selectedTabID"] = json!(id);
             }
             "switchSpace" => {

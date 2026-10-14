@@ -66,46 +66,6 @@ struct BrowserWindow: View {
         .onChange(of: model.configuration.layout.split) { _, _ in model.synchronizeSplit() }
     }
 }
-struct BrowserTabContent<Placeholder: View>: View {
-    @ObservedObject var tab: BrowserEngineTab
-    var hasPage: Bool
-    var onUseWebKit: () -> Void
-    @ViewBuilder var placeholder: () -> Placeholder
-    var body: some View {
-        if hasPage || (tab.chromiumSessionPages?.count ?? 0) > 1 || tab.errorMessage != nil { BrowserPage(tab: tab, onUseWebKit: onUseWebKit) }
-        else { placeholder() }
-    }
-}
-struct BrowserPage: View {
-    @ObservedObject var tab: BrowserEngineTab
-    var onUseWebKit: (() -> Void)?
-    private var showPage: Bool { tab.errorMessage == nil || tab is ChromiumTab }
-    var body: some View {
-        VStack(spacing: 0) {
-            if tab.loading { ProgressView(value: tab.progress).progressViewStyle(.linear).frame(height: 2) }
-            if let error = tab.errorMessage {
-                if tab is ChromiumTab {
-                    HStack(spacing: 12) {
-                        Text(error).font(.callout).lineLimit(3).help(error).frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Reload page") { tab.reload() }.buttonStyle(.bordered)
-                        if let onUseWebKit { Button("Reopen in WebKit") { onUseWebKit() }.buttonStyle(.bordered) }
-                    }.padding(.horizontal, 16).padding(.vertical, 10)
-                } else {
-                    VStack(spacing: 16) {
-                        EmptyPanel(title: "This page needs attention", icon: "exclamationmark.circle", detail: error)
-                        Button("Reload page") { tab.reload() }.buttonStyle(.borderedProminent).padding(.bottom, 32)
-                        if tab.engineID == .chromium, let onUseWebKit { Button("Reopen in WebKit") { onUseWebKit() }.padding(.bottom, 24) }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            // Mounting Chrome changes its navigation capability. Keep the
-            // representable's identity stable across that callback and errors.
-            WebViewHost(tab: tab)
-                .frame(maxWidth: .infinity, maxHeight: showPage ? .infinity : 0)
-                .opacity(showPage ? 1 : 0).allowsHitTesting(showPage).accessibilityHidden(!showPage).clipped()
-        }
-    }
-}
 struct WindowCloseObserver: NSViewRepresentable {
     let model: BrowserModel
     func makeNSView(context: Context) -> ObserverView { ObserverView(model: model) }

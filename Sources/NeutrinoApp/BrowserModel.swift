@@ -239,8 +239,7 @@ final class BrowserModel: ObservableObject {
         if activeWebTab.performNativeTabCommand(command) { return }
         switch command {
         case .new:
-            newTab()
-            NotificationCenter.default.post(name: .neutrinoFocusAddress, object: session.id)
+            shellAction?(["op": "newTab"])
         case .close: closeTab(session.selectedTabID)
         case .reopen: reopenClosedTab()
         case .previous: selectRelativeTab(-1)

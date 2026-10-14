@@ -195,7 +195,7 @@ extension AppState {
 }
 
 @MainActor
-private final class WebsiteStoreRemoval {
+final class WebsiteStoreRemoval {
     private var continuation: CheckedContinuation<Void, any Error>?
     private var deadline: Task<Void, Never>?
     private init() {}

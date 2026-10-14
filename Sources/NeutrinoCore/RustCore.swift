@@ -4,6 +4,18 @@ import NeutrinoRust
 
 /// Typed ownership boundary for portable Rust services. No website controls this ABI.
 public enum RustCore {
+    public static func encoded<T: Encodable>(_ value: T) throws -> Any {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)
+    }
+    public static func transform<T: Codable>(_ value: T, operation: String) throws -> T {
+        let encoder=JSONEncoder()
+        // JSON has no NaN/Infinity. Preserve their invalidness as inert markers
+        // so the Rust normalizer can replace them with finite defaults.
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity:"Infinity",negativeInfinity:"-Infinity",nan:"NaN")
+        let encoded = try JSONSerialization.jsonObject(with: encoder.encode(value))
+        let transformed = try request(["op": operation, "value": encoded])
+        return try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: transformed))
+    }
     public static func request(_ request: [String: Any]) throws -> Any {
         let data = try JSONSerialization.data(withJSONObject: request)
         guard data.count <= 64 * 1024 * 1024, let json = String(data: data, encoding: .utf8),

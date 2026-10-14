@@ -15,6 +15,7 @@ void *neutrino_shell_new(void);
 void neutrino_shell_free(void *handle);
 char *neutrino_shell_dispatch(void *handle, const char *request);
 char *neutrino_core_request(const char *input);
+char *neutrino_sha256(const uint8_t *data, size_t length);
 char *neutrino_shell_asset(const char *name);
 void neutrino_string_free(char *value);
 #ifdef __cplusplus

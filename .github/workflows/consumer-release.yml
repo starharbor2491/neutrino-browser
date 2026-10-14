@@ -34,6 +34,8 @@ jobs:
       NEUTRINO_SECURITY_EPOCH: ${{ inputs.security_epoch }}
       NEUTRINO_RELEASE_TAG: v${{ inputs.version }}
       NEUTRINO_UPDATE_CHANNEL: stable
+      NEUTRINO_SPARKLE_PUBLIC_KEY: ${{ vars.NEUTRINO_SPARKLE_PUBLIC_KEY }}
+      NEUTRINO_SPARKLE_PRIVATE_KEY: ${{ secrets.NEUTRINO_SPARKLE_PRIVATE_KEY }}
       NEUTRINO_NOTARY_KEY_ID: ${{ secrets.NEUTRINO_NOTARY_KEY_ID }}
       NEUTRINO_NOTARY_ISSUER: ${{ secrets.NEUTRINO_NOTARY_ISSUER }}
     steps:
@@ -48,7 +50,7 @@ jobs:
           python3 - <<'PY'
           import base64, os
           from pathlib import Path
-          required = ['CERTIFICATE', 'CERTIFICATE_PASSWORD', 'NOTARY_KEY', 'NEUTRINO_SIGNING_IDENTITY', 'NEUTRINO_NOTARY_KEY_ID', 'NEUTRINO_NOTARY_ISSUER']
+          required = ['CERTIFICATE', 'CERTIFICATE_PASSWORD', 'NOTARY_KEY', 'NEUTRINO_SIGNING_IDENTITY', 'NEUTRINO_NOTARY_KEY_ID', 'NEUTRINO_NOTARY_ISSUER', 'NEUTRINO_SPARKLE_PUBLIC_KEY', 'NEUTRINO_SPARKLE_PRIVATE_KEY']
           if not all(os.environ.get(key) for key in required):
               raise SystemExit('Developer ID and App Store Connect notarization secrets are required; unsigned consumer packaging is not supported.')
           directory = Path(os.environ['RUNNER_TEMP'])
@@ -104,6 +106,8 @@ jobs:
             dist/*.dmg
             dist/*.app.zip
             dist/SHA256SUMS
+            dist/sparkle-status.json
+            dist/stable.xml
             dist/*-package.json
             dist/*-catalog-entry.json
             dist/installed-smoke.json

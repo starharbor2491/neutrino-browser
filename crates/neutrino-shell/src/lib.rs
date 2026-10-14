@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 //! The application-owned interface. macOS supplies engine views and platform services;
 //! this crate owns presentation, interaction state, editing and workspace transforms.
+mod appearance;
 mod bookmarks;
 mod core;
+mod icons;
+mod modules;
 mod storage;
+mod uninstall;
 pub use core::request as core_request;
 mod render;
 mod state;
@@ -97,4 +101,24 @@ pub unsafe extern "C" fn neutrino_core_request(input: *const c_char) -> *mut c_c
         Err(_) => serde_json::json!({"error":"The browser operation failed"}),
     };
     CString::new(response.to_string()).unwrap().into_raw()
+}
+
+/// Hashes caller-owned bytes without JSON copies or a platform-specific digest.
+/// # Safety
+/// For nonzero length, data must point to length readable bytes for this call.
+/// Release the returned string with neutrino_string_free.
+#[no_mangle]
+pub unsafe extern "C" fn neutrino_sha256(data: *const u8, length: usize) -> *mut c_char {
+    use sha2::{Digest, Sha256};
+    if length > isize::MAX as usize || data.is_null() && length > 0 {
+        return std::ptr::null_mut();
+    }
+    let bytes = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(data, length)
+    };
+    CString::new(format!("{:x}", Sha256::digest(bytes)))
+        .unwrap()
+        .into_raw()
 }

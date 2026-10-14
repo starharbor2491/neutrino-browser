@@ -16,6 +16,7 @@
     composition = false,
     currentContext = null,
     focusToken = null,
+    commandRevision = null,
     menuAnchor = null,
     dialogPosition = null,
     dialogDrag = null,
@@ -222,7 +223,13 @@
     const previousStep = root.querySelector(".onboarding")?.className;
     const previousScreen =
       root.querySelector(".utility-screen")?.dataset.screen;
-    const previousTab = root.querySelector(".tab-row.active")?.dataset.tab;
+    const tabPositions = new Map(
+      [...root.querySelectorAll(".tab-row")].map((el) => [
+        el.dataset.tab,
+        el.getBoundingClientRect(),
+      ]),
+    );
+    const hadPanel = !!root.querySelector(".workspace-panel");
     const sameContext =
       currentContext === null || currentContext === result.context;
     if (result.context) currentContext = result.context;
@@ -247,10 +254,18 @@
     const hadDialog = !!topDialog();
     const template = document.createElement("template");
     template.innerHTML = result.html;
+    const commandValue =
+      template.content.querySelector("#command-input")?.getAttribute("value") ||
+      "";
     if (sameContext) reconcile(root, template.content, true);
     else root.replaceChildren(template.content.cloneNode(true));
     currentOverlay = !!result.overlay;
     currentEditing = !!result.editing;
+    if (result.commandRevision !== commandRevision) {
+      commandRevision = result.commandRevision;
+      const command = root.querySelector("#command-input");
+      if (command) command.value = commandValue;
+    }
     const dialog = topDialog();
     for (const el of root.querySelectorAll(
       ".browser-shell,.editor,.utility-screen,.command-palette",
@@ -348,15 +363,30 @@
         ],
         180,
       );
-    const tab = root.querySelector(".tab-row.active");
-    if (tab && previousTab !== tab.dataset.tab)
+    if (sameContext && motionAllowed() && !root.querySelector(".dragging")) {
+      for (const tab of root.querySelectorAll(".tab-row")) {
+        const before = tabPositions.get(tab.dataset.tab),
+          after = tab.getBoundingClientRect();
+        if (before && Math.abs(before.top - after.top) > 1)
+          animate(
+            tab,
+            [
+              { transform: `translateY(${before.top - after.top}px)` },
+              { transform: "translateY(0)" },
+            ],
+            180,
+          );
+      }
+    }
+    const panel = root.querySelector(".workspace-panel");
+    if (panel && !hadPanel)
       animate(
-        tab,
+        panel,
         [
-          { boxShadow: "inset 2px 0 var(--accent),0 0 0 1px var(--accent)" },
-          { boxShadow: "inset 2px 0 var(--accent),0 0 0 1px transparent" },
+          { opacity: 0, transform: "translateX(8px)" },
+          { opacity: 1, transform: "translateX(0)" },
         ],
-        240,
+        180,
       );
     announce(result.announce);
     patching = false;
@@ -435,6 +465,29 @@
     canvas.style.transform = "none";
     canvas.style.left = "0";
     canvas.style.top = "0";
+    const frameRect = frame.getBoundingClientRect();
+    for (const [selector, target] of [
+      [".tabs-selection", ".workspace-rail"],
+      [".nav-selection", ".page-toolbar"],
+    ]) {
+      const selection = frame.querySelector(selector);
+      let source = canvas.querySelector(target);
+      if (
+        target === ".workspace-rail" &&
+        source &&
+        getComputedStyle(source).visibility === "hidden"
+      )
+        source = canvas.querySelector(".horizontal-tabs");
+      if (selection && source) {
+        const rect = source.getBoundingClientRect();
+        selection.style.left = rect.left - frameRect.left + "px";
+        selection.style.top = rect.top - frameRect.top + "px";
+        selection.style.width = rect.width + "px";
+        selection.style.height = rect.height + "px";
+        selection.style.right = "auto";
+        selection.style.bottom = "auto";
+      }
+    }
   }
   function scheduleGeometry() {
     scalePreview();
@@ -451,6 +504,10 @@
           y: r.y,
           width: r.width,
           height: r.height,
+          radius:
+            parseFloat(
+              getComputedStyle(el.closest(".page-frame") || el).borderRadius,
+            ) || 0,
         };
       });
       positionMenu();

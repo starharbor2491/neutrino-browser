@@ -30,10 +30,13 @@ final class DistributionManager: ObservableObject {
     private var generation = UUID()
     private var installOnQuit = false
     private var restartRequested = false
+    private var sparkle: SparkleUpdates?
+    var usesSparkle: Bool {sparkle != nil}
     var isRestartRequested: Bool { restartRequested }
     @Published var automaticUpdates = UserDefaults.standard.object(forKey: "automaticAppUpdates") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(automaticUpdates, forKey: "automaticAppUpdates")
+            sparkle?.setAutomatic(automaticUpdates)
             if !restartRequested { installOnQuit = automaticUpdates && pending != nil && pending?.chromium == current?.chromium }
             if !automaticUpdates && automaticDownload { operation?.cancel() }
         }
@@ -66,6 +69,11 @@ final class DistributionManager: ObservableObject {
         guard directory == nil else { return }
         directory = dataDirectory.resolvingSymlinksInPath().appendingPathComponent("Updates", isDirectory: true)
         current = try? ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false)
+        if let updater=SparkleUpdates.make(automatic:automaticUpdates) {
+            sparkle=updater; publisherAvailable=true
+            message="Sparkle checks GitHub for signed Neutrino updates, including Chromium. Your browsing data stays in place."
+            return
+        }
         do {
             try FileManager.default.createDirectory(at: directory!, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
@@ -106,6 +114,7 @@ final class DistributionManager: ObservableObject {
         }
     }
     func checkForUpdates(dataDirectory: URL, automatically: Bool = false) {
+        if let sparkle {sparkle.check(quiet:automatically);return}
         start(dataDirectory: dataDirectory) {
             guard let authority = self.authority else { throw ValidationError("Install a published Neutrino release to enable updates.") }
             self.message = "Checking GitHub releases…"

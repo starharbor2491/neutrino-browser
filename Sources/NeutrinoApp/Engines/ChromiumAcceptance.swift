@@ -389,7 +389,9 @@ enum ChromiumAcceptance {
               abs(chrome.frame.width - expected.width) < 2, abs(chrome.frame.height - expected.height) < 2 else {
             throw ValidationError("The Chrome window does not fit its native page anchor; see the recorded window frames.")
         }
-        guard state["customHost"] as? Bool == true, !tab.hasNativeNavigationChrome, state["toolbarPresent"] as? Bool == false else {
+        guard state["customHost"] as? Bool == true, !tab.hasNativeNavigationChrome,
+              state["toolbarPresent"] as? Bool == true, state["toolbarVisible"] as? Bool == false,
+              state["toolbarDrawn"] as? Bool == false else {
             throw ValidationError("Chrome’s native toolbar is visible inside Neutrino’s page surface.")
         }
     }

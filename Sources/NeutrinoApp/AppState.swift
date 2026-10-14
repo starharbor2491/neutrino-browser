@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
     @Published var deletingProfileIDs = Set<UUID>()
     @Published var profilesAwaitingWebsiteDataRemoval = Set<UUID>()
     let dataDirectory: URL
+    var uninstallRequested = false
     @Published var catalog: [ModuleManifest] = []
     @Published var communityCatalogNames: [String] = []
     var bundledModuleIDs = Set<String>()
@@ -684,7 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !saved {
                 quit = self.offerQuitWithoutSaving(state)
             }
-            if quit && saved {
+            if quit && saved && !state.uninstallRequested {
                 // The updater waits for this process to exit. Start and validate
                 // it before irreversible CefShutdown; a cancelled quit stops it.
                 do { try await DistributionManager.shared.launchPendingInstaller() }
@@ -715,6 +716,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     quit = await ChromiumRuntime.shared.shutdown()
                     if !quit { state.notice = ChromiumRuntime.shared.status }
                     if quit { await state.finishPendingProfileDeletions() }
+                    if quit && state.uninstallRequested {
+                        let failures=await AppUninstaller.remove(state)
+                        if !failures.isEmpty {
+                            let alert=NSAlert();alert.messageText="Uninstall could not remove every file"
+                            alert.informativeText=failures.joined(separator:"\n")
+                            alert.addButton(withTitle:"Close Neutrino");alert.runModal()
+                        }
+                    }
                 }
             }
             self.smokeTrace("Sending termination reply: \(quit)")

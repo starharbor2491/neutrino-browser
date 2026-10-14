@@ -31,17 +31,7 @@ public indirect enum ModuleValue: Codable, Equatable, Sendable {
     public var object: [String: ModuleValue]? { if case .object(let value) = self { value } else { nil } }
     public var array: [ModuleValue]? { if case .array(let value) = self { value } else { nil } }
     public func validate(depth: Int = 0) throws {
-        guard depth <= 16 else { throw ValidationError("Module data is nested too deeply.") }
-        switch self {
-        case .string(let value): guard value.utf8.count <= 1_000_000 else { throw ValidationError("Module text is too large.") }
-        case .array(let values):
-            guard values.count <= 64 else { throw ValidationError("Module arrays are too large.") }
-            for value in values { try value.validate(depth: depth + 1) }
-        case .object(let values):
-            guard values.count <= 64, values.keys.allSatisfy(ModuleProgram.validKey) else { throw ValidationError("Module fields are invalid.") }
-            for value in values.values { try value.validate(depth: depth + 1) }
-        default: break
-        }
+        _ = try RustCore.request(["op":"moduleValue","value":RustCore.encoded(self),"depth":depth])
     }
 }
 
@@ -57,37 +47,6 @@ public struct ModuleExpression: Codable, Equatable, Sendable {
                 arguments: [ModuleExpression]? = nil, fields: [String: ModuleExpression]? = nil) {
         self.op = op; self.value = value; self.key = key; self.limit = limit; self.arguments = arguments; self.fields = fields
     }
-    fileprivate func validate(depth: Int, budget: inout Int) throws {
-        budget -= 1
-        guard depth <= 16, budget >= 0 else { throw ValidationError("Module programs exceed the instruction limit.") }
-        let expectedArguments = switch op { case .prefix: 1; case .equal: 2; case .choose: 3; default: 0 }
-        guard (arguments?.count ?? 0) == expectedArguments else { throw ValidationError("A module instruction has invalid arguments.") }
-        switch op {
-        case .literal: guard let value else { throw ValidationError("A literal needs a value.") }; try value.validate()
-        case .input: guard let key, ModuleProgram.validKey(key) else { throw ValidationError("A module input name is invalid.") }
-        case .prefix: guard let limit, (0...200_000).contains(limit) else { throw ValidationError("A text limit is invalid.") }
-        case .object: guard let fields, fields.count <= 32, fields.keys.allSatisfy(ModuleProgram.validKey) else { throw ValidationError("Module output fields are invalid.") }
-        default: break
-        }
-        guard op == .literal || value == nil, op == .input || key == nil, op == .prefix || limit == nil,
-              op == .object || fields == nil else { throw ValidationError("A module instruction contains unsupported properties.") }
-        for argument in arguments ?? [] { try argument.validate(depth: depth + 1, budget: &budget) }
-        for field in fields?.values ?? Dictionary<String, ModuleExpression>().values { try field.validate(depth: depth + 1, budget: &budget) }
-    }
-    fileprivate func evaluate(_ input: [String: ModuleValue]) throws -> ModuleValue {
-        switch op {
-        case .literal: return value!
-        case .input: return input[key!] ?? .null
-        case .prefix:
-            guard let text = try arguments![0].evaluate(input).string else { throw ValidationError("This module expected text.") }
-            return .string(String(text.prefix(limit!)))
-        case .equal: return .bool(try arguments![0].evaluate(input) == arguments![1].evaluate(input))
-        case .choose:
-            guard let condition = try arguments![0].evaluate(input).bool else { throw ValidationError("This module expected a condition.") }
-            return try arguments![condition ? 1 : 2].evaluate(input)
-        case .object: return .object(try fields!.mapValues { try $0.evaluate(input) })
-        }
-    }
 }
 
 /// Small, terminating expression programs supply feature behavior. Neutrino only
@@ -97,7 +56,7 @@ public struct ModuleProgram: Codable, Equatable, Sendable {
     public var entrypoints: [String: ModuleExpression]
     public init(entrypoints: [String: ModuleExpression]) { formatVersion = 1; self.entrypoints = entrypoints }
     public static func validKey(_ key: String) -> Bool {
-        !key.isEmpty && key.count <= 64 && key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "." || $0 == "-") }
+        (try? RustCore.request(["op":"moduleKey","value":key]) as? Bool) ?? false
     }
     public static func decode(_ data: Data) throws -> Self {
         guard data.count <= 128 * 1024 else { throw ValidationError("Behavior programs exceed 128 KB.") }
@@ -106,30 +65,14 @@ public struct ModuleProgram: Codable, Equatable, Sendable {
         try program.validate(); return program
     }
     public func validate() throws {
-        guard formatVersion == 1, !entrypoints.isEmpty, entrypoints.count <= 16,
-              entrypoints.keys.allSatisfy(Self.validKey) else { throw ValidationError("This behavior program is incompatible with Neutrino.") }
-        var budget = 512
-        for expression in entrypoints.values { try expression.validate(depth: 0, budget: &budget) }
+        _ = try RustCore.request(["op":"validateProgram","program":RustCore.encoded(self)])
     }
     public func validate(capability: ModuleCapability) throws {
-        try validate()
-        let required: Set<String>
-        switch capability {
-        case .notes: required = ["create", "update", "delete"]
-        case .screenshot: required = ["prepare"]
-        case .focusMode: required = ["enter", "exit"]
-        default: throw ValidationError("This role does not support a behavior program.")
-        }
-        guard required.isSubset(of: Set(entrypoints.keys)) else { throw ValidationError("This behavior package does not implement every required operation for its role.") }
+        _ = try RustCore.request(["op":"validateProgram","program":RustCore.encoded(self),"capability":capability.rawValue])
     }
     public func run(_ event: String, input: [String: ModuleValue]) throws -> [String: ModuleValue] {
-        try validate(); try ModuleValue.object(input).validate()
-        guard try JSONEncoder().encode(input).count <= 1_048_576 else { throw ValidationError("Module input exceeds 1 MB.") }
-        guard let expression = entrypoints[event] else { throw ValidationError("This module does not implement \(event).") }
-        guard let output = try expression.evaluate(input).object else { throw ValidationError("A module must return named values.") }
-        try ModuleValue.object(output).validate()
-        guard try JSONEncoder().encode(output).count <= 1_048_576 else { throw ValidationError("Module output exceeds 1 MB.") }
-        return output
+        let output = try RustCore.request(["op":"runProgram","program":RustCore.encoded(self),"event":event,"input":RustCore.encoded(input)])
+        return try JSONDecoder().decode([String:ModuleValue].self,from:JSONSerialization.data(withJSONObject:output))
     }
 }
 
@@ -141,18 +84,10 @@ public struct ModuleSetting: Identifiable, Codable, Equatable, Sendable {
     public var defaultValue: ModuleValue
     public var choices: [String]?
     public func validate() throws {
-        guard ModuleProgram.validKey(id), !title.isEmpty, title.count <= 100 else { throw ValidationError("A module setting is invalid.") }
-        try validate(value: defaultValue)
+        _ = try RustCore.request(["op":"validateSetting","setting":RustCore.encoded(self),"value":RustCore.encoded(defaultValue)])
     }
     public func validate(value: ModuleValue) throws {
-        switch kind {
-        case .toggle: guard value.bool != nil else { throw ValidationError("This setting needs a toggle value.") }
-        case .choice:
-            guard let choices, !choices.isEmpty, choices.count <= 32, choices.allSatisfy({ !$0.isEmpty && $0.count <= 100 }),
-                  Set(choices).count == choices.count, let text = value.string, choices.contains(text) else { throw ValidationError("This setting needs a listed choice.") }
-        case .text: guard let text = value.string, text.count <= 1000 else { throw ValidationError("This setting needs at most 1,000 characters.") }
-        case .integer: guard let number = value.integer, (0...200_000).contains(number) else { throw ValidationError("This number must be between 0 and 200,000.") }
-        }
+        _ = try RustCore.request(["op":"validateSetting","setting":RustCore.encoded(self),"value":RustCore.encoded(value)])
     }
 }
 
@@ -166,6 +101,7 @@ public struct ModuleDefinition: Codable, Equatable, Sendable {
     public var theme: Theme?
     public var layout: BrowserLayout?
     public var icons: [String: String]?
+    public var svgIcons: [String: String]?
     public var menu: [ModuleMenuItem]?
     public var widgetTitle: String?
     public var widgetBody: String?
@@ -177,7 +113,7 @@ public struct ModuleDefinition: Codable, Equatable, Sendable {
     }
     public func validate(capability: ModuleCapability) throws {
         guard formatVersion == 1 else { throw ValidationError("This declarative module is incompatible with Neutrino.") }
-        let populated = [treeTabs != nil, theme != nil, layout != nil, icons != nil, menu != nil, widgetTitle != nil || widgetBody != nil].filter { $0 }.count
+        let populated = [treeTabs != nil, theme != nil, layout != nil, icons != nil || svgIcons != nil, menu != nil, widgetTitle != nil || widgetBody != nil].filter { $0 }.count
         guard populated == 1 else { throw ValidationError("A declarative package must define exactly one role.") }
         switch capability {
         case .tabSystem: guard treeTabs != nil else { throw ValidationError("A tab system must choose its tab presentation.") }
@@ -195,6 +131,11 @@ public struct ModuleDefinition: Codable, Equatable, Sendable {
             var normalized = layout; normalized.normalize()
             guard normalized == layout else { throw ValidationError("Layout values exceed Neutrino's supported ranges.") }
         case .icons:
+            if let svgIcons {
+                _ = try RustCore.request(["op":"validateSVGIcons","icons":svgIcons])
+                guard icons == nil else {throw ValidationError("Choose SVG paths or native symbol names, not both.")}
+                return
+            }
             let supported = Set(ToolbarCommand.allCases.map(\.rawValue)).union(["bookmarks", "history", "notes", "resources"])
             guard let icons, !icons.isEmpty, icons.count <= 32, Set(icons.keys).isSubset(of: supported),
                   icons.values.allSatisfy({ !$0.isEmpty && $0.count <= 80 && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") } }) else { throw ValidationError("Invalid native symbol names.") }

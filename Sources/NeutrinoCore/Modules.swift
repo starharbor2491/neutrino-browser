@@ -41,28 +41,10 @@ public struct ModuleManifest: Identifiable, Codable, Equatable, Sendable {
         self.dependencyVersions = dependencyVersions
     }
     public func validate() throws {
-        guard Self.validID(id), dependencies.count <= 32, dependencies.allSatisfy(Self.validID), Set(dependencies).count == dependencies.count,
-              !dependencies.contains(id) else { throw ValidationError("Invalid module ID or dependencies.") }
-        guard version > 0, !name.isEmpty, name.count <= 100, summary.count <= 1000, publisher.count <= 100,
-              source.scheme == "https", source.host != nil, source.user == nil, source.password == nil else {
-            throw ValidationError("The module manifest contains invalid metadata.")
-        }
-        guard (minimumHostVersion ?? 1) == 1 else { throw ValidationError("This module requires a newer Neutrino version.") }
-        guard (dependencyVersions ?? [:]).allSatisfy({ dependencies.contains($0.key) && (1...100_000).contains($0.value) }) else {
-            throw ValidationError("Dependency version requirements are invalid.")
-        }
-        guard (settings?.count ?? 0) <= 16, Set((settings ?? []).map(\.id)).count == (settings?.count ?? 0) else { throw ValidationError("Module settings are invalid.") }
-        for setting in settings ?? [] { try setting.validate() }
-        let declarativeRoles: Set<ModuleCapability> = [.tabSystem, .theme, .layout, .icons, .menu, .startWidget]
-        guard runtime == nil || (runtime == .nativeResourceWorker && capability == .resourceMonitor) ||
-              (runtime == .nativeReaderWorker && capability == .reader) ||
-              (runtime == .behaviorProgram && [.notes, .screenshot, .focusMode].contains(capability)) ||
-              (runtime == .declarative && declarativeRoles.contains(capability)) else { throw ValidationError("This module role and runtime are incompatible.") }
-        guard try JSONEncoder().encode(self).count <= 32 * 1024 else { throw ValidationError("Module manifest exceeds 32 KB.") }
+        _ = try RustCore.request(["op":"validateManifest","manifest":RustCore.encoded(self)])
     }
     public static func validID(_ id: String) -> Bool {
-        !id.isEmpty && id == id.lowercased() && id.count <= 80 && !id.hasPrefix(".") && !id.contains("..") &&
-        id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }
+        (try? RustCore.request(["op":"moduleID","value":id]) as? Bool) ?? false
     }
     public static func decode(_ data: Data) throws -> ModuleManifest {
         guard data.count <= 32 * 1024 else { throw ValidationError("Module manifest exceeds 32 KB.") }
@@ -158,38 +140,9 @@ public struct ModuleRepository: Sendable {
         return result
     }
     public func installationPlan(for id: String, catalog: [ModuleManifest], includeInstalled: Bool = false) throws -> [ModuleManifest] {
-        let existing = try installed()
-        var index: [String: ModuleManifest] = [:]
-        for manifest in catalog {
-            try manifest.validate()
-            guard index.updateValue(manifest, forKey: manifest.id) == nil else { throw ValidationError("Catalog contains duplicate module IDs.") }
-        }
-        var visiting = Set<String>(), visited = Set<String>(), result: [ModuleManifest] = []
-        func visit(_ current: String) throws {
-            if visited.contains(current) { return }
-            guard visiting.insert(current).inserted else { throw ValidationError("Modules have circular dependencies.") }
-            let catalogManifest = index[current]
-            let installedManifest = existing.first(where: { $0.id == current })?.manifest
-            let candidate: ModuleManifest?
-            if let installedManifest, installedManifest.version >= (catalogManifest?.version ?? 0) { candidate = installedManifest }
-            else { candidate = catalogManifest ?? installedManifest }
-            guard let manifest = candidate else {
-                throw ValidationError("A required module is missing: \(current).")
-            }
-            for dependency in manifest.dependencies {
-                let availableVersion = max(index[dependency]?.version ?? 0, existing.first(where: { $0.id == dependency })?.manifest.version ?? 0)
-                guard availableVersion >= (manifest.dependencyVersions?[dependency] ?? 1) else {
-                    throw ValidationError("\(manifest.name) requires \(dependency) v\(manifest.dependencyVersions?[dependency] ?? 1) or later.")
-                }
-                try visit(dependency)
-            }
-            visiting.remove(current); visited.insert(current)
-            if includeInstalled || !existing.contains(where: { $0.id == current && $0.manifest.version >= manifest.version && $0.enabled }) {
-                result.append(manifest)
-            }
-        }
-        try visit(id)
-        return result
+        let existing=try installed().map{["manifest":try RustCore.encoded($0.manifest),"enabled":$0.enabled] as [String:Any]}
+        let plan=try RustCore.request(["op":"installationPlan","id":id,"catalog":RustCore.encoded(catalog),"installed":existing,"includeInstalled":includeInstalled])
+        return try JSONDecoder().decode([ModuleManifest].self,from:JSONSerialization.data(withJSONObject:plan))
     }
     /// Dependency/setup changes either commit together or restore their package
     /// and provider snapshots, including after a process interruption. Module data

@@ -90,6 +90,22 @@ if channel not in ('local', 'preview', 'stable'):
 if channel == 'preview' and not chromium:
     raise ValueError('Published previews must include Blink')
 info['NeutrinoUpdateChannel'] = channel
+# No unsigned Sparkle feed is accepted. A missing publisher key retains the
+# existing verified GitHub updater until the signed migration release is ready.
+public_key=os.environ.get('NEUTRINO_SPARKLE_PUBLIC_KEY','').strip()
+if public_key:
+    import base64
+    if len(base64.b64decode(public_key,validate=True))!=32 or channel not in ('preview','stable'):
+        raise ValueError('Sparkle requires a 32-byte public key and published update channel')
+    info['SUPublicEDKey']=public_key
+    info['SUFeedURL']='https://raw.githubusercontent.com/starharbor2491/neutrino-browser/updates/'+channel+'.xml'
+    info['SUEnableAutomaticChecks']=True
+    info['SUAutomaticallyUpdate']=True
+    info['SUVerifyUpdateBeforeExtraction']=True
+    info['SURequireSignedFeed']=True
+else:
+    for key in ('SUPublicEDKey','SUFeedURL','SUEnableAutomaticChecks','SUAutomaticallyUpdate','SUVerifyUpdateBeforeExtraction','SURequireSignedFeed'):
+        info.pop(key,None)
 info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
 (app / 'Contents/Resources/Distribution.json').write_text(json.dumps({
     'format': 1, 'build': build, 'version': version, 'securityEpoch': epoch,

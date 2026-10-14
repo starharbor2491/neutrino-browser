@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 60
     env:
       NEUTRINO_UPDATE_CHANNEL: preview
+      NEUTRINO_SPARKLE_PUBLIC_KEY: ${{ vars.NEUTRINO_SPARKLE_PUBLIC_KEY }}
+      NEUTRINO_SPARKLE_PRIVATE_KEY: ${{ secrets.NEUTRINO_SPARKLE_PRIVATE_KEY }}
       NEUTRINO_SIGNING_IDENTITY: ${{ secrets.NEUTRINO_SIGNING_IDENTITY }}
       NEUTRINO_NOTARY_KEY_ID: ${{ secrets.NEUTRINO_NOTARY_KEY_ID }}
       NEUTRINO_NOTARY_ISSUER: ${{ secrets.NEUTRINO_NOTARY_ISSUER }}
@@ -94,6 +96,8 @@ jobs:
             dist/*-catalog-entry.json
             dist/SHA256SUMS
             dist/signing-status.json
+            dist/sparkle-status.json
+            dist/preview.xml
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -179,6 +183,8 @@ jobs:
             dist/catalog.json
             dist/SHA256SUMS
             dist/signing-status.json
+            dist/sparkle-status.json
+            dist/preview.xml
             dist/RELEASE.md
             dist/RELEASE_TITLE
             dist/installed-smoke.json
@@ -221,5 +227,31 @@ jobs:
           else
             gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
           fi
-          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json --clobber
+          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json --clobber
           gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
+      - name: Publish signed Sparkle feed after release assets are public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ -f release/preview.xml ]]; then
+            python3 - <<'PYFEED'
+          import base64,json,subprocess
+          from pathlib import Path
+          def api(method,path,body=None):
+              result=subprocess.run(['gh','api','--method',method,path,'--input','-'],input=json.dumps(body or {}),text=True,capture_output=True)
+              if result.returncode: raise RuntimeError('GitHub feed publication failed')
+              return json.loads(result.stdout) if result.stdout else None
+          repo='repos/starharbor2491/neutrino-browser'
+          # Create the update branch at the reviewed release source if absent.
+          existing=subprocess.run(['gh','api',repo+'/git/ref/heads/updates'],capture_output=True,text=True)
+          if existing.returncode:
+              release=json.loads(Path('release/catalog.json').read_text())['releases'][0]['release']
+              tag=api('GET',repo+'/git/ref/tags/v'+release['version'])
+              api('POST',repo+'/git/refs',{'ref':'refs/heads/updates','sha':tag['object']['sha']})
+          current=subprocess.run(['gh','api',repo+'/contents/preview.xml?ref=updates'],capture_output=True,text=True)
+          body={'message':'Publish signed Neutrino preview appcast','branch':'updates','content':base64.b64encode(Path('release/preview.xml').read_bytes()).decode()}
+          if current.returncode==0: body['sha']=json.loads(current.stdout)['sha']
+          api('PUT',repo+'/contents/preview.xml',body)
+          PYFEED
+          fi

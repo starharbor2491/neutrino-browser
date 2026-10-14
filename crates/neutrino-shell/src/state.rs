@@ -31,6 +31,10 @@ pub struct Shell {
     pub invalid_field: String,
     pub tab_undo: Vec<Value>,
     pub palette: bool,
+    pub palette_new: bool,
+    pub palette_serial: u64,
+    pub palette_parent: Value,
+    pub panel: String,
     pub query: String,
     pub selected_result: usize,
     pub menu: String,
@@ -56,7 +60,7 @@ impl Default for Shell {
             screen: "browse".into(),
             section: "general".into(),
             step: 0,
-            setup: json!({"profile":"Personal","space":"Everyday","search":"duckDuckGo","blockTrackers":true,"blockPopups":true,"restoreSession":true,"appearance":"dark","accent":"purple","layout":"leading","imported":false}),
+            setup: json!({"profile":"Personal","space":"Everyday","search":"duckDuckGo","blockTrackers":true,"blockPopups":true,"restoreSession":true,"appearance":"dark","accent":"purple","layout":"leading","preset":"neutrino","imported":false}),
             draft: None,
             undo: vec![],
             redo: vec![],
@@ -64,6 +68,10 @@ impl Default for Shell {
             invalid_field: String::new(),
             tab_undo: vec![],
             palette: false,
+            palette_new: false,
+            palette_serial: 0,
+            palette_parent: Value::Null,
+            panel: String::new(),
             query: String::new(),
             selected_result: 0,
             menu: String::new(),
@@ -175,7 +183,11 @@ impl Shell {
                     }
                 }
                 "palette" => {
+                    self.palette_serial = self.palette_serial.wrapping_add(1);
                     self.palette = true;
+                    self.focus = "command-input".into();
+                    self.palette_new = false;
+                    self.palette_parent = Value::Null;
                     self.menu.clear();
                     self.query = text(&request, "value").into();
                     self.selected_result = 0;
@@ -291,7 +303,13 @@ impl Shell {
                         text(&value, "value"),
                         text(&self.snapshot["preferences"], "search"),
                     ) {
-                        commands.push(json!({"op":"navigate","url":url}));
+                        if op == "activate-result" && self.palette_new {
+                            commands.push(
+                                json!({"op":"newTab","url":url,"parentID":self.palette_parent}),
+                            );
+                        } else {
+                            commands.push(json!({"op":"navigate","url":url}));
+                        }
                         self.palette = false;
                         self.close_screen();
                     } else {
@@ -303,12 +321,71 @@ impl Shell {
                     return self.dispatch(json!({"op":"activate-result"}));
                 }
                 "newTab" => {
-                    commands.push(json!({"op":"newTab"}));
-                    self.palette = false;
+                    self.palette_serial = self.palette_serial.wrapping_add(1);
+                    self.palette = true;
+                    self.focus = "command-input".into();
+                    self.palette_new = true;
+                    self.palette_parent = self
+                        .tabs()
+                        .iter()
+                        .find(|t| t["id"] == request["parentID"])
+                        .map(|t| t["id"].clone())
+                        .unwrap_or(Value::Null);
                     self.query.clear();
                     self.selected_result = 0;
-                    self.screen = "browse".into();
-                    self.focus = "start-input".into();
+                    self.menu.clear();
+                }
+                "panel" => {
+                    let value = text(&request, "value");
+                    if [
+                        "",
+                        "bookmarks",
+                        "history",
+                        "downloads",
+                        "notes",
+                        "resources",
+                    ]
+                    .contains(&value)
+                    {
+                        self.panel = if value.is_empty() || self.panel_key() == value {
+                            "closed".into()
+                        } else {
+                            value.into()
+                        };
+                        if self.panel != "resources" && self.panel != "closed" {
+                            self.section = self.panel.clone();
+                            commands.push(json!({"op":"projectLibrary","section":self.panel}));
+                        }
+                        self.screen = "browse".into();
+                    }
+                }
+                "setup-preset" => {
+                    if let Some(c) = crate::appearance::preset(text(&request, "value")) {
+                        self.setup["preset"] = request["value"].clone();
+                        self.setup["appearance"] = c["theme"]["colorMode"].clone();
+                        self.setup["accent"] = c["theme"]["accent"].clone();
+                        self.setup["layout"] = c["layout"]["tabs"].clone();
+                    }
+                }
+                "editor-preset" => {
+                    if self.draft.is_some() {
+                        if let Some(c) = crate::appearance::preset(text(&request, "value")) {
+                            self.push_undo();
+                            self.draft = Some(c);
+                        }
+                    }
+                }
+                "split-with" => {
+                    let id = &request["id"];
+                    if *id != self.active()["id"]
+                        && self
+                            .tabs()
+                            .iter()
+                            .any(|t| t["id"] == *id && !text(t, "url").is_empty())
+                    {
+                        commands.push(json!({"op":"splitWith","id":id}));
+                        self.menu.clear();
+                    }
                 }
                 "selectTab" | "closeTab" | "duplicateTab" | "pinTab" | "toggleBranch" => {
                     if let Some(tab) = self
@@ -501,6 +578,25 @@ impl Shell {
                     self.apply_space = request["value"].as_bool().unwrap_or(true);
                 }
                 "editor-value" => self.edit_value(&request),
+                "editor-save-named" => {
+                    if let Some(config) = &self.draft {
+                        if !self.name.is_empty() {
+                            commands.push(json!({"op":"saveNamedSetup","name":self.name,"configuration":config}));
+                            self.name.clear();
+                            self.notice = "Setup saved. Choose it from Saved setups.".into();
+                        }
+                    }
+                }
+                "editor-load-named" => {
+                    if let Some(c) = array(&self.snapshot["savedConfigurations"])
+                        .iter()
+                        .find(|c| c["id"] == request["id"])
+                    {
+                        let config = c["configuration"].clone();
+                        self.push_undo();
+                        self.draft = Some(config);
+                    }
+                }
                 "editor-preview-size" => self.expanded_preview = !self.expanded_preview,
                 "editor-end-adjustment" => {}
                 "dock" => self.dock(&request),
@@ -533,6 +629,7 @@ impl Shell {
                     if let Some(config) = self.draft.take() {
                         let pending = self.pending_exit.take();
                         commands.push(json!({"op":"applyConfiguration","configuration":config,"space":self.apply_space}));
+                        self.panel.clear();
                         self.close_screen();
                         if let Some(pending) = pending {
                             let next = self.dispatch(pending);
@@ -570,7 +667,7 @@ impl Shell {
                 | "privateWindow" | "importModule" | "installExtension" | "webStore" | "reader"
                 | "capture" | "exportBookmarks" | "clearHistory" | "signIn" | "disconnectAI"
                 | "disableAI" | "cancelAI" | "restoreLayout" | "resetModules" | "retrySave"
-                | "showDataFolder" => {
+                | "showDataFolder" | "uninstall" => {
                     commands.push(json!({"op":op}));
                     self.menu.clear();
                 }
@@ -637,6 +734,8 @@ impl Shell {
                         "deleteNote",
                         "createNote",
                         "selectNote",
+                        "noteFromPage",
+                        "quoteSelection",
                         "libraryPage",
                         "useWebKit",
                         "reloadTab",
@@ -645,8 +744,15 @@ impl Shell {
                     ]
                     .contains(&action)
                         && !(self.private()
-                            && ["saveNote", "deleteNote", "createNote", "credentialDelete"]
-                                .contains(&action))
+                            && [
+                                "saveNote",
+                                "deleteNote",
+                                "createNote",
+                                "noteFromPage",
+                                "quoteSelection",
+                                "credentialDelete",
+                            ]
+                            .contains(&action))
                     {
                         commands
                             .push(json!({"op":action,"id":request["id"],"value":request["value"]}));
@@ -696,7 +802,16 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if self.palette { "command-input" } else if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+    }
+    pub fn panel_key(&self) -> &str {
+        if self.panel == "closed" {
+            ""
+        } else if !self.panel.is_empty() {
+            &self.panel
+        } else {
+            text(&self.config()["layout"], "secondaryPanel")
+        }
     }
     pub fn modal_menu(&self) -> bool {
         ["discard-editor", "clear-history", "reset-modules"].contains(&self.menu.as_str())
@@ -770,8 +885,12 @@ impl Shell {
         let key = text(r, "key");
         let v = &r["value"];
         let target = match key {
-            "accent" | "colorMode" | "density" | "reducedMotion" => "theme",
-            "tabsWidth" | "treeTabs" | "bookmarksBar" => "layout",
+            "accent" | "colorMode" | "density" | "reducedMotion" | "iconPack" | "iconStroke"
+            | "cornerRadius" | "fontScale" | "spacingScale" | "typography" | "transparency"
+            | "borderWidth" | "shadowStrength" | "accentHex" | "surfaceHex" | "textHex" => "theme",
+            "tabsWidth" | "treeTabs" | "bookmarksBar" | "sidebarWidth" | "secondaryPanel" => {
+                "layout"
+            }
             _ => return,
         };
         let valid = match key {
@@ -779,6 +898,31 @@ impl Shell {
                 .contains(&v.as_str().unwrap_or("")),
             "colorMode" => ["system", "light", "dark"].contains(&v.as_str().unwrap_or("")),
             "density" => ["compact", "comfortable"].contains(&v.as_str().unwrap_or("")),
+            "iconPack" => {
+                ["outline", "precision", "solid", "module"].contains(&v.as_str().unwrap_or(""))
+            }
+            "typography" => {
+                ["system", "rounded", "monospaced", "serif"].contains(&v.as_str().unwrap_or(""))
+            }
+            "accentHex" | "surfaceHex" | "textHex" => {
+                v.as_str().is_some_and(crate::appearance::hex)
+            }
+            "secondaryPanel" => [
+                "",
+                "notes",
+                "bookmarks",
+                "history",
+                "downloads",
+                "resources",
+            ]
+            .contains(&v.as_str().unwrap_or("")),
+            "cornerRadius" => v.as_f64().is_some_and(|n| (0.0..=24.0).contains(&n)),
+            "fontScale" => v.as_f64().is_some_and(|n| (0.85..=1.4).contains(&n)),
+            "spacingScale" => v.as_f64().is_some_and(|n| (0.75..=1.5).contains(&n)),
+            "borderWidth" => v.as_f64().is_some_and(|n| (0.0..=2.0).contains(&n)),
+            "shadowStrength" => v.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)),
+            "iconStroke" => v.as_f64().is_some_and(|n| (1.0..=2.5).contains(&n)),
+            "sidebarWidth" => v.as_f64().is_some_and(|n| (180.0..=360.0).contains(&n)),
             "tabsWidth" => v
                 .as_f64()
                 .map(|x| (200.0..=340.0).contains(&x))
@@ -818,6 +962,9 @@ impl Shell {
         self.push_undo();
         let draft = self.draft.as_mut().unwrap();
         draft["layout"][key] = json!(region);
+        if key == "sidebar" && text(&draft["layout"], "secondaryPanel").is_empty() {
+            draft["layout"]["secondaryPanel"] = json!("bookmarks");
+        }
         if key == "tabs" && ["top", "bottom"].contains(&region) {
             draft["layout"]["treeTabs"] = json!(false);
         }
@@ -940,6 +1087,9 @@ impl Shell {
         }
         if !query.is_empty() {
             out.push(json!({"kind":"search","title":self.query,"detail":"Search or open website","value":self.query}));
+            if self.palette_new {
+                out.rotate_right(1);
+            }
         }
         out
     }
@@ -952,7 +1102,7 @@ fn return_focus(field: &str) -> &str {
     }
 }
 pub fn default_configuration() -> Value {
-    json!({"theme":{"design":"graphite","accent":"purple","colorMode":"dark","density":"comfortable","cornerRadius":6,"transparency":false,"reducedMotion":false,"iconStyle":"outline"},"layout":{"tabs":"leading","navigation":"top","sidebar":"leading","sidebarWidth":260,"bookmarksBar":false,"statusBar":false,"tabsWidth":256}})
+    crate::appearance::preset("neutrino").unwrap()
 }
 pub fn resolve_address(input: &str, search: &str) -> Option<String> {
     let value = input.trim();

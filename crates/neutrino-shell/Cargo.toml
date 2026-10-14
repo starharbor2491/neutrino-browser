@@ -16,3 +16,4 @@ url = "2"
 
 roxmltree = "0.20"
 rusqlite = "0.32"
+sha2 = "0.10"

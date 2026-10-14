@@ -81,10 +81,15 @@ extension NativeIntegrationTests {
       try await RustShellAcceptance.action(["op":"focus-address"],web:web)
       #expect((try await web.evaluateJavaScript("(()=>{const address=document.querySelector('#address-input');return address.selectionStart===0 && address.selectionEnd===address.value.length && address.value.length>5;})()")) as? Bool == true)
       #expect((try await web.evaluateJavaScript("document.activeElement.id==='address-input' && document.querySelector('#address-input').getBoundingClientRect().width>100")) as? Bool == true)
+      let before=model.session.tabs
       try await RustShellAcceptance.action(["op":"newTab"],web:web)
-      _ = try await web.evaluateJavaScript("(()=>{const input=document.querySelector('#start-input');input.focus();input.value='Unfinished search';return true;})()")
+      #expect(model.session.tabs==before)
+      _ = try await web.evaluateJavaScript("(()=>{const input=document.querySelector('#command-input');input.value='Unfinished search';return true;})()")
       try await RustShellAcceptance.action(["op":"newTab"],web:web)
-      #expect((try await web.evaluateJavaScript("document.querySelector('#start-input').value==='' && document.activeElement.id==='start-input'")) as? Bool == true)
+      #expect((try await web.evaluateJavaScript("document.querySelector('#command-input').value==='' && document.activeElement.id==='command-input'")) as? Bool == true)
+      try await RustShellAcceptance.action(["op":"escape"],web:web)
+      #expect(model.session.tabs==before)
+
     }
     @Test func auxiliaryDownloadsNeverProjectTheDefaultLibrary() async throws {
       _ = NSApplication.shared

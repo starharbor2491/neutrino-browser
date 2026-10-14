@@ -115,6 +115,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var pendingSync: Task<Void, Never>?
     private var renderGeneration = 0
     private var showingOverlay = true
+    private var pendingPageFocus: UUID?
+    private var backdropTask: Task<Void,Never>?
+    private var pageBackdrops: [String:String] = [:]
+    private var backdropRevisions: [UUID:UUID] = [:]
     private var nonModalMenuRect: NSRect?
     private let editingOwner = UUID()
     private var editingEngines: [BrowserEngineTab] = []
@@ -125,8 +129,6 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private let resourceWorker = ResourceWorker()
     private var resourceGeneration: UUID?
     private var resourcesOpen = false
-    private var cachedIconSymbols: [String:String] = [:]
-    private var cachedIconImages: [String:String] = [:]
     private var stopped = false
     private var projectedProfileID: UUID?
     private var downloadScreenOpened = false
@@ -225,6 +227,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        backdropTask?.cancel();backdropTask=nil;pageBackdrops=[:];backdropRevisions=[:]
         resourceWorker.stop()
         editingEngines.forEach { $0.setInterfaceEditing(false, owner: editingOwner) }; editingEngines.removeAll()
         if let editingInputMonitor { NSEvent.removeMonitor(editingInputMonitor) }; editingInputMonitor = nil
@@ -283,6 +286,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "saving": app.onboardingSaving, "spaceName": space?.name ?? "Everyday",
             "profileName": model?.profile.name ?? app.library.profiles[0].name,
             "preferences": encoded(app.library.preferences),
+            "savedConfigurations": encoded(app.library.preferences.savedConfigurations),
             "configuration": encoded(model?.configuration ?? app.library.preferences.configuration),
             "profiles": encoded(app.library.profiles),
             "spaces": encoded((app.library.spaces ?? []).map { SpaceIdentity(id: $0.id, name: $0.name, profileID: $0.profileID) }),
@@ -302,7 +306,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "modules": moduleSnapshot(), "moduleCatalogs": app.communityCatalogNames,
             "menuItems": encoded(app.declarativeDefinition(.menu)?.menu ?? []),
             "icons": app.declarativeDefinition(.icons)?.icons ?? [:],
-            "iconImages": symbolImages(),
+            "svgIcons": app.declarativeDefinition(.icons)?.svgIcons ?? [:],
             "startWidgets": encoded(app.startWidgets),
             "resources": ["frame": encoded(resourceWorker.frame), "failure": resourceWorker.failure ?? ""],
         ]
@@ -315,10 +319,16 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 if (projectedSession.tabs[i].faviconDataURL?.utf8.count ?? 0) > 12_000 { projectedSession.tabs[i].faviconDataURL = nil }
             }
             snapshot["session"] = encoded(projectedSession)
+            snapshot["pageBackdrops"] = Dictionary(uniqueKeysWithValues:model.visibleEngineTabs.compactMap {entry -> (String,String)? in
+                guard backdropRevisions[entry.id]==entry.page.navigationRevision,let image=pageBackdrops[entry.id.uuidString] else{return nil}
+                return (entry.id.uuidString,image)
+            })
             snapshot["focusMode"] = model.focusMode
             snapshot["focusHidden"] = Array(model.focusHiddenComponents).sorted()
             let tab = model.activeWebTab
             snapshot["loading"] = tab.loading
+            snapshot["canGoBack"] = tab.canGoBack
+            snapshot["canGoForward"] = tab.canGoForward
             let visible = model.visibleEngineTabs
             snapshot["pageErrors"] = Dictionary(uniqueKeysWithValues: visible.compactMap { id, page in page.errorMessage.map { (id.uuidString, $0) } })
             if let error = tab.errorMessage { snapshot["pageError"] = error }
@@ -354,7 +364,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         return stamped(result)
     }
     private func stamped(_ response: [String: Any]) -> [String: Any] {
-        let needsResources = response["screen"] as? String == "resources" && model != nil && !app.terminating && !app.finalQuitDataFrozen
+        let needsResources = response["resourcesVisible"] as? Bool == true && model != nil && !app.terminating && !app.finalQuitDataFrozen
         if needsResources && (!resourcesOpen || resourceGeneration != app.resourceWorkerGeneration) {
             resourcesOpen = true; resourceGeneration = app.resourceWorkerGeneration
             do { let package = try app.resourceWorkerPackage(); try resourceWorker.start(executable: package.url, moduleID: package.id) }
@@ -372,6 +382,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         for engine in next where !editingEngines.contains(where: { $0 === engine }) { engine.setInterfaceEditing(true, owner: editingOwner) }
         editingEngines = next
         if entering { container.window?.makeKey(); container.window?.makeFirstResponder(container.chrome) }
+        if response["focus"] as? String == "address-input" || response["focus"] as? String == "command-input" {pendingPageFocus=nil}
         if let token = response["focusToken"] as? Int, token != appliedFocusToken,
            let focus = response["focus"] as? String, !focus.isEmpty {
             appliedFocusToken = token
@@ -379,21 +390,6 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         }
         if showingOverlay { container.hidePages() }
         return result
-    }
-    private func symbolImages() -> [String:String] {
-        let symbols=app.declarativeDefinition(.icons)?.icons ?? [:]
-        if symbols==cachedIconSymbols { return cachedIconImages }
-        cachedIconSymbols=symbols;cachedIconImages=[:]
-        // AppKit resolves validated SF Symbols. Rust still owns the controls and
-        // layout; only transparent image masks cross this platform boundary.
-        for (name,symbol) in symbols {
-            guard let source=NSImage(systemSymbolName:symbol,accessibilityDescription:nil)?.withSymbolConfiguration(.init(pointSize:18,weight:.regular)) else { continue }
-            let image=NSImage(size:NSSize(width:24,height:24))
-            image.lockFocus();source.draw(in:NSRect(x:2,y:2,width:20,height:20));image.unlockFocus()
-            guard let tiff=image.tiffRepresentation,let bitmap=NSBitmapImageRep(data:tiff),let png=bitmap.representation(using:.png,properties:[:]),png.count<8000 else { continue }
-            cachedIconImages[name]="data:image/png;base64,"+png.base64EncodedString()
-        }
-        return cachedIconImages
     }
     private func moduleSnapshot() -> [[String:Any]] {
         let catalogIDs = Set(app.catalog.map(\.id))
@@ -426,10 +422,39 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         if result["overlay"] as? Bool == true { container.hidePages() }
         container.chrome.evaluateJavaScript("window.neutrino.receive(\(json))", completionHandler: nil)
     }
-    private func sendAction(_ request: [String: Any]) {
-        let result = handle.dispatch(request)
-        if let commands = result["commands"] as? [[String: Any]], !commands.isEmpty { for command in commands { perform(command) }; push(synchronize(), interactive:true) }
-        else { push(stamped(result), interactive:true) }
+    private func dispatchAction(_ request: [String:Any]) -> [String:Any] {
+        let result=handle.dispatch(request)
+        if let commands=result["commands"] as? [[String:Any]],!commands.isEmpty {
+            for command in commands {perform(command)}
+            return synchronize()
+        }
+        return stamped(result)
+    }
+    private func prepareAction(_ request: [String:Any],completion:@escaping @MainActor ([String:Any])->Void) {
+        if ["escape","focus-address","screen","selectTab","switchSpace"].contains(request["op"] as? String ?? "") {backdropTask?.cancel()}
+        guard ["newTab","palette","menu"].contains(request["op"] as? String ?? ""),
+              !showingOverlay,let model,model.hasPage else{completion(dispatchAction(request));return}
+        backdropTask?.cancel()
+        let profile=model.session.profileID,selected=model.session.selectedTabID
+        let entries=model.visibleEngineTabs
+        backdropTask=Task { @MainActor in
+            var images=[String:String](),revisions=[UUID:UUID]()
+            for entry in entries {
+                let revision=entry.page.navigationRevision
+                if let png=try? await entry.page.capturePNG(),png.count<=1_500_000,
+                   entry.page.navigationRevision==revision {
+                    images[entry.id.uuidString]="data:image/png;base64,"+png.base64EncodedString();revisions[entry.id]=revision
+                }
+                if Task.isCancelled{break}
+            }
+            guard !stopped,!Task.isCancelled,!model.isClosed,model.session.profileID==profile,model.session.selectedTabID==selected else{completion([:]);return}
+            pageBackdrops=images;backdropRevisions=revisions
+            _ = synchronize()
+            completion(dispatchAction(request))
+        }
+    }
+    private func sendAction(_ request: [String:Any]) {
+        prepareAction(request){[weak self] result in self?.push(result,interactive:true)}
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
@@ -453,12 +478,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if request["op"] as? String == "escape" || request["op"] as? String == "screen" {
                 model?.sheet = nil; model?.panel = nil; lastSheet = nil; lastPanel = nil
             }
-            let result = handle.dispatch(request)
-            if result["overlay"] as? Bool == true { container.hidePages() }
-            if let commands = result["commands"] as? [[String: Any]], !commands.isEmpty {
-                for command in commands { perform(command) }
-                replyHandler(synchronize(), nil)
-            } else { replyHandler(stamped(result), nil) }
+            prepareAction(request){result in replyHandler(result,nil)}
         default: replyHandler(nil, "Unknown platform request")
         }
     }
@@ -493,8 +513,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             view.mount(tab.nativeView); view.frame = rect; view.isHidden = false
             view.isPreviewing = body["editing"] as? Bool == true
             view.identifier = NSUserInterfaceItemIdentifier("neutrino.page")
-            view.wantsLayer = true; view.layer?.cornerRadius = 10; view.layer?.masksToBounds = true
+            view.wantsLayer = true; view.layer?.cornerRadius = min(24,max(0,(page["radius"] as? Double) ?? model.configuration.theme.cornerRadius)); view.layer?.masksToBounds = true
             container.mounted[id] = view; visible.insert(id)
+            if pendingPageFocus==id,model.session.selectedTabID==id,NSApp.modalWindow==nil,container.window?.attachedSheet==nil {
+                pendingPageFocus=nil;tab.focus()
+            }
         }
         for (id, view) in container.mounted where !visible.contains(id) { view.isHidden = true }
         for id in Array(container.mounted.keys) where !model.session.tabs.contains(where: { $0.id == id }) {
@@ -518,9 +541,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         switch operation {
         case "navigate":
-            if let value = command["url"] as? String { model?.navigate(value) }
+            if let value = command["url"] as? String { model?.navigate(value);pendingPageFocus=model?.session.selectedTabID }
         case "clearNotice": app.notice = nil
-        case "newTab": model?.newTab()
+        case "uninstall": AppUninstaller.request(app)
+        case "newTab":
+            guard let value=command["url"] as? String, let url=URL(string:value), AddressResolver.isWebURL(url) else { return }
+            model?.newTab(url:url, parentID:(command["parentID"] as? String).flatMap(UUID.init(uuidString:)))
+            pendingPageFocus=model?.session.selectedTabID
         case "selectTab": if let id { model?.selectTab(id) }
         case "closeTab": if let id { model?.requestCloseTab(id) }
         case "duplicateTab":
@@ -534,6 +561,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "stop": model?.activeWebTab.stop()
         case "bookmark": model?.toggleBookmark()
         case "split": model?.beginSplit(.sideBySide)
+        case "splitWith":
+            if let model, let id, id != model.session.selectedTabID,
+               model.session.tabs.contains(where:{$0.id==id && $0.url != nil}) {
+                model.session.split=TabSplit(first:model.session.selectedTabID,second:id)
+                model.session.splitSuppressed=nil
+                var c=model.configuration;c.layout.split = .sideBySide
+                app.applyConfiguration(c,to:model.session.spaceID)
+            }
         case "unsplit": model?.endSplit()
         case "switchSpace": if let id, let model, app.library.spaces?.contains(where: { $0.id==id && $0.profileID==model.session.profileID })==true { model.switchSpace(id) }
         case "switchProfile": if let id { model?.switchProfile(id) }
@@ -591,6 +626,15 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             let ids = raw.compactMap(UUID.init(uuidString:))
             guard ids.count == raw.count, Set(ids).count == ids.count, Set(ids) == Set(folders.map(\.id)) else { return }
             app.library.spaces?[index].folders = ids.compactMap { id in folders.first { $0.id == id } }
+        case "saveNamedSetup":
+            guard app.library.preferences.savedConfigurations.count<50,
+                  let name=command["name"] as? String, !name.isEmpty,
+                  let object=command["configuration"],let data=try? JSONSerialization.data(withJSONObject:object),
+                  var c=try? JSONDecoder().decode(Configuration.self,from:data) else {app.notice="Save up to 50 named setups.";return}
+            c.normalize()
+            var setup=NamedConfiguration(name:String(name.prefix(80)),configuration:c)
+            setup.requiredModuleIDs=app.configurationModuleRequirements
+            app.library.preferences.savedConfigurations.append(setup)
         case "applyConfiguration":
             guard let object = command["configuration"], let data = try? JSONSerialization.data(withJSONObject: object),
                   var configuration = try? JSONDecoder().decode(Configuration.self, from: data) else { app.notice = "That appearance could not be saved."; return }
@@ -628,9 +672,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if operation == "downloadCancel" { center.cancel(item) }
             else if let url = item.destination, !item.active { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         case "toggleModule":
-            if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.toggleModule(module) }
+            if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.toggleModule(module); applyActiveStyle(raw) }
         case "installModule":
-            if let raw = command["id"] as? String, app.catalog.contains(where: { $0.id == raw }) { app.install(raw) }
+            if let raw = command["id"] as? String, app.catalog.contains(where: { $0.id == raw }) { app.install(raw); applyActiveStyle(raw) }
         case "repairModule":
             if let raw = command["id"] as? String, let module = app.installedModules.first(where: { $0.id == raw }) { app.reinstallWorker(module) }
         case "uninstallModule":
@@ -663,6 +707,25 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             libraryPage = max(0, min(100_000, (command["value"] as? String).flatMap(Int.init) ?? 0))
         case "selectNote":
             if model?.isPrivate != true, app.library.notes.contains(where: { $0.id == id && $0.profileID == profileID }) { selectedNoteID = id }
+        case "noteFromPage", "quoteSelection":
+            guard let model,!model.isPrivate,let url=model.selectedTab.url else{return}
+            let tab=model.activeWebTab,revision=tab.navigationRevision,profile=model.session.profileID,title=model.selectedTab.title
+            Task { @MainActor in
+                do {
+                    let quote=operation=="quoteSelection" ? try await tab.selectedText() : ""
+                    guard !app.finalQuitDataFrozen,!model.isClosed,model.session.profileID==profile,model.activeWebTab===tab,tab.navigationRevision==revision else{return}
+                    if operation=="quoteSelection" && quote.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {app.notice="Select text on the page, then choose Quote.";return}
+                    guard let prepared=try RustCore.request(["op":"prepareNote","url":url.absoluteString,"title":title,"quote":quote]) as? [String:String] else{return}
+                    let original=app.library.notes
+                    do {
+                        let noteID=try app.createModuleNote(profileID:profile)
+                        try app.updateModuleNote(id:noteID,profileID:profile,field:"title",value:prepared["title"] ?? title)
+                        try app.updateModuleNote(id:noteID,profileID:profile,field:"text",value:prepared["text"] ?? "")
+                        selectedNoteID=noteID
+                    } catch {app.library.notes=original;throw error}
+                    scheduleSync()
+                }catch{app.notice=error.localizedDescription}
+            }
         case "createNote":
             guard model?.isPrivate != true else { return }
             app.perform { selectedNoteID = try app.createModuleNote(profileID: profileID) }
@@ -747,6 +810,19 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             return ["id": key, "origin": String(parts[0]), "username": String(parts[1])]
         }
     }
+    private func applyActiveStyle(_ id: String) {
+        guard let model,let module=app.installedModules.first(where:{$0.id==id && $0.enabled}),
+              let definition=app.declarativeDefinition(module.manifest.capability) else{return}
+        var c=model.configuration
+        switch module.manifest.capability {
+        case .theme: if let theme=definition.theme {c.theme=theme}
+        case .layout: if let layout=definition.layout {c.layout=layout}
+        case .tabSystem: c.layout.treeTabs=definition.treeTabs
+        case .icons: c.theme.iconPack="module"
+        default:return
+        }
+        app.applyConfiguration(c,to:model.session.spaceID)
+    }
     private func finishSetup(_ values: [String: Any]) {
         guard !app.onboardingSaving, !app.library.preferences.completedOnboarding,
               let profile = values["profile"] as? String, !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -759,10 +835,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         app.library.preferences.blockPopups = values["blockPopups"] as? Bool ?? true
         app.library.preferences.restoreSession = values["restoreSession"] as? Bool ?? true
         var configuration = Configuration()
-        configuration.theme.accent = (values["accent"] as? String).flatMap(Accent.init(rawValue:)) ?? .rose
+        if let id=values["preset"] as? String,
+           let raw=try? RustCore.request(["op":"appearancePreset","id":id]),
+           let data=try? JSONSerialization.data(withJSONObject:raw),
+           let selected=try? JSONDecoder().decode(Configuration.self,from:data) {configuration=selected}
+        configuration.theme.accent = (values["accent"] as? String).flatMap(Accent.init(rawValue:)) ?? .purple
         configuration.theme.colorMode = (values["appearance"] as? String).flatMap(ColorMode.init(rawValue:)) ?? .system
         configuration.layout.tabs = (values["layout"] as? String).flatMap(TabPlacement.init(rawValue:)) ?? .leading
-        configuration.layout.tabsWidth = 240
         app.applyConfiguration(configuration)
         Task { @MainActor in
             app.library.preferences.completedOnboarding = true

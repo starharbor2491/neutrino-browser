@@ -381,19 +381,25 @@ fn continuous_width_drag_is_one_undo_step_despite_passive_updates() {
 }
 
 #[test]
-fn new_tab_uses_inline_search_and_palette_commands_are_explicit() {
+fn command_tab_creation_is_deferred_and_cancel_preserves_the_live_page() {
     let mut s = shell();
+    let before = s.snapshot["session"].clone();
     let r = s.dispatch(json!({"op":"newTab"}));
+    assert!(commands(&r).is_empty());
+    assert!(s.palette);
+    assert_eq!(r["focus"], "command-input");
+    s.dispatch(json!({"op":"escape"}));
+    assert_eq!(s.snapshot["session"], before);
+    s.dispatch(json!({"op":"newTab"}));
+    s.dispatch(json!({"op":"query","value":"https://example.org/research"}));
+    let r = s.dispatch(json!({"op":"activate-result"}));
+    assert_eq!(commands(&r).len(), 1);
     assert_eq!(commands(&r)[0]["op"], "newTab");
-    assert!(!s.palette);
-    assert_eq!(r["focus"], "start-input");
+    assert_eq!(commands(&r)[0]["url"], "https://example.org/research");
     s.dispatch(json!({"op":"palette","value":"Modules"}));
-    let results = s.results();
-    assert_eq!(results[0]["kind"], "command");
-    assert_eq!(results[0]["value"], "modules");
+    assert_eq!(s.results()[0]["kind"], "command");
     s.dispatch(json!({"op":"activate-result"}));
     assert_eq!(s.screen, "modules");
-    assert!(!s.palette);
 }
 
 #[test]
@@ -475,4 +481,64 @@ fn focus_recovers_after_overlays_and_address_focus_and_spaces_stay_in_profile() 
         commands(&s.dispatch(json!({"op":"switchSpace","id":"s2"})))[0]["id"],
         "s2"
     );
+}
+
+#[test]
+fn presets_and_saved_panel_edits_produce_real_browsing_surfaces() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-preset","value":"chrome"}));
+    assert_eq!(s.config()["layout"]["tabs"], "top");
+    s.dispatch(json!({"op":"editor-preset","value":"neutrino"}));
+    s.dispatch(json!({"op":"dock","component":"panels","region":"trailing"}));
+    s.dispatch(json!({"op":"editor-value","key":"iconPack","value":"precision"}));
+    s.dispatch(json!({"op":"editor-value","key":"cornerRadius","value":12.0}));
+    let result = s.dispatch(json!({"op":"editor-save"}));
+    let c = commands(&result)[0]["configuration"].clone();
+    assert_eq!(c["layout"]["secondaryPanel"], "bookmarks");
+    assert_eq!(c["theme"]["iconPack"], "precision");
+    s.snapshot["configuration"] = c;
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot}));
+    assert!(r["html"].as_str().unwrap().contains("workspace-panel"));
+    assert!(r["html"]
+        .as_str()
+        .unwrap()
+        .contains("--component-radius:12px"));
+}
+#[test]
+fn svg_packages_cannot_import_markup_or_external_resources() {
+    use neutrino_shell::core_request;
+    assert!(
+        core_request(json!({"op":"validateSVGIcons","icons":{"back":"M15 4 7 12l8 8"}})).is_ok()
+    );
+    for path in [
+        "<svg onload=alert(1)>",
+        "https://example.com/x.svg",
+        "url(#icon)",
+        "M0 0<script>",
+    ] {
+        assert!(core_request(json!({"op":"validateSVGIcons","icons":{"back":path}})).is_err());
+    }
+}
+#[test]
+fn full_uninstall_scope_excludes_other_apps_downloads_and_publisher_keys() {
+    use neutrino_shell::core_request;
+    let result=core_request(json!({"op":"uninstallPaths","home":"/Users/researcher","dataDirectory":"/Users/researcher/Library/Application Support/org.neutrino.browser"})).unwrap();
+    assert_eq!(result.as_array().unwrap().len(), 7);
+    assert!(!result.to_string().contains("Downloads"));
+    assert!(
+        core_request(json!({"op":"uninstallPaths","home":"/","dataDirectory":"/Library"})).is_err()
+    );
+    assert!(core_request(json!({"op":"uninstallPaths","home":"/Users/researcher","dataDirectory":"/Users/researcher"})).is_err());
+    for service in [
+        "org.neutrino.browser.passwords.anything",
+        "org.neutrino.browser.other",
+        "Sparkle Private Key",
+        "org.brave.browser.passwords",
+    ] {
+        assert_eq!(
+            core_request(json!({"op":"uninstallKeychainService","service":service})).unwrap(),
+            false
+        );
+    }
 }

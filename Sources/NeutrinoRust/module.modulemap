@@ -1,5 +1,6 @@
 module NeutrinoRust [system] {
     header "include/NeutrinoRust.h"
     link "neutrino_shell"
+    link "sqlite3"
     export *
 }
