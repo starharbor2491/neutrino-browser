@@ -725,7 +725,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if !quit { state.notice = ChromiumRuntime.shared.status }
                     if quit { await state.finishPendingProfileDeletions() }
                     if quit && state.uninstallRequested {
-                        for browser in state.windows.values.compactMap(\.model) { browser.stopInterface?() }
+                        for browser in state.windows.values.compactMap(\.model) { await browser.stopInterface?() }
                         let failures=await AppUninstaller.remove(state)
                         if !failures.isEmpty {
                             let alert=NSAlert();alert.messageText="Uninstall could not remove every file"

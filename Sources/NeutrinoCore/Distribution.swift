@@ -17,34 +17,18 @@ public struct DistributionRelease: Codable, Equatable, Sendable {
         self.minimumMacOS = minimumMacOS
     }
     public func validate(current: DistributionRelease, minimumEpoch: Int, architecture: String, operatingSystemVersion: OperatingSystemVersion? = nil) throws {
-        try Self.validateMinimumMacOS(minimumMacOS ?? "14.0", operatingSystemVersion: operatingSystemVersion)
-        guard format == 1, build > 0, !version.isEmpty, version.count <= 64,
-              version.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || ".-+".contains($0)) }), securityEpoch >= 0,
-              self.architecture == architecture || self.architecture == "universal" else {
-            throw ValidationError("This release is incompatible with this Mac.")
-        }
-        guard build >= current.build, securityEpoch >= max(current.securityEpoch, minimumEpoch) else {
-            throw ValidationError("Neutrino will not install an older application or an engine below the accepted security version.")
-        }
+        _ = try RustCore.policy(["op":"validateRelease","value":RustCore.encoded(self),"current":RustCore.encoded(current),"minimumEpoch":minimumEpoch,"architecture":architecture,"system":Self.system(operatingSystemVersion)])
     }
-    public static func validateMinimumMacOS(_ minimum: String, operatingSystemVersion: OperatingSystemVersion? = nil) throws {
-        let components = minimum.split(separator: ".", omittingEmptySubsequences: false)
-        let numbers = components.compactMap { Int($0) }
-        guard (2...3).contains(components.count), numbers.count == components.count,
-              components.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0.isASCII && $0.isNumber }) }),
-              numbers.allSatisfy({ (0...999).contains($0) }), numbers[0] > 0 else {
-            throw ValidationError("The release has an invalid macOS compatibility requirement.")
-        }
-        let actual: OperatingSystemVersion?
+    static func system(_ version:OperatingSystemVersion?) -> Any {
         #if os(macOS)
-        actual = operatingSystemVersion ?? ProcessInfo.processInfo.operatingSystemVersion
+        let actual=version ?? ProcessInfo.processInfo.operatingSystemVersion
         #else
-        actual = operatingSystemVersion
+        guard let actual=version else {return NSNull()}
         #endif
-        if let actual,
-           (actual.majorVersion, actual.minorVersion, actual.patchVersion) < (numbers[0], numbers[1], numbers.count == 3 ? numbers[2] : 0) {
-            throw ValidationError("This release requires macOS \(minimum) or later. Your installed application has been kept.")
-        }
+        return [actual.majorVersion,actual.minorVersion,actual.patchVersion]
+    }
+    public static func validateMinimumMacOS(_ minimum:String,operatingSystemVersion:OperatingSystemVersion?=nil) throws {
+        _ = try RustCore.policy(["op":"validateMinimumMacOS","minimum":minimum,"system":system(operatingSystemVersion)])
     }
 }
 
@@ -61,14 +45,7 @@ public struct DistributionEngineManifest: Codable, Sendable {
         self.architecture = architecture; self.cefVersion = cefVersion
     }
     public func validate(release: DistributionRelease, architecture expected: String?) throws {
-        guard format == 2, abi > 0, abi <= 1024, runtimeStyle == "chromeViews",
-              ["arm64", "x86_64"].contains(architecture), architecture == release.architecture,
-              expected == nil || architecture == expected, release.chromium,
-              !cefVersion.isEmpty, cefVersion.count <= 256,
-              let major = cefVersion.split(separator: ".").first.flatMap({ Int($0) }),
-              major > 0, release.securityEpoch >= major else {
-            throw ValidationError("The Chromium package has an incompatible architecture or security version.")
-        }
+        _ = try RustCore.policy(["op":"validateEngineManifest","value":RustCore.encoded(self),"release":RustCore.encoded(release),"architecture":expected as Any? ?? NSNull()])
     }
 }
 
@@ -83,18 +60,7 @@ public struct DistributionAsset: Codable, Equatable, Sendable {
         self.codeDirectoryHash = codeDirectoryHash
     }
     public func validate() throws {
-        guard url.scheme == "https", url.host == "github.com", url.user == nil, url.password == nil,
-              url.path.hasPrefix("/starharbor2491/neutrino-browser/releases/download/"),
-              url.path.hasSuffix(".dmg"), url.query == nil, url.fragment == nil,
-              bytes > 0, bytes <= 4_000_000_000, sha256.count == 64,
-              sha256.allSatisfy({ "0123456789abcdef".contains($0) }) else {
-            throw ValidationError("The release catalog contains an invalid asset.")
-        }
-        if let codeDirectoryHash {
-            guard codeDirectoryHash.count == 40, codeDirectoryHash.allSatisfy({ "0123456789abcdef".contains($0) }) else {
-                throw ValidationError("The release catalog contains an invalid application code hash.")
-            }
-        }
+        _ = try RustCore.policy(["op":"validateDistributionAsset","value":RustCore.encoded(self)])
     }
 }
 public struct DistributionCatalog: Codable, Sendable {
@@ -102,16 +68,10 @@ public struct DistributionCatalog: Codable, Sendable {
     public let releases: [DistributionAsset]
     public init(releases: [DistributionAsset]) { self.format = 1; self.releases = releases }
     public func validate() throws {
-        guard format == 1, releases.count <= 16 else { throw ValidationError("The release catalog is incompatible or too large.") }
-        for release in releases { try release.validate() }
+        _ = try RustCore.policy(["op":"validateDistributionCatalog","value":RustCore.encoded(self)])
     }
-    public func updates(current: DistributionRelease, minimumEpoch: Int, architecture: String,
-                        operatingSystemVersion: OperatingSystemVersion? = nil) -> [DistributionAsset] {
-        releases.filter {
-            $0.release.build > current.build && $0.release.chromium == current.chromium &&
-            (try? $0.release.validate(current: current, minimumEpoch: minimumEpoch, architecture: architecture,
-                                     operatingSystemVersion: operatingSystemVersion)) != nil
-        }.sorted { $0.release.build > $1.release.build }
+    public func updates(current:DistributionRelease,minimumEpoch:Int,architecture:String,operatingSystemVersion:OperatingSystemVersion?=nil) -> [DistributionAsset] {
+        (try? RustCore.decode([DistributionAsset].self,from:RustCore.policy(["op":"distributionUpdates","value":RustCore.encoded(self),"current":RustCore.encoded(current),"minimumEpoch":minimumEpoch,"architecture":architecture,"system":DistributionRelease.system(operatingSystemVersion)]))) ?? []
     }
 }
 

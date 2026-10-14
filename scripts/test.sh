@@ -8,6 +8,7 @@ python3 scripts/test-installed-acceptance.py
 python3 scripts/test-core-acceptance.py
 python3 scripts/test-disk-images.py
 python3 scripts/test-chromium-updates.py
+python3 scripts/test-appcast.py
 if [[ "$(uname -s)" == Darwin ]]; then
   configuration=debug
   previous_argument=""

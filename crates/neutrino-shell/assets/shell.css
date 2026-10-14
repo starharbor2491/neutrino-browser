@@ -3135,3 +3135,11 @@ svg {
 .note-source { display:flex; align-items:center; gap:8px; text-align:left; min-height:36px; font-size:12px; color:var(--accent); }
 .note-source span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
 .note-quote { margin:8px 0; padding:12px; white-space:pre-wrap; overflow:auto; max-height:240px; background:var(--selected); border-radius:var(--component-radius,6px); font-size:13px; line-height:1.6; }
+
+.note-list strong,.note-list small {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-list strong {font-size:12px;font-weight:500}
+.note-list small,.note-source small {display:block;color:var(--muted);font-size:11px;line-height:1.5}
+.saved-setup-row {display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:4px;align-items:center;margin:4px 0}
+.saved-setup-row input {width:100%;font-size:12px;min-height:36px;background:transparent;padding:6px;border:1px solid transparent;border-radius:4px}
+.saved-setup-row input:hover,.saved-setup-row input:focus {border-color:var(--line)}
+.saved-setup-row .saved-setup {grid-column:1/-1}

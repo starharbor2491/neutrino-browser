@@ -44,6 +44,7 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
+            dist/research-acceptance.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
@@ -63,6 +64,7 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
+            dist/research-acceptance.json
           if-no-files-found: warn
   portable-core:
     runs-on: ubuntu-24.04

@@ -126,19 +126,10 @@ public struct DeclarativeModulePackage: Codable, Equatable, Sendable {
         self.manifest = manifest; self.program = program; self.definition = definition
     }
     public func payload() throws -> Data {
-        try manifest.validate()
-        let payload: Data
-        switch manifest.runtime {
-        case .behaviorProgram:
-            guard let program, definition == nil else { throw ValidationError("A behavior package needs its program.") }
-            try program.validate(capability: manifest.capability); payload = try JSONEncoder().encode(program)
-        case .declarative:
-            guard let definition, program == nil else { throw ValidationError("A declarative package needs its definition.") }
-            try definition.validate(capability: manifest.capability); payload = try JSONEncoder().encode(definition)
-        default: throw ValidationError("Community packages cannot contain native code or descriptor-only features.")
-        }
-        guard payload.count <= 128 * 1024 else { throw ValidationError("A module's payload exceeds 128 KB.") }
-        return payload
+        guard let result=try RustCore.request(["op":"communityPayload","package":RustCore.encoded(self)]) as? [String:Any] else {throw ValidationError("Invalid community package.")}
+        if let error=result["error"] as? String {throw ValidationError(error)}
+        guard let payload=result["result"] else {throw ValidationError("Missing module payload.")}
+        return try JSONSerialization.data(withJSONObject:payload,options:.sortedKeys)
     }
     public static func decode(_ data: Data) throws -> Self {
         guard data.count <= 192 * 1024 else { throw ValidationError("Local packages exceed 192 KB.") }
@@ -158,12 +149,8 @@ public struct DeclarativeModuleCatalog: Codable, Sendable {
         guard data.count <= 2 * 1024 * 1024 else { throw ValidationError("Catalogs exceed 2 MB.") }
         try ModuleJSONBounds.validate(data)
         let catalog = try JSONDecoder().decode(Self.self, from: data)
-        guard catalog.formatVersion == 1, !catalog.name.isEmpty, catalog.name.count <= 100, catalog.packages.count <= 64,
-              Set(catalog.packages.map { $0.manifest.id }).count == catalog.packages.count else { throw ValidationError("Invalid community catalog.") }
-        if let url = catalog.sourceURL {
-            guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil else { throw ValidationError("A catalog source must be an HTTPS URL without credentials.") }
-        }
-        for package in catalog.packages { _ = try package.payload() }
+        guard let result=try RustCore.request(["op":"validateCommunityCatalog","catalog":RustCore.encoded(catalog)]) as? [String:Any] else {throw ValidationError("Invalid community catalog.")}
+        if let error=result["error"] as? String {throw ValidationError(error)}
         return catalog
     }
 }

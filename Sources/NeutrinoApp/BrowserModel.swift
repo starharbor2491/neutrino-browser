@@ -11,7 +11,7 @@ final class BrowserModel: ObservableObject {
         return ids.map { ($0, webTab($0)) }
     }
     var shellAction: (([String: Any]) -> Void)?
-    var stopInterface: (() -> Void)?
+    var stopInterface: (() async -> Void)?
     @Published var session: WindowSession {
         didSet {
             guard !restoringFrozenSession else { return }

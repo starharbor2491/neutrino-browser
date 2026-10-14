@@ -22,12 +22,7 @@ public struct ResourceFrame: Codable, Equatable, Sendable {
     public static func decode(_ data: Data) throws -> Self {
         guard data.count <= 64 * 1024 else { throw ValidationError("The resource worker returned too much data.") }
         let frame = try JSONDecoder().decode(Self.self, from: data)
-        guard frame.title.count <= 100, frame.detail.count <= 1000, frame.metrics.count <= 12,
-              frame.metrics.allSatisfy({ metric in
-                  metric.name.count <= 100 && metric.value.count <= 100 && metric.detail.count <= 500 &&
-                  (metric.fraction.map { $0.isFinite && (0...1).contains($0) } ?? true) &&
-                  metric.samples.count <= 60 && metric.samples.allSatisfy { $0.isFinite && (0...1).contains($0) }
-              }) else { throw ValidationError("The resource worker returned an invalid display.") }
+        _ = try RustCore.policy(["op":"validateResourceFrame","value":RustCore.encoded(frame)])
         return frame
     }
 }

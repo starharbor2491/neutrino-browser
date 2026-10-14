@@ -100,19 +100,24 @@ import NeutrinoCore
         let originalConfiguration = model.configuration
         guard let source = page.url else { throw ValidationError("The research check needs a loaded website.") }
         let count = app.library.notes.count
-        _ = try await evaluatePage(page, "window.neutrinoResearchDraft='retained'; const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);'selected'")
+        try await action(["op":"screen","value":"browse"],web:web)
+        _ = try await evaluatePage(page, "(()=>{window.neutrinoResearchDraft='retained';const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);return 'selected';})()")
+        let selectedText=try await page.selectedText()
+        guard selectedText.contains("Local browser check") else {throw ValidationError("The fixture quote was not selected in \(page.engineID.rawValue): \(selectedText)")}
         try await action(["op":"section","value":"notes"], web: web)
         _ = try await web.evaluateJavaScript("document.querySelector('[data-op=native][data-action=quoteSelection]').click()")
         let deadline = ContinuousClock.now.advanced(by: .seconds(8))
         while app.library.notes.count == count && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(40)) }
         try await Task.sleep(for: .milliseconds(160))
+        let panelVisible=(try await web.evaluateJavaScript("!!document.querySelector('.workspace-panel textarea')")) as? Bool == true
         guard let note = app.library.notes.last, app.library.notes.count == count + 1,
               note.quotedText?.contains("Local browser check") == true, note.sourceURL == source,
               note.spaceID == model.session.spaceID,
               note.profileID == model.session.profileID,
-              (try await web.evaluateJavaScript("!!document.querySelector('.workspace-panel textarea')")) as? Bool == true,
+              note.sourceTabID == originalID, panelVisible,
               model.activeWebTab === page, !page.nativeView.isHidden else {
-            throw ValidationError("Quote did not create a source-preserving note beside the live page.")
+            let note=app.library.notes.last
+            throw ValidationError("Quote failed in \(page.engineID.rawValue): count=\(app.library.notes.count-count), quote=\(note?.quotedText ?? "nil"), source=\(note?.sourceURL?.absoluteString ?? "nil"), expected=\(source.absoluteString), Space=\(note?.spaceID==model.session.spaceID), panel=\(panelVisible), retained=\(model.activeWebTab===page), hidden=\(page.nativeView.isHidden), notice=\(app.notice ?? "none")")
         }
         guard await app.flush() else { throw ValidationError("The quote could not be saved.") }
         let database = try LibraryDatabase(url: app.dataDirectory.appendingPathComponent("library.sqlite"))
@@ -126,7 +131,7 @@ import NeutrinoCore
         defer { model.endSplit(); model.closeTab(comparison); model.selectTab(originalID); app.applyConfiguration(originalConfiguration, to: model.session.spaceID) }
         let secondDeadline = ContinuousClock.now.advanced(by: .seconds(12))
         while (model.activeWebTab.loading || model.activeWebTab.title != "Neutrino HTTP fixture") && ContinuousClock.now < secondDeadline { try await Task.sleep(for: .milliseconds(40)) }
-        _ = try await evaluatePage(model.activeWebTab,"const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);'selected'")
+        _ = try await evaluatePage(model.activeWebTab,"(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);return 'selected';})()")
         try await action(["op":"native","action":"quoteSelection"], web:web)
         let quoteDeadline = ContinuousClock.now.advanced(by:.seconds(8))
         while app.library.notes.count == count+1 && ContinuousClock.now < quoteDeadline { try await Task.sleep(for:.milliseconds(40)) }
@@ -147,28 +152,55 @@ import NeutrinoCore
               try await evaluatePage(page,"window.neutrinoResearchDraft") == "retained" else {
             throw ValidationError("A saved browser preset discarded the live research page.")
         }
-        app.applyConfiguration(originalConfiguration, to: model.session.spaceID)
-        model.endSplit()
+        // Save a real named setup with the live pair, change the draft, reload it,
+        // then prove both the setup and its Space presentation survive storage.
+        try await action(["op":"split-with","id":comparison.uuidString],web:web)
+        let savedPair=try unwrapSplit(model)
+        try await action(["op":"screen","value":"editor"],web:web)
+        let setupName="Acceptance research " + page.engineID.rawValue
+        try await action(["op":"name","value":setupName],web:web)
+        try await action(["op":"editor-save-named"],web:web)
+        guard let setup=app.library.preferences.savedConfigurations.last(where:{$0.name==setupName}) else {throw ValidationError("The named research setup was not saved.")}
+        try await action(["op":"editor-preset","value":"arc"],web:web)
+        try await action(["op":"editor-load-named","id":setup.id.uuidString],web:web)
+        try await action(["op":"editor-save"],web:web)
+        guard model.configuration.layout.tabs == .top,model.configuration.layout.split == .sideBySide,
+              model.session.split==savedPair else {throw ValidationError("The named research setup did not restore its saved layout and live split.")}
+        // Deliberately put another tab with the same URL ahead of the captured
+        // document. Recovery must select the original identity, not first URL.
+        model.newTab(url:source,engine:page.engineID)
+        let duplicate=model.session.selectedTabID
+        defer {model.switchSpace(researchSpace);model.closeTab(duplicate)}
+        model.pinTab(duplicate)
+        model.selectTab(originalID)
         guard let away = app.createSpace(name:"Acceptance scratch " + page.engineID.rawValue,profileID:model.session.profileID) else { throw ValidationError("The research Space round-trip could not start.") }
         model.switchSpace(away)
         try await Task.sleep(for:.milliseconds(160))
         guard (try await web.evaluateJavaScript("!document.querySelector('.note-quote')")) as? Bool == true else { throw ValidationError("Research quotes leaked into another Space.") }
-        model.switchSpace(researchSpace)
+        try await action(["op":"open-panel","value":"notes"],web:web)
+        try await action(["op":"native","action":"notesScope","value":"all"],web:web)
         try await action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:web)
-        guard model.session.selectedTabID==originalID,model.activeWebTab===page,
+        guard model.session.spaceID==researchSpace,model.session.selectedTabID==originalID,model.activeWebTab===page,
+              model.session.split?.contains(originalID)==true,
               try await evaluatePage(page,"window.neutrinoResearchDraft")=="retained" else {throw ValidationError("Opening the source after a Space round-trip did not recover the retained page.")}
         guard await app.flush() else {throw ValidationError("The complete research workspace could not be saved.")}
         let complete = try await database.load()
+        guard complete.preferences.savedConfigurations.contains(where:{$0.id==setup.id && $0.configuration==setup.configuration}),
+              complete.sessions.contains(where:{$0.id==model.session.id && $0.spaceID==researchSpace && $0.split==model.session.split}) else {throw ValidationError("The named layout and split did not survive a database reload.")}
         guard complete.notes.contains(where:{$0.spaceID==researchSpace && $0.sourceURL==source && $0.id==note.id}),
               complete.notes.contains(where:{$0.id==other.id && $0.sourceURL==comparisonURL && $0.quotedText==other.quotedText}) else {throw ValidationError("The two-source workspace did not survive a storage reload.")}
+        try await action(["op":"native","action":"notesScope","value":"space"],web:web)
         try await action(["op":"section","value":"notes"], web: web)
         try await Task.sleep(for: .milliseconds(200))
         await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-research-\(page.engineID.rawValue).png"))
         let receipt = output.deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
         var evidence = (try? JSONSerialization.jsonObject(with: Data(contentsOf: receipt))) as? [String: Any] ?? [:]
-        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true]
+        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true]
         try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted,.sortedKeys]).write(to: receipt, options: .atomic)
         print("Neutrino research acceptance: \(page.engineID.rawValue) quote, source, durable note, retained split, and saved preset passed")
+    }
+    private static func unwrapSplit(_ model:BrowserModel) throws -> TabSplit {
+        guard let pair=model.session.split else {throw ValidationError("The research split is missing.")};return pair
     }
     static func verifyPageGeometry(window:NSWindow, model:BrowserModel, output:URL) async throws {
         let web=try await waitForShell(in:window)
@@ -244,6 +276,7 @@ import NeutrinoCore
         if let chrome=page as? ChromiumTab {
             let data=try await chrome.request("Runtime.evaluate",parameters:["expression":expression,"returnByValue":true])
             let object=try JSONSerialization.jsonObject(with:data) as? [String:Any]
+            guard object?["exceptionDetails"]==nil else {throw ValidationError("The fixture JavaScript failed: " + String(describing:object?["exceptionDetails"]))}
             return (object?["result"] as? [String:Any])?["value"] as? String ?? ""
         }
         throw ValidationError("The editor input test requires a website engine.")

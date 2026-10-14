@@ -597,7 +597,7 @@ fn catalogs(root: &Path) -> Result<Vec<(PathBuf, Value)>> {
         })
         .collect()
 }
-fn validate_catalog(c: &Value) -> Result<()> {
+pub(crate) fn validate_catalog(c: &Value) -> Result<()> {
     let p = array(&c["packages"]);
     if c["formatVersion"] != 1
         || text(c, "name").is_empty()
@@ -622,17 +622,32 @@ fn validate_catalog(c: &Value) -> Result<()> {
         }
     }
     for p in p {
-        let m = &p["manifest"];
-        modules::manifest(m)?;
-        let value = match text(m, "runtime") {
-            "declarative" if p["program"].is_null() => &p["definition"],
-            "behaviorProgram" if p["definition"].is_null() => &p["program"],
-            _ => return fail("Community packages cannot contain native code or descriptors."),
-        };
-        let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
-        validate_payload(m, Some(&bytes))?;
+        community_payload(p)?;
     }
+
     Ok(())
+}
+pub(crate) fn community_payload(p: &Value) -> Result<Value> {
+    let m = &p["manifest"];
+    modules::manifest(m)?;
+    let value = match text(m, "runtime") {
+        "declarative" if p["program"].is_null() => &p["definition"],
+        "behaviorProgram" if p["definition"].is_null() => &p["program"],
+        _ => return fail("Community packages cannot contain native code or descriptors."),
+    };
+    let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    validate_payload(m, Some(&bytes))?;
+    Ok(value.clone())
+}
+pub(crate) fn community_request(r: &Value) -> Value {
+    match if text(r, "op") == "communityPayload" {
+        community_payload(&r["package"])
+    } else {
+        validate_catalog(&r["catalog"]).map(|_| json!(true))
+    } {
+        Ok(v) => json!({"result":v}),
+        Err(e) => json!({"error":e}),
+    }
 }
 pub fn request(r: &Value) -> Value {
     match dispatch(r) {
@@ -652,10 +667,11 @@ fn dispatch(r: &Value) -> Result<Value> {
             recover_install(root)?;
             recover_batch(root)?;
             for p in entries(root)? {
-                if token(
-                    &p.file_name().unwrap_or_default().to_string_lossy(),
-                    ".batch-",
-                ) {
+                let name = p.file_name().unwrap_or_default().to_string_lossy();
+                if [".batch-", ".stage-", ".backup-", ".restore-"]
+                    .iter()
+                    .any(|prefix| token(&name, prefix))
+                {
                     remove(&p)?;
                 }
             }
@@ -718,21 +734,28 @@ fn dispatch(r: &Value) -> Result<Value> {
             let backup = root.join(&backup_name);
             let destination = root.join(id);
             mkdir(&stage)?;
-            write_json(&stage.join("manifest.json"), m)?;
-            write_json(
-                &stage.join("receipt.json"),
-                &json!({"enabled":active,"payloadSHA256":bytes.as_ref().map(|b|format!("{:x}",Sha256::digest(b)))}),
-            )?;
-            if let Some(b) = bytes {
-                write(
-                    &stage.join(payload_name(m)),
-                    &b,
-                    if payload_name(m) == "worker" {
-                        0o700
-                    } else {
-                        0o600
-                    },
+            let staged = (|| -> Result<()> {
+                write_json(&stage.join("manifest.json"), m)?;
+                write_json(
+                    &stage.join("receipt.json"),
+                    &json!({"enabled":active,"payloadSHA256":bytes.as_ref().map(|b|format!("{:x}",Sha256::digest(b)))}),
                 )?;
+                if let Some(b) = bytes {
+                    write(
+                        &stage.join(payload_name(m)),
+                        &b,
+                        if payload_name(m) == "worker" {
+                            0o700
+                        } else {
+                            0o600
+                        },
+                    )?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = staged {
+                let _ = remove(&stage);
+                return Err(error);
             }
             write_json(
                 &root.join(".transaction.json"),

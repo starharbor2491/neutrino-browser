@@ -49,6 +49,7 @@ final class DistributionManager: ObservableObject {
             if !automaticUpdates && automaticDownload { operation?.cancel() }
         }
     }
+    private var initialization: Task<Void, Never>?
     private var automaticCheck: Task<Void, Never>?
     private var automaticDownload = false
     private var pendingCodeHash: String?
@@ -65,6 +66,9 @@ final class DistributionManager: ObservableObject {
     func cancel() { operation?.cancel() }
     func cancelAndWaitForOperation() async {
         terminationPending = true
+        initialization?.cancel()
+        await initialization?.value
+        initialization = nil
         automaticCheck?.cancel()
         await automaticCheck?.value
         automaticCheck = nil
@@ -89,9 +93,11 @@ final class DistributionManager: ObservableObject {
             }
         } catch { message = error.localizedDescription; directory = nil; return }
         let installed = Bundle.main.bundleURL
-        Task {
+        initialization = Task {
+            defer { self.initialization = nil }
             do {
                 let authority = try await Self.background { try ReleaseTrust.updateAuthority(of: installed) }
+                guard !Task.isCancelled, !self.terminationPending else { return }
                 self.authority = authority
                 if let updater = SparkleUpdates.make(automatic: self.automaticUpdates) {
                     self.sparkle = updater; self.publisherAvailable = true
@@ -100,6 +106,7 @@ final class DistributionManager: ObservableObject {
                 }
                 do { try await self.restorePending(authority: authority) }
                 catch { self.message = error.localizedDescription; self.pendingRecordInvalid = true }
+                guard !Task.isCancelled, !self.terminationPending else { return }
                 self.publisherAvailable = true
                 self.scheduleAutomaticChecks()
             } catch { if self.message == nil { self.message = error.localizedDescription } }
@@ -428,6 +435,7 @@ final class DistributionManager: ObservableObject {
             try Self.verify(saved.candidate, authority: authority, codeHash: saved.codeDirectoryHash, current: current, floor: floor)
             guard try ReleaseTrust.metadata(of: saved.candidate) == saved.release else { throw ValidationError("The staged installer version changed.") }
         }
+        guard !Task.isCancelled, !terminationPending else { return }
         candidate = saved.candidate; destination = saved.destination; pending = saved.release
         pendingCodeHash = saved.codeDirectoryHash; installOnQuit = automaticUpdates && saved.release.chromium == current.chromium
         rejectedStage = nil

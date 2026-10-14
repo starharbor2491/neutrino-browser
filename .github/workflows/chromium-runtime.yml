@@ -129,6 +129,7 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
+            dist/research-acceptance.json
             dist/Chromium-*.neutrinoengine.zip
             dist/Neutrino-Chromium-*.zip
           if-no-files-found: error
@@ -147,5 +148,6 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
+            dist/research-acceptance.json
             ${{ runner.temp }}/neutrino-cef-runtime/neutrino-adapter-*.json
           if-no-files-found: warn

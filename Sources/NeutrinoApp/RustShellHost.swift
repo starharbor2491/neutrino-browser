@@ -224,8 +224,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }.store(in: &subscriptions)
         }
         model?.shellAction = { [weak self] request in self?.sendAction(request) }
-        model?.stopInterface = { [weak self] in self?.stop() }
+        model?.stopInterface = { [weak self] in await self?.stopAndWait() }
         chrome.load(URLRequest(url: URL(string: "neutrino-ui://shell/index.html")!))
+    }
+    private func stopAndWait() async {
+        let assistant=assistantTask, backdrop=backdropTask
+        stop()
+        await assistant?.value
+        await backdrop?.value
     }
     func stop() {
         guard !stopped else { return }; stopped = true
@@ -281,6 +287,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         libraryPage = min(libraryPage, max(0, (count - 1) / 40))
         let offset = libraryPage * 40
         let selectedNote = notes.first { $0.id == selectedNoteID } ?? notes.first
+        func noteContext(_ note:Note) -> [String:Any] {
+            ["id":note.id.uuidString,"title":String(note.title.prefix(100)),"sourceURL":note.sourceURL?.absoluteString ?? "",
+             "sourceTitle":note.sourceTitle ?? "","spaceName":app.library.spaces?.first(where:{$0.id==note.spaceID})?.name ?? "",
+             "text":String(note.text.prefix(200_000)),"quotedText":note.quotedText ?? ""]
+        }
         var snapshot: [String: Any] = [
             "completedOnboarding": !isPreview && app.library.preferences.completedOnboarding,
             "smoke": model != nil && CommandLine.arguments.contains("--smoke-test"),
@@ -295,9 +306,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "folders": encoded(space?.folders ?? []), "archived": (space?.archivedTabs ?? []).prefix(200).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String(($0.url?.absoluteString ?? "").prefix(8192))] },
             "bookmarks": bookmarks.dropFirst(librarySection == "bookmarks" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
             "history": history.dropFirst(librarySection == "history" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
-            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100)),"sourceURL": $0.sourceURL?.absoluteString ?? ""] },
+            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map(noteContext),
             "notesScope": allNotes ? "all" : "space",
-            "selectedNote": selectedNote.map { ["id": $0.id.uuidString, "title": String($0.title.prefix(100)), "text": String($0.text.prefix(200_000)),"sourceURL":$0.sourceURL?.absoluteString ?? "","sourceTitle":$0.sourceTitle ?? "","quotedText":$0.quotedText ?? ""] } as Any? ?? NSNull(),
+            "selectedNote": selectedNote.map(noteContext) as Any? ?? NSNull(),
             "libraryPage": libraryPage, "libraryCount": count,
             "account": ["connected": ChatGPTAccount.shared.connected, "busy": ChatGPTAccount.shared.busy, "status": ChatGPTAccount.shared.status ?? "", "models": ChatGPTAccount.shared.models],
             "notice": app.notice ?? "", "defaultStatus": defaultStatus, "imported": imported,
@@ -631,15 +642,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             let ids = raw.compactMap(UUID.init(uuidString:))
             guard ids.count == raw.count, Set(ids).count == ids.count, Set(ids) == Set(folders.map(\.id)) else { return }
             app.library.spaces?[index].folders = ids.compactMap { id in folders.first { $0.id == id } }
-        case "saveNamedSetup":
-            guard app.library.preferences.savedConfigurations.count<50,
-                  let name=command["name"] as? String, !name.isEmpty,
-                  let object=command["configuration"],let data=try? JSONSerialization.data(withJSONObject:object),
-                  var c=try? JSONDecoder().decode(Configuration.self,from:data) else {app.notice="Save up to 50 named setups.";return}
-            c.normalize()
-            var setup=NamedConfiguration(name:String(name.prefix(80)),configuration:c)
-            setup.requiredModuleIDs=command["requirements"] as? [String] ?? app.configurationModuleRequirements
-            app.library.preferences.savedConfigurations.append(setup)
+        case "saveNamedSetup", "replaceNamedSetup", "renameNamedSetup", "deleteNamedSetup":
+            app.perform {
+                let action=operation=="saveNamedSetup" ? "save" : operation=="replaceNamedSetup" ? "replace" : operation=="renameNamedSetup" ? "rename" : "delete"
+                app.library=try RustCore.decode(LibraryState.self,from:RustCore.request(["op":"manageNamedSetup","action":action,"value":RustCore.encoded(app.library),
+                    "id":command["id"] ?? NSNull(),"name":command["name"] ?? "","configuration":command["configuration"] ?? NSNull(),
+                    "requirements":command["requirements"] as? [String] ?? app.configurationModuleRequirements]))
+                if action=="replace" || action=="delete" {app.windows.values.compactMap(\.model).forEach{$0.synchronizeSplit(force:true)}}
+            }
         case "applyConfiguration":
             guard let object = command["configuration"], let data = try? JSONSerialization.data(withJSONObject: object),
                   var configuration = try? JSONDecoder().decode(Configuration.self, from: data) else { app.notice = "That appearance could not be saved."; return }
@@ -737,6 +747,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                         try app.updateModuleNote(id:noteID,profileID:profile,field:"text",value:prepared["text"] ?? "")
                         if let index = app.library.notes.firstIndex(where:{$0.id==noteID}) {
                             app.library.notes[index].spaceID = model.session.spaceID
+                            app.library.notes[index].sourceTabID = model.session.selectedTabID
                             app.library.notes[index].sourceURL = URL(string: prepared["sourceURL"] ?? "")
                             app.library.notes[index].sourceTitle = prepared["sourceTitle"]
                             app.library.notes[index].quotedText = prepared["quote"]
@@ -757,7 +768,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard model?.isPrivate != true, let model, let id,
                   let note=app.library.notes.first(where:{$0.id==id && $0.profileID==profileID}),
                   let url=note.sourceURL, AddressResolver.isWebURL(url) else{return}
-            if let existing=model.session.tabs.first(where:{$0.url==url}) { model.selectTab(existing.id) }
+            if let spaceID=note.spaceID, app.library.spaces?.contains(where:{$0.id==spaceID && $0.profileID==profileID}) == true,
+               model.session.spaceID != spaceID { model.switchSpace(spaceID) }
+            if let original=note.sourceTabID, model.session.tabs.contains(where:{$0.id==original && $0.url==url}) {model.selectTab(original)}
+            else if let existing=model.session.tabs.first(where:{$0.url==url}) { model.selectTab(existing.id) }
             else { model.newTab(url:url) }
         case "saveNote":
             guard model?.isPrivate != true, let id,

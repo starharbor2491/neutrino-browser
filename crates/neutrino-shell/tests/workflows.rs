@@ -578,3 +578,66 @@ fn full_uninstall_scope_excludes_other_apps_downloads_and_publisher_keys() {
         );
     }
 }
+
+#[test]
+fn named_setups_have_a_complete_lifecycle_and_space_recovery() {
+    use neutrino_shell::core_request;
+    let config = neutrino_shell::core_request(json!({"op":"appearancePreset","id":"arc"})).unwrap();
+    let mut library = json!({"preferences":{"savedConfigurations":[]},"spaces":[]});
+    library=core_request(json!({"op":"manageNamedSetup","action":"save","name":"Research","configuration":config,"requirements":["org.neutrino.notes"],"value":library})).unwrap();
+    let id = library["preferences"]["savedConfigurations"][0]["id"].clone();
+    library["spaces"] = json!([{"setupID":id}]);
+    library = core_request(
+        json!({"op":"manageNamedSetup","action":"rename","id":id,"name":"Reading","value":library}),
+    )
+    .unwrap();
+    assert_eq!(
+        library["preferences"]["savedConfigurations"][0]["name"],
+        "Reading"
+    );
+    let chrome = core_request(json!({"op":"appearancePreset","id":"chrome"})).unwrap();
+    library=core_request(json!({"op":"manageNamedSetup","action":"replace","id":id,"configuration":chrome,"requirements":[],"value":library})).unwrap();
+    assert_eq!(library["preferences"]["savedConfigurations"][0]["id"], id);
+    assert_eq!(
+        library["preferences"]["savedConfigurations"][0]["configuration"]["layout"]["tabs"],
+        "top"
+    );
+    let mut full = library.clone();
+    full["preferences"]["savedConfigurations"] =
+        json!(vec![
+            full["preferences"]["savedConfigurations"][0].clone();
+            50
+        ]);
+    assert!(core_request(json!({"op":"manageNamedSetup","action":"save","name":"Overflow","configuration":config,"value":full})).is_err());
+    library =
+        core_request(json!({"op":"manageNamedSetup","action":"delete","id":id,"value":library}))
+            .unwrap();
+    assert!(library["spaces"][0]["setupID"].is_null());
+    assert_eq!(library["preferences"]["savedConfigurations"], json!([]));
+    assert!(core_request(
+        json!({"op":"manageNamedSetup","action":"rename","id":id,"name":"Gone","value":library})
+    )
+    .is_err());
+}
+#[test]
+fn module_recovery_reclaims_only_recognized_orphan_transaction_directories() {
+    let root = std::env::temp_dir().join(format!("neutrino-orphan-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let mut orphans = vec![];
+    for prefix in [".stage-", ".backup-", ".restore-", ".batch-"] {
+        let p = root.join(format!("{prefix}{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&p).unwrap();
+        std::fs::write(p.join("payload"), "orphan").unwrap();
+        orphans.push(p);
+    }
+    let unrelated = root.join(".stage-user-export");
+    std::fs::create_dir(&unrelated).unwrap();
+    let result = neutrino_shell::core_request(
+        json!({"op":"moduleRepository","action":"initialize","root":root}),
+    )
+    .unwrap();
+    assert!(result["error"].is_null(), "{result}");
+    assert!(orphans.iter().all(|p| !p.exists()));
+    assert!(unrelated.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}

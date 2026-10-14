@@ -38,14 +38,7 @@ public struct ChromiumSessionPage: Codable, Equatable, Sendable {
     /// The selected page is first. Blank/internal pages retain their slot without
     /// persisting privileged URLs, cookies, forms or website execution state.
     public static func normalized(_ pages: [Self]) -> [Self] {
-        Array(pages.prefix(200)).map { page in
-            var value = page
-            if let url = value.url, !AddressResolver.isWebURL(url) || url.absoluteString.utf8.count > 8192 {
-                value.url = nil
-            }
-            value.title = value.url == nil ? "New tab" : boundedPageTitle(value.title)
-            return value
-        }
+        (try? RustCore.transform(pages, operation: "normalizeChromiumPages")) ?? []
     }
 }
 public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
@@ -83,83 +76,23 @@ public struct WindowSession: Identifiable, Codable, Equatable, Sendable {
         self.tabs = tabs.isEmpty ? [BrowserTab()] : tabs
         self.selectedTabID = self.tabs[0].id
     }
-    public mutating func normalize() {
-        var seen = Set<UUID>()
-        tabs = Array(tabs.filter { seen.insert($0.id).inserted }.prefix(200))
-        for i in tabs.indices {
-            if let url = tabs[i].url, !AddressResolver.isWebURL(url) { tabs[i].url = nil; tabs[i].title = "New tab" }
-            tabs[i].title = boundedPageTitle(tabs[i].title)
-            if tabs[i].engineID == .chromium, let pages = tabs[i].chromiumPages {
-                let saved = ChromiumSessionPage.normalized(pages)
-                tabs[i].chromiumPages = saved.isEmpty ? nil : saved
-                if let selected = saved.first { tabs[i].url = selected.url; tabs[i].title = selected.title }
-            } else { tabs[i].chromiumPages = nil }
-        }
-        if tabs.isEmpty { tabs = [BrowserTab()] }
-        tabs = tabs.filter(\.pinned) + tabs.filter { !$0.pinned }
-        if !tabs.contains(where: { $0.id == selectedTabID }) { selectedTabID = tabs[0].id }
-        let ids = Set(tabs.map(\.id))
-        for i in tabs.indices {
-            var visited: Set<UUID> = [tabs[i].id]
-            var parent = tabs[i].parentID
-            var depth = 0
-            while let id = parent {
-                depth += 1
-                guard ids.contains(id), visited.insert(id).inserted, depth <= 8, !tabs[i].pinned else {
-                    tabs[i].parentID = nil; break
-                }
-                parent = tabs.first(where: { $0.id == id })?.parentID
-            }
-        }
-        if let pair = split, pair.first == pair.second || !ids.contains(pair.first) || !ids.contains(pair.second) { split = nil }
-        if let pair = split, !pair.contains(selectedTabID) { split?.first = selectedTabID }
-        if split != nil { splitSuppressed = nil }
-        selectTab(selectedTabID)
-    }
+    public mutating func normalize() { if let value = try? RustCore.transform(self, operation: "normalizeSession") { self = value } }
     public func ancestors(of id: UUID) -> [UUID] {
-        var result: [UUID] = [], seen: Set<UUID> = [id]
-        var parent = tabs.first(where: { $0.id == id })?.parentID
-        while let current = parent, seen.insert(current).inserted, result.count < 8 {
-            result.append(current); parent = tabs.first(where: { $0.id == current })?.parentID
-        }
-        return result
+        (try? RustCore.decode([UUID].self, from: RustCore.request(["op":"sessionAncestors","value":RustCore.encoded(self),"id":id.uuidString]))) ?? []
     }
     public var visibleTreeTabs: [BrowserTab] {
-        var result: [BrowserTab] = []
-        func appendChildren(of parent: UUID?) {
-            for tab in tabs where tab.parentID == parent {
-                result.append(tab)
-                if tab.collapsed != true { appendChildren(of: tab.id) }
-            }
-        }
-        appendChildren(of: nil)
-        return result
+        (try? RustCore.decode([BrowserTab].self, from: RustCore.request(["op":"visibleTreeTabs","value":RustCore.encoded(self)]))) ?? []
     }
     @discardableResult public mutating func setParent(_ id: UUID, to parent: UUID?) -> Bool {
-        guard let index = tabs.firstIndex(where: { $0.id == id }), !tabs[index].pinned,
-              parent == nil || (parent != id && tabs.contains(where: { $0.id == parent }) && !ancestors(of: parent!).contains(id)) else { return false }
-        let descendants = tabs.filter { ancestors(of: $0.id).contains(id) }
-        let depth = parent.map { ancestors(of: $0).count + 1 } ?? 0
-        guard descendants.allSatisfy({ ancestors(of: $0.id).count - ancestors(of: id).count + depth <= 8 }), depth <= 8 else { return false }
-        tabs[index].parentID = parent
-        selectTab(selectedTabID)
-        return true
+        guard let result = try? RustCore.request(["op":"setTabParent","value":RustCore.encoded(self),"id":id.uuidString,"parentID":parent?.uuidString as Any? ?? NSNull()]) as? [String:Any],
+              let value = result["value"], let updated = try? RustCore.decode(Self.self, from:value) else { return false }
+        self = updated; return result["changed"] as? Bool ?? false
     }
     public mutating func selectTab(_ id: UUID) {
-        guard tabs.contains(where: { $0.id == id }) else { return }
-        if let pair = split, !pair.contains(id) {
-            if selectedTabID == pair.second { split?.second = id } else { split?.first = id }
-        }
-        selectedTabID = id
-        for ancestor in ancestors(of: id) {
-            if let index = tabs.firstIndex(where: { $0.id == ancestor }) { tabs[index].collapsed = false }
-        }
+        if let value = try? RustCore.decode(Self.self, from:RustCore.request(["op":"selectSessionTab","value":RustCore.encoded(self),"id":id.uuidString])) { self=value }
     }
     public mutating func enableSplit(defaultEngine: BrowserEngineID = .chromium) {
-        guard split == nil else { return }
-        let other = tabs.first(where: { $0.id != selectedTabID }) ?? BrowserTab(engineID: defaultEngine)
-        if !tabs.contains(where: { $0.id == other.id }) { tabs.append(other) }
-        split = TabSplit(first: selectedTabID, second: other.id)
+        if let value = try? RustCore.decode(Self.self, from:RustCore.request(["op":"enableSessionSplit","value":RustCore.encoded(self),"engine":defaultEngine.rawValue])) {self=value}
     }
 }
 public struct Profile: Identifiable, Codable, Equatable, Sendable {
@@ -197,6 +130,7 @@ public struct Note: Identifiable, Codable, Equatable, Sendable {
     public var spaceID: UUID?
     public var sourceURL: URL?
     public var sourceTitle: String?
+    public var sourceTabID: UUID?
     public var quotedText: String?
     public init(id: UUID = UUID(), profileID: UUID, title: String = "Untitled note", text: String = "") {
         self.id = id; self.profileID = profileID; self.title = title; self.text = text; self.modifiedAt = Date()
@@ -331,26 +265,7 @@ public struct LibraryState: Codable, Equatable, Sendable {
     public var preferences = Preferences()
     public init() { spaces = [BrowserSpace(name: "Personal", profileID: profiles[0].id)] }
     public mutating func normalize() {
-        var profilesSeen = Set<UUID>()
-        profiles = Array(profiles.filter { profilesSeen.insert($0.id).inserted }.prefix(20))
-        if profiles.isEmpty { profiles = [Profile(name: "Personal")] }
-        let profileIDs = Set(profiles.map(\.id))
-        if let pendingWebsiteDataClears { self.pendingWebsiteDataClears = Array(Set(pendingWebsiteDataClears).intersection(profileIDs)).sorted { $0.uuidString < $1.uuidString } }
-        if let pendingProfileDeletions {
-            var seen = Set<UUID>()
-            self.pendingProfileDeletions = Array(pendingProfileDeletions.filter { !profileIDs.contains($0) && seen.insert($0).inserted }.prefix(100))
-        }
-        bookmarks = bookmarks.filter { profileIDs.contains($0.profileID) && AddressResolver.isWebURL($0.url) }
-        history = Array(history.filter { profileIDs.contains($0.profileID) && AddressResolver.isWebURL($0.url) }.suffix(10_000))
-        for i in bookmarks.indices { bookmarks[i].title = boundedPageTitle(bookmarks[i].title) }
-        for i in history.indices { history[i].title = boundedPageTitle(history[i].title) }
-        notes = notes.filter { profileIDs.contains($0.profileID) }
-        var sessionsSeen = Set<UUID>()
-        sessions = sessions.filter { profileIDs.contains($0.profileID) && sessionsSeen.insert($0.id).inserted }
-        for i in sessions.indices { sessions[i].normalize() }
-        normalizeSpaces()
-        preferences.configuration.normalize()
-        for i in preferences.savedConfigurations.indices { preferences.savedConfigurations[i].configuration.normalize() }
+        if let value = try? RustCore.transform(self, operation: "normalizeLibrary") { self = value }
     }
 }
 
@@ -366,13 +281,7 @@ public struct SetupPack: Codable, Equatable, Sendable {
     public static func decode(_ data: Data) throws -> SetupPack {
         guard data.count <= 64 * 1024 else { throw ValidationError("Setup pack is too large.") }
         var pack = try JSONDecoder().decode(SetupPack.self, from: data)
-        guard pack.formatVersion == 1 else { throw ValidationError("This setup pack needs a newer Neutrino version.") }
-        guard !pack.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              pack.name.count <= 100 else { throw ValidationError("Use a setup name of 1–100 characters.") }
-        if let requirements = pack.requiredModuleIDs {
-            guard requirements.count <= 32, Set(requirements).count == requirements.count, requirements.allSatisfy(ModuleManifest.validID) else { throw ValidationError("Setup module requirements are invalid.") }
-        }
-        pack.configuration.normalize()
+        pack=try RustCore.decode(Self.self,from:RustCore.policy(["op":"normalizeSetupPack","value":RustCore.encoded(pack)]))
         return pack
     }
 }

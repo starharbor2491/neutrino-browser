@@ -604,6 +604,21 @@ impl Shell {
                         }
                     }
                 }
+                "editor-replace-named" => {
+                    if let Some(config) = &self.draft {
+                        commands.push(json!({"op":"replaceNamedSetup","id":request["id"],"configuration":config,"requirements":config["requiredModuleIDs"]}));
+                    }
+                }
+                "editor-rename-named" => {
+                    commands.push(json!({"op":"renameNamedSetup","id":request["id"],"name":text(&request,"value")}));
+                }
+                "editor-delete-named" => {
+                    self.menu = format!("delete-setup:{}", text(&request, "id"));
+                }
+                "editor-remove-named" => {
+                    commands.push(json!({"op":"deleteNamedSetup","id":request["id"]}));
+                    self.menu.clear();
+                }
                 "editor-load-named" => {
                     if let Some(c) = array(&self.snapshot["savedConfigurations"])
                         .iter()

@@ -40,7 +40,7 @@
   function selector(el) {
     if (!el) return null;
     if (el.id) return "#" + CSS.escape(el.id);
-    for (const key of ["data-setup", "data-name", "data-note", "data-editor"])
+    for (const key of ["data-setup", "data-setup-name", "data-name", "data-note", "data-editor"])
       if (el.hasAttribute(key))
         return (
           el.tagName.toLowerCase() +
@@ -624,7 +624,8 @@
   });
   document.addEventListener("change", (e) => {
     const el = e.target;
-    if (el.dataset.moduleSetting) {
+    if (el.dataset.setupName) {send({op:"editor-rename-named",id:el.dataset.setupName,value:el.value});}
+    else if (el.dataset.moduleSetting) {
       const value = el.type === "number" ? Number(el.value) : el.value;
       if (
         el.type !== "number" ||
