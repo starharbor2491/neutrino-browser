@@ -147,7 +147,7 @@ final class AppState: ObservableObject {
                     guard size.isSymbolicLink != true, (size.fileSize ?? 0) > 0, (size.fileSize ?? 0) <= 128 * 1024 else { throw ValidationError("Invalid bundled module payload.") }
                     let bytes = try Data(contentsOf: url)
                     if manifest.runtime == .behaviorProgram { try ModuleProgram.decode(bytes).validate(capability: manifest.capability) }
-                    else { try validateDefinitionForPlatform(ModuleDefinition.decode(bytes, capability: manifest.capability)) }
+                    else { _ = try ModuleDefinition.decode(bytes, capability: manifest.capability) }
                     modulePayloads[manifest.id] = bytes
                     continue
                 }

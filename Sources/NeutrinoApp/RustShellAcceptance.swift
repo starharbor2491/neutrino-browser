@@ -96,6 +96,7 @@ import NeutrinoCore
     static func verifyResearchWorkspace(window: NSWindow, app: AppState, model: BrowserModel, output: URL) async throws {
         let web = try await waitForShell(in: window)
         let page = model.activeWebTab, originalID = model.session.selectedTabID
+        guard let researchSpace=model.session.spaceID else {throw ValidationError("The research check requires a Space.")}
         let originalConfiguration = model.configuration
         guard let source = page.url else { throw ValidationError("The research check needs a loaded website.") }
         let count = app.library.notes.count
@@ -148,7 +149,6 @@ import NeutrinoCore
         }
         app.applyConfiguration(originalConfiguration, to: model.session.spaceID)
         model.endSplit()
-        let researchSpace = model.session.spaceID
         guard let away = app.createSpace(name:"Acceptance scratch " + page.engineID.rawValue,profileID:model.session.profileID) else { throw ValidationError("The research Space round-trip could not start.") }
         model.switchSpace(away)
         try await Task.sleep(for:.milliseconds(160))
