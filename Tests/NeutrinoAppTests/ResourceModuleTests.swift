@@ -15,8 +15,8 @@ struct ResourceModuleTests {
     @Test func realWorkerReapingRejectsNestedApprovedUpdatesAndPreservesUnrelatedLayoutEdits() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("neutrino-worker-reentry-" + UUID().uuidString)
         let previous = AppDelegate.state
-        let app = AppState(directory: directory), worker = ResourceWorker()
-        defer { worker.stop(); app.ready = false; AppDelegate.state = previous; try? FileManager.default.removeItem(at: directory) }
+        let app = AppState(directory: directory)
+        defer { app.ready = false; AppDelegate.state = previous; try? FileManager.default.removeItem(at: directory) }
         await app.load()
         try #require(app.ready, Comment(rawValue: app.startupError ?? "Native worker fixture did not load"))
         let repository = try #require(app.repository)
@@ -30,6 +30,8 @@ struct ResourceModuleTests {
         let trustedBytes = try Data(contentsOf: package.url)
 
         for rollback in [false, true] {
+            let worker=ResourceWorker()
+            defer {worker.stop()}
             let requirements = try app.validateModuleRequirements(for: [widget.id])
             let approval = try app.captureModuleApproval(requirements, rootIDs: [widget.id])
             let inventory = try repository.installed()
@@ -46,7 +48,7 @@ struct ResourceModuleTests {
             // A preflight can service the run loop before worker reaping starts.
             // Keep a real source pending until the guarded critical section, then
             // invalidate it before the probe itself can reenter the run loop.
-            let runLoop = CFRunLoopGetMain()
+            let runLoop = CFRunLoopGetCurrent()
             let timer = try #require(CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent(), 0.001, 0, 0) { timer in
                 MainActor.assumeIsolated {
                     guard probe.app.stoppingModuleWorkers, !probe.fired else { return }

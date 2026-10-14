@@ -3143,3 +3143,11 @@ svg {
 .saved-setup-row input {width:100%;font-size:12px;min-height:36px;background:transparent;padding:6px;border:1px solid transparent;border-radius:4px}
 .saved-setup-row input:hover,.saved-setup-row input:focus {border-color:var(--line)}
 .saved-setup-row .saved-setup {grid-column:1/-1}
+
+.notes-search {width:100%;min-height:36px;padding:8px 10px;margin:4px 0 8px;background:var(--surface);border:1px solid var(--line);border-radius:4px;font-size:12px}
+@media(max-width:920px){
+.browser-shell.with-panel:not(.editing-preview):is(.placement-leading,.placement-trailing) {grid-template-columns:0 minmax(0,1fr)}
+.browser-shell.with-panel:not(.editing-preview):is(.placement-leading,.placement-trailing)>.workspace-rail {visibility:hidden;grid-column:1;grid-row:1}
+.browser-shell.with-panel:not(.editing-preview):is(.placement-leading,.placement-trailing)>.browser-main {grid-column:2}
+.browser-shell.with-panel:not(.editing-preview)>.rail-resizer {display:none}
+}

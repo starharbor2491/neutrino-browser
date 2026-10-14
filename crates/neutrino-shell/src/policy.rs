@@ -91,6 +91,48 @@ fn asset(v: &Value) -> Result<(), String> {
 fn dispatch(r: &Value) -> Result<Value, String> {
     let v = &r["value"];
     match text(r, "op") {
+        "githubCatalogURL" => {
+            if array(v).len() > 100 {
+                return Err("The GitHub release list is too large.".into());
+            }
+            let mut releases: Vec<_> = array(v)
+                .iter()
+                .filter(|v| {
+                    v["draft"] == false
+                        && finite(&v["published_at"]).is_some()
+                        && (r["previews"] == true || v["prerelease"] == false)
+                })
+                .collect();
+            releases.sort_by(|a, b| {
+                b["published_at"]
+                    .as_f64()
+                    .unwrap_or(0.)
+                    .total_cmp(&a["published_at"].as_f64().unwrap_or(0.))
+            });
+            for release in releases {
+                if let Some(asset) = array(&release["assets"])
+                    .iter()
+                    .find(|v| v["name"] == "catalog.json")
+                {
+                    let value = text(asset, "browser_download_url");
+                    if !Url::parse(value).is_ok_and(|u| {
+                        u.scheme() == "https"
+                            && u.host_str() == Some("github.com")
+                            && u.username().is_empty()
+                            && u.password().is_none()
+                            && u.query().is_none()
+                            && u.fragment().is_none()
+                            && u.path()
+                                .starts_with("/starharbor2491/neutrino-browser/releases/download/")
+                            && u.path().ends_with("/catalog.json")
+                    }) {
+                        return Err("GitHub returned an unexpected update catalog location.".into());
+                    }
+                    return Ok(json!(value));
+                }
+            }
+            return Ok(Value::Null);
+        }
         "validateMinimumMacOS" => macos(text(r, "minimum"), &r["system"])?,
         "validateRelease" => release(v, r)?,
         "validateDistributionAsset" => asset(v)?,

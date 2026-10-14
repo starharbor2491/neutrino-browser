@@ -77,8 +77,8 @@ public struct DistributionCatalog: Codable, Sendable {
 
 /// GitHub's `latest` endpoint excludes previews. Select the newest published
 /// release in the installed channel that actually carries our update catalog.
-public struct GitHubBrowserRelease: Decodable, Sendable {
-    public struct Asset: Decodable, Sendable { public let name: String; public let browser_download_url: URL }
+public struct GitHubBrowserRelease: Codable, Sendable {
+    public struct Asset: Codable, Sendable { public let name: String; public let browser_download_url: URL }
     public let draft: Bool
     public let prerelease: Bool
     public let published_at: Date?
@@ -86,21 +86,8 @@ public struct GitHubBrowserRelease: Decodable, Sendable {
     public static func catalogURL(in data: Data, previews: Bool) throws -> URL? {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         let releases = try decoder.decode([Self].self, from: data)
-        guard releases.count <= 100 else { throw ValidationError("The GitHub release list is too large.") }
-        for release in releases.filter({ !$0.draft && $0.published_at != nil && (previews || !$0.prerelease) })
-            .sorted(by: { $0.published_at! > $1.published_at! }) {
-            if let asset = release.assets.first(where: { $0.name == "catalog.json" }) {
-                let url = asset.browser_download_url
-                guard url.scheme == "https", url.host == "github.com", url.user == nil, url.password == nil,
-                      url.query == nil, url.fragment == nil,
-                      url.path.hasPrefix("/starharbor2491/neutrino-browser/releases/download/"),
-                      url.lastPathComponent == "catalog.json" else {
-                    throw ValidationError("GitHub returned an unexpected update catalog location.")
-                }
-                return url
-            }
-        }
-        return nil
+        let result=try RustCore.policy(["op":"githubCatalogURL","value":RustCore.encoded(releases),"previews":previews])
+        return (result as? String).flatMap(URL.init(string:))
     }
 }
 

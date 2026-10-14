@@ -189,13 +189,19 @@ import NeutrinoCore
               complete.sessions.contains(where:{$0.id==model.session.id && $0.spaceID==researchSpace && $0.split==model.session.split}) else {throw ValidationError("The named layout and split did not survive a database reload.")}
         guard complete.notes.contains(where:{$0.spaceID==researchSpace && $0.sourceURL==source && $0.id==note.id}),
               complete.notes.contains(where:{$0.id==other.id && $0.sourceURL==comparisonURL && $0.quotedText==other.quotedText}) else {throw ValidationError("The two-source workspace did not survive a storage reload.")}
+        model.moveTab(originalID,toSpace:away)
+        try await action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:web)
+        guard model.session.spaceID==away,model.session.selectedTabID==originalID,model.activeWebTab===page,
+              try await evaluatePage(page,"window.neutrinoResearchDraft")=="retained" else {throw ValidationError("Source recovery did not follow the original live tab after it moved to another Space.")}
+        model.moveTab(originalID,toSpace:researchSpace)
+        model.switchSpace(researchSpace);model.selectTab(originalID)
         try await action(["op":"native","action":"notesScope","value":"space"],web:web)
         try await action(["op":"section","value":"notes"], web: web)
         try await Task.sleep(for: .milliseconds(200))
         await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-research-\(page.engineID.rawValue).png"))
         let receipt = output.deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
         var evidence = (try? JSONSerialization.jsonObject(with: Data(contentsOf: receipt))) as? [String: Any] ?? [:]
-        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true]
+        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true,"movedSourceRecovery":true]
         try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted,.sortedKeys]).write(to: receipt, options: .atomic)
         print("Neutrino research acceptance: \(page.engineID.rawValue) quote, source, durable note, retained split, and saved preset passed")
     }

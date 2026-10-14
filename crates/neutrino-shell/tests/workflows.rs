@@ -126,6 +126,11 @@ fn editor_draft_is_isolated_recoverable_and_scoped() {
         commands(&result)[0]["configuration"]["theme"]["accent"],
         "teal"
     );
+    assert!(s.draft.is_some());
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":false,"message":"Approval was cancelled."}));
+    assert!(s.draft.is_some());
+    assert_eq!(s.screen, "editor");
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":true}));
     assert!(s.draft.is_none());
 }
 #[test]
@@ -315,7 +320,8 @@ fn undo_feedback_is_attached_only_to_the_tab_move() {
     let mut s = shell();
     s.dispatch(json!({"op":"move-tab","id":"a","group":"pinned"}));
     s.dispatch(json!({"op":"screen","value":"editor"}));
-    let r = s.dispatch(json!({"op":"editor-save"}));
+    s.dispatch(json!({"op":"editor-save"}));
+    let r = s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":true}));
     assert!(r["html"].as_str().unwrap().contains("Appearance saved."));
     assert!(!r["html"]
         .as_str()
@@ -369,6 +375,8 @@ fn keep_editing_forgets_the_cancelled_exit_and_save_completes_the_new_one() {
     s.dispatch(json!({"op":"screen","value":"settings"}));
     let r = s.dispatch(json!({"op":"editor-save"}));
     assert_eq!(commands(&r)[0]["op"], "applyConfiguration");
+    assert_eq!(s.screen, "editor");
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":true}));
     assert_eq!(s.screen, "settings");
     assert!(s.draft.is_none());
 }
@@ -624,7 +632,7 @@ fn module_recovery_reclaims_only_recognized_orphan_transaction_directories() {
     let root = std::env::temp_dir().join(format!("neutrino-orphan-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();
     let mut orphans = vec![];
-    for prefix in [".stage-", ".backup-", ".restore-", ".batch-"] {
+    for prefix in [".stage-", ".backup-", ".restore-", ".batch-", ".write-"] {
         let p = root.join(format!("{prefix}{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&p).unwrap();
         std::fs::write(p.join("payload"), "orphan").unwrap();
@@ -640,4 +648,39 @@ fn module_recovery_reclaims_only_recognized_orphan_transaction_directories() {
     assert!(orphans.iter().all(|p| !p.exists()));
     assert!(unrelated.exists());
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rejected_editor_saves_keep_drafts_and_named_input_until_acknowledged() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-preset","value":"chrome"}));
+    let draft = s.draft.clone();
+    s.dispatch(json!({"op":"name","value":"Research"}));
+    let r = s.dispatch(json!({"op":"editor-save-named"}));
+    assert_eq!(commands(&r)[0]["op"], "saveNamedSetup");
+    assert!(!s.notice.contains("saved"));
+    s.dispatch(json!({"op":"editor-result","action":"saveNamedSetup","success":false,"message":"Use a name."}));
+    assert_eq!(s.name, "Research");
+    assert_eq!(s.draft, draft);
+    assert_eq!(s.notice, "Use a name.");
+    s.dispatch(json!({"op":"editor-save"}));
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":false,"message":"Approval cancelled."}));
+    assert_eq!(s.screen, "editor");
+    assert_eq!(s.draft, draft);
+}
+#[test]
+fn note_search_is_profile_and_space_scoped_with_newest_first() {
+    let notes = json!([
+        {"id":"old","profileID":"p1","spaceID":"s1","title":"Rust","modifiedAt":1},
+        {"id":"new","profileID":"p1","spaceID":"s1","title":"Arc","sourceURL":"https://docs.rs/a","modifiedAt":5},
+        {"id":"other","profileID":"p1","spaceID":"s2","title":"Rust","modifiedAt":7},
+        {"id":"secret","profileID":"p2","spaceID":"s1","title":"Rust","modifiedAt":9}
+    ]);
+    let project = |all, query| {
+        neutrino_shell::core_request(json!({"op":"projectNotes","value":notes,"profileID":"p1","spaceID":"s1","all":all,"query":query})).unwrap()
+    };
+    assert_eq!(project(false, ""), json!(["new", "old"]));
+    assert_eq!(project(true, "RUST"), json!(["other", "old"]));
+    assert_eq!(project(false, "docs.rs"), json!(["new"]));
 }

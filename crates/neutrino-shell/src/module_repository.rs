@@ -668,11 +668,26 @@ fn dispatch(r: &Value) -> Result<Value> {
             recover_batch(root)?;
             for p in entries(root)? {
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
-                if [".batch-", ".stage-", ".backup-", ".restore-"]
+                if [".batch-", ".stage-", ".backup-", ".restore-", ".write-"]
                     .iter()
                     .any(|prefix| token(&name, prefix))
                 {
                     remove(&p)?;
+                }
+            }
+            let data = root
+                .parent()
+                .ok_or("Invalid module storage.")?
+                .join("ModuleData");
+            check(&data)?;
+            if data.is_dir() {
+                for p in entries(&data)? {
+                    if token(
+                        &p.file_name().unwrap_or_default().to_string_lossy(),
+                        ".write-",
+                    ) {
+                        remove(&p)?;
+                    }
                 }
             }
         }

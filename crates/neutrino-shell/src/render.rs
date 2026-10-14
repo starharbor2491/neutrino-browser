@@ -340,10 +340,10 @@ pub fn render(s: &Shell) -> Markup {
     }}
 }
 fn feedback(s: &Shell) -> Markup {
-    let notice = if !s.notice.is_empty() {
-        s.notice.as_str()
-    } else {
+    let notice = if !text(&s.snapshot, "notice").is_empty() {
         text(&s.snapshot, "notice")
+    } else {
+        s.notice.as_str()
     };
     html! {@if !notice.is_empty(){div class="rail-feedback" role="status" data-transient=((notice.starts_with("Tab moved.") || notice.ends_with("order updated.")).to_string()){span{(notice)}@if notice.starts_with("Tab moved.") || notice.ends_with("order updated."){button data-op="undo-tabs"{"Undo"}}button class="icon-button" data-op="dismiss-notice" aria-label="Dismiss message"{(icon("close"))}}}}
 }
@@ -413,7 +413,7 @@ fn editor(s: &Shell) -> Markup {
         header class="editor-header"{div{h1{"Customize"}}div class="editor-actions"{label class="save-scope"{span{"Apply to"}select data-scope="true" aria-label="Where to apply appearance"{option value="true" selected[s.apply_space]{"This Space"}option value="false" selected[!s.apply_space]{"Browser default"}}}(action("Cancel","escape",false))(action("Save changes","editor-save",true))}}
         div class="editor-body"{section class="editor-stage" aria-label="Layout preview"{div class="preview-caption"{span{"Your browser · live layout"}button class="preview-size" data-op="editor-preview-size" aria-expanded=((!s.expanded_preview).to_string()) aria-controls="appearance-controls"{(icon(if s.expanded_preview{"sidebar"}else{"external"}))(if s.expanded_preview{"Show controls"}else{"Expand preview"})}}
             div class="editor-preview"{div class="preview-canvas" inert="" {(browser(s,true))}div class="edit-selection tabs-selection" draggable="true" data-component="tabs" data-op="editor-select" data-value="tabs" role="button" tabindex="0" aria-label="Edit tabs"{}div class="edit-selection nav-selection" draggable="true" data-component="navigation" data-op="editor-select" data-value="navigation" role="button" tabindex="0" aria-label="Edit navigation"{}@for region in ["leading","trailing","top","bottom"]{div class=(format!("dock-target dock-{region}")) data-dock=(region){span{(match region{"leading"=>"Left","trailing"=>"Right","top"=>"Top",_=>"Bottom"})}}}}
-            div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span class="editor-feedback" role="status"{(if !s.notice.is_empty(){s.notice.as_str()}else if !text(&s.snapshot,"notice").is_empty(){text(&s.snapshot,"notice")}else{"Changes apply when you save."})}}
+            div class="editor-recovery"{button class="icon-button" data-op="editor-undo" title="Undo appearance change" aria-label="Undo appearance change" disabled[s.undo.is_empty()]{(icon("undo"))}button class="icon-button" data-op="editor-redo" title="Redo appearance change" aria-label="Redo appearance change" disabled[s.redo.is_empty()]{(icon("forward"))}button data-op="editor-reset"{"Reset appearance"}span class="editor-feedback" role="status"{(if !text(&s.snapshot,"notice").is_empty(){text(&s.snapshot,"notice")}else if !s.notice.is_empty(){s.notice.as_str()}else{"Changes apply when you save."})}}
         }
         aside class="editor-inspector" id="appearance-controls" hidden[s.expanded_preview]{div class="inspector-section"{h2{"Arrange"}p{"Drag a component, or choose its position."}
             @for (component,label,glyph) in [("tabs","Tabs","sidebar"),("navigation","Navigation","search"),("panels","Library panel","grid")] {div class=(if s.edit_component==component{"component selected"}else{"component"}) draggable="true" data-component=(component){button data-op="editor-select" data-value=(component){(icon(glyph))span{(label)}(icon("grip"))}}}
@@ -586,7 +586,7 @@ fn library(s: &Shell) -> Markup {
                 @if s.private() {(empty("Notes stay in regular windows","Private browsing does not create or change saved notes.","shield"))}
                 @else {
                     div class="notes-scope"{button class=(if text(&s.snapshot,"notesScope")!="all"{"selected"}else{""}) data-op="native" data-action="notesScope" data-value="space"{"This Space"}button class=(if text(&s.snapshot,"notesScope")=="all"{"selected"}else{""}) data-op="native" data-action="notesScope" data-value="all"{"All notes"}}
-                    div class="note-actions"{button class="button" data-op="native" data-action="createNote"{(icon("plus"))"New"}button class="button quiet" data-op="native" data-action="noteFromPage" disabled[text(s.active(),"url").is_empty()]{"Save page"}button class="button quiet" data-op="native" data-action="quoteSelection" title="Quote text selected on the page" disabled[text(s.active(),"url").is_empty()]{"Quote"}}
+                    input class="notes-search" type="search" data-notes-query="true" placeholder="Search notes" value=(text(&s.snapshot,"notesQuery")) maxlength="160" aria-label="Search note titles, sources and Spaces";div class="note-actions"{button class="button" data-op="native" data-action="createNote"{(icon("plus"))"New"}button class="button quiet" data-op="native" data-action="noteFromPage" disabled[text(s.active(),"url").is_empty()]{"Save page"}button class="button quiet" data-op="native" data-action="quoteSelection" title="Quote text selected on the page" disabled[text(s.active(),"url").is_empty()]{"Quote"}}
                     div class="note-list" {@for n in array(&s.snapshot["notes"]) {button class=(if n["id"]==s.snapshot["selectedNote"]["id"]{"selected"}else{""}) data-op="native" data-action="selectNote" data-id=(text(n,"id")){(icon("edit"))span{strong{(text(n,"title"))}@if !text(n,"sourceURL").is_empty(){small{(text(n,"sourceTitle"))" · "(host(text(n,"sourceURL")))}}@if text(&s.snapshot,"notesScope")=="all" && !text(n,"spaceName").is_empty(){small{(text(n,"spaceName"))}}}}}}
                     @let n=&s.snapshot["selectedNote"];
                     @if !n.is_null() {article class="note-card"{

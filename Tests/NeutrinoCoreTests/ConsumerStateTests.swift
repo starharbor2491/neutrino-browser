@@ -189,3 +189,15 @@ import Testing
     #expect(session.selectedTabID == child.id && session.visibleTreeTabs.contains(where: { $0.id == child.id }))
     #expect(session.tabs.first(where: { $0.id == root.id })?.collapsed == false)
 }
+
+@Test func portableLibraryNormalizationPreservesExactDateValues() throws {
+    var library=LibraryState()
+    for seconds in [800_000_000.1234567,800_000_000.1234567.nextUp,800_000_000.1234567.nextDown] {
+        var note=Note(profileID:library.profiles[0].id)
+        note.modifiedAt=Date(timeIntervalSinceReferenceDate:seconds)
+        library.notes.append(note)
+    }
+    let original=library.notes
+    library.normalize();library.normalize()
+    #expect(library.notes==original)
+}

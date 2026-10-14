@@ -55,13 +55,13 @@ extension LibraryState {
 /// Value-semantic ownership registry: claiming a live tab returns its previous
 /// window so the host can transfer the existing native view without reloading.
 public struct LiveTabOwnership: Sendable {
-  private var owners: [UUID: UUID] = [:]
+  private var owners: [String:String] = [:]
   public init() {}
-  public func owner(of tab: UUID) -> UUID? { owners[tab] }
-  @discardableResult public mutating func claim(_ tab: UUID, in window: UUID) -> UUID? {
-    owners.updateValue(window, forKey: tab)
-  }
-  public mutating func release(_ tab: UUID, from window: UUID) {
-    if owners[tab] == window { owners.removeValue(forKey: tab) }
+  public func owner(of tab: UUID) -> UUID? {owners[tab.uuidString].flatMap(UUID.init(uuidString:))}
+  @discardableResult public mutating func claim(_ tab: UUID,in window: UUID) -> UUID? {update(tab,in:window,action:"claim")}
+  public mutating func release(_ tab: UUID,from window: UUID) {_ = update(tab,in:window,action:"release")}
+  private mutating func update(_ tab:UUID,in window:UUID,action:String) -> UUID? {
+    guard let result=try? RustCore.request(["op":"liveTabOwnership","value":owners,"tab":tab.uuidString,"window":window.uuidString,"action":action]) as? [String:Any],let updated=result["owners"] as? [String:String] else {return nil}
+    owners=updated;return (result["owner"] as? String).flatMap(UUID.init(uuidString:))
   }
 }

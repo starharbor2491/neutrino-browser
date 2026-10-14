@@ -147,31 +147,7 @@ extension AppState {
     }
 
     func libraryPreparedForChromiumRemoval() -> LibraryState {
-        var prepared = library
-        for index in prepared.profiles.indices where prepared.profiles[index].engineID == .chromium { prepared.profiles[index].engineID = .webkit }
-        for index in prepared.sessions.indices {
-            for tabIndex in prepared.sessions[index].tabs.indices where prepared.sessions[index].tabs[tabIndex].engineID == .chromium {
-                prepared.sessions[index].tabs[tabIndex].engineID = .webkit
-                prepared.sessions[index].tabs[tabIndex].chromiumPages = nil
-                if let url = prepared.sessions[index].tabs[tabIndex].url, !AddressResolver.isWebURL(url) {
-                    prepared.sessions[index].tabs[tabIndex].url = nil
-                    prepared.sessions[index].tabs[tabIndex].title = "New tab"
-                }
-            }
-        }
-        if let spaces = prepared.spaces {
-            for spaceIndex in spaces.indices {
-                prepared.spaces?[spaceIndex].tabs = spaces[spaceIndex].tabs.map(webKitDescriptor)
-                prepared.spaces?[spaceIndex].archivedTabs = spaces[spaceIndex].archivedTabs.map(webKitDescriptor)
-            }
-        }
-        return prepared
-    }
-    private func webKitDescriptor(_ descriptor: BrowserTab) -> BrowserTab {
-        guard descriptor.engineID == .chromium else { return descriptor }
-        var tab = descriptor; tab.engineID = .webkit; tab.chromiumPages = nil
-        if let url = tab.url, !AddressResolver.isWebURL(url) { tab.url = nil; tab.title = "New tab" }
-        return tab
+        (try? RustCore.transform(library,operation:"prepareForChromiumRemoval")) ?? library
     }
 
 }

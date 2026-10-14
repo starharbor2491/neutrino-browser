@@ -53,7 +53,10 @@ extension AppState {
         }
         // Preview publisher, all dependencies, and permission differences before
         // any installation, role replacement, or configuration mutation.
-        guard approveModules(requirements, activateRequirements: true, activationTitle: approvalTitle) else { return false }
+        let needsApproval=requirements.contains { requirement in
+            !installedModules.contains(where:{$0.manifest==requirement && $0.enabled})
+        }
+        if needsApproval, !approveModules(requirements,activateRequirements:true,activationTitle:approvalTitle) {return false}
         try applyApprovedSetup(configuration, requirements: requirements, approval: approval, spaceID: spaceID)
         return true
     }
@@ -68,7 +71,7 @@ extension AppState {
             // setup before replacing any providers; required ID order is inert.
             try installApprovedModuleCode(requirements)
             try activateApprovedModuleRequirements(requirements)
-            applyConfiguration(configuration, to: spaceID)
+            guard applyConfiguration(configuration,to:spaceID) else {throw ValidationError(notice ?? "This Space's appearance could not be applied.")}
         }
         // The setup explicitly supplies customized values; preserve them after
         // contribution defaults have been synchronized at the transaction boundary.

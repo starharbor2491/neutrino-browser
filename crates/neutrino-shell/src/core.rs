@@ -26,9 +26,9 @@ pub const BLOCKED_DOMAINS: &[&str] = &[
 ];
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
-        "manageNamedSetup" | "normalizeSession" | "sessionAncestors" | "visibleTreeTabs" | "setTabParent" | "selectSessionTab" | "enableSessionSplit" | "normalizeSpace" | "archiveIdleTabs" | "restoreArchivedTab" | "normalizeSpaces" | "normalizeLibrary" | "spaceConfiguration" | "removeProfile" | "restoreProfile" | "normalizeChromiumPages" => crate::workspace::request(&r)?,
+        "projectNotes" | "prepareForChromiumRemoval" | "applyOrganization" | "liveTabOwnership" | "applySpaceConfiguration" | "manageNamedSetup" | "normalizeSession" | "sessionAncestors" | "visibleTreeTabs" | "setTabParent" | "selectSessionTab" | "enableSessionSplit" | "normalizeSpace" | "archiveIdleTabs" | "restoreArchivedTab" | "normalizeSpaces" | "normalizeLibrary" | "spaceConfiguration" | "removeProfile" | "restoreProfile" | "normalizeChromiumPages" => crate::workspace::request(&r)?,
         "communityPayload" | "validateCommunityCatalog" => crate::module_repository::community_request(&r),
-        "validateMinimumMacOS" | "validateRelease" | "validateDistributionAsset" | "validateDistributionCatalog" | "distributionUpdates" | "validateEngineManifest" | "validateIdentity" | "validateResourceFrame" | "normalizeSetupPack" | "boundedImport" => crate::policy::request(&r),
+        "githubCatalogURL" | "validateMinimumMacOS" | "validateRelease" | "validateDistributionAsset" | "validateDistributionCatalog" | "distributionUpdates" | "validateEngineManifest" | "validateIdentity" | "validateResourceFrame" | "normalizeSetupPack" | "boundedImport" => crate::policy::request(&r),
         "moduleRepository" => crate::module_repository::request(&r),
         "validateUpdatePolicy" => {
             if r["build"].as_u64().unwrap_or(0) < r["currentBuild"].as_u64().unwrap_or(0) ||

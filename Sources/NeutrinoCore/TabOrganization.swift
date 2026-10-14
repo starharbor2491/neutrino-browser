@@ -16,16 +16,6 @@ public struct TabOrganization: Codable, Equatable, Sendable {
     return proposal
   }
   public func apply(to space: inout BrowserSpace) throws {
-    _ = try Self.decode(JSONEncoder().encode(self), knownTabs: Set(space.tabs.map(\.id)))
-    guard space.folders.count + folders.count <= 100 else {
-      throw ValidationError("This Space already has too many folders.")
-    }
-    for folder in folders {
-      let item = TabFolder(name: folder.name)
-      space.folders.append(item)
-      for i in space.tabs.indices where folder.tabIDs.contains(space.tabs[i].id) {
-        space.tabs[i].folderID = item.id
-      }
-    }
+    space=try RustCore.decode(BrowserSpace.self,from:RustCore.request(["op":"applyOrganization","value":RustCore.encoded(space),"proposal":RustCore.encoded(self)]))
   }
 }

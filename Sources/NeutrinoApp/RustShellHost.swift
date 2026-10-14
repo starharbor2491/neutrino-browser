@@ -108,6 +108,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var observedDownloadIDs: [UUID] = []
     private var selectedNoteID: UUID?
     private var allNotes = false
+    private var notesQuery = ""
     private var librarySection = "bookmarks"
     private var libraryPage = 0
     private var engineObservations = Set<AnyCancellable>()
@@ -275,22 +276,31 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         if projectedProfileID != profileID {
             projectedProfileID = profileID; assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
-            assistantResponse = ""; credentialMetadata = []; selectedNoteID = nil; libraryPage = 0
+            assistantResponse = ""; credentialMetadata = []; selectedNoteID = nil; libraryPage = 0; notesQuery=""; allNotes=false
         }
         let space = model?.space
         observeDownloads(downloadCenter ?? model?.downloads)
         let regular = model?.isPrivate != true
         let bookmarks = regular ? app.library.bookmarks.filter { $0.profileID == profileID } : []
-        let notes = regular ? app.library.notes.filter { $0.profileID == profileID && (allNotes || $0.spaceID == nil || $0.spaceID == model?.session.spaceID) } : []
+        let noteIndex:[[String:Any]]=regular ? app.library.notes.map { note in
+            ["id":note.id.uuidString,"profileID":note.profileID.uuidString,"spaceID":note.spaceID?.uuidString ?? "", "title":String(note.title.prefix(100)),
+             "sourceURL":note.sourceURL?.absoluteString ?? "","sourceTitle":note.sourceTitle ?? "","modifiedAt":note.modifiedAt.timeIntervalSinceReferenceDate,
+             "spaceName":app.library.spaces?.first(where:{$0.id==note.spaceID})?.name ?? ""]
+        } : []
+        let noteIDs=(try? RustCore.request(["op":"projectNotes","value":noteIndex,"profileID":profileID.uuidString,"spaceID":model?.session.spaceID?.uuidString ?? "","all":allNotes,"query":notesQuery]) as? [String]) ?? []
+        let records=app.library.notes.reduce(into:[String:Note]()){$0[$1.id.uuidString]=$1}
+        let notes=noteIDs.compactMap{records[$0]}
         let history = regular ? Array(app.library.history.filter { $0.profileID == profileID }.reversed()) : []
         let count = librarySection == "notes" ? notes.count : librarySection == "history" ? history.count : bookmarks.count
         libraryPage = min(libraryPage, max(0, (count - 1) / 40))
         let offset = libraryPage * 40
         let selectedNote = notes.first { $0.id == selectedNoteID } ?? notes.first
-        func noteContext(_ note:Note) -> [String:Any] {
-            ["id":note.id.uuidString,"title":String(note.title.prefix(100)),"sourceURL":note.sourceURL?.absoluteString ?? "",
+        func noteContext(_ note:Note, content:Bool=false) -> [String:Any] {
+            var value:[String:Any]=["id":note.id.uuidString,"title":String(note.title.prefix(100)),"sourceURL":note.sourceURL?.absoluteString ?? "",
              "sourceTitle":note.sourceTitle ?? "","spaceName":app.library.spaces?.first(where:{$0.id==note.spaceID})?.name ?? "",
-             "text":String(note.text.prefix(200_000)),"quotedText":note.quotedText ?? ""]
+             "sourceTabID":note.sourceTabID?.uuidString ?? ""]
+            if content {value["text"]=String(note.text.prefix(200_000));value["quotedText"]=note.quotedText ?? ""}
+            return value
         }
         var snapshot: [String: Any] = [
             "completedOnboarding": !isPreview && app.library.preferences.completedOnboarding,
@@ -306,9 +316,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "folders": encoded(space?.folders ?? []), "archived": (space?.archivedTabs ?? []).prefix(200).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String(($0.url?.absoluteString ?? "").prefix(8192))] },
             "bookmarks": bookmarks.dropFirst(librarySection == "bookmarks" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
             "history": history.dropFirst(librarySection == "history" ? offset : 0).prefix(40).map { ["id": $0.id.uuidString, "title": String($0.title.prefix(512)), "url": String($0.url.absoluteString.prefix(8192))] },
-            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map(noteContext),
-            "notesScope": allNotes ? "all" : "space",
-            "selectedNote": selectedNote.map(noteContext) as Any? ?? NSNull(),
+            "notes": notes.dropFirst(librarySection == "notes" ? offset : 0).prefix(40).map {noteContext($0)},
+            "notesScope": allNotes ? "all" : "space", "notesQuery":notesQuery,
+            "selectedNote": selectedNote.map {noteContext($0,content:true)} as Any? ?? NSNull(),
             "libraryPage": libraryPage, "libraryCount": count,
             "account": ["connected": ChatGPTAccount.shared.connected, "busy": ChatGPTAccount.shared.busy, "status": ChatGPTAccount.shared.status ?? "", "models": ChatGPTAccount.shared.models],
             "notice": app.notice ?? "", "defaultStatus": defaultStatus, "imported": imported,
@@ -435,6 +445,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         guard ready, !stopped, let data = try? JSONSerialization.data(withJSONObject: result), let json = String(data: data, encoding: .utf8) else { return }
         if result["overlay"] as? Bool == true { container.hidePages() }
         container.chrome.evaluateJavaScript("window.neutrino.receive(\(json))", completionHandler: nil)
+    }
+    private func editorResult(action:String,success:Bool,message:String) {
+        let result=handle.dispatch(["op":"editor-result","action":action,"success":success,"message":message])
+        for command in result["commands"] as? [[String:Any]] ?? [] {perform(command)}
     }
     private func dispatchAction(_ request: [String:Any]) -> [String:Any] {
         let result=handle.dispatch(request)
@@ -643,23 +657,29 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard ids.count == raw.count, Set(ids).count == ids.count, Set(ids) == Set(folders.map(\.id)) else { return }
             app.library.spaces?[index].folders = ids.compactMap { id in folders.first { $0.id == id } }
         case "saveNamedSetup", "replaceNamedSetup", "renameNamedSetup", "deleteNamedSetup":
-            app.perform {
+            do {
                 let action=operation=="saveNamedSetup" ? "save" : operation=="replaceNamedSetup" ? "replace" : operation=="renameNamedSetup" ? "rename" : "delete"
                 app.library=try RustCore.decode(LibraryState.self,from:RustCore.request(["op":"manageNamedSetup","action":action,"value":RustCore.encoded(app.library),
                     "id":command["id"] ?? NSNull(),"name":command["name"] ?? "","configuration":command["configuration"] ?? NSNull(),
                     "requirements":command["requirements"] as? [String] ?? app.configurationModuleRequirements]))
                 if action=="replace" || action=="delete" {app.windows.values.compactMap(\.model).forEach{$0.synchronizeSplit(force:true)}}
-            }
+                app.notice=nil;editorResult(action:operation,success:true,message:action=="save" ? "Setup saved." : action=="rename" ? "Setup renamed." : action=="delete" ? "Setup deleted." : "Setup replaced.")
+            } catch {app.notice=error.localizedDescription;editorResult(action:operation,success:false,message:error.localizedDescription)}
         case "applyConfiguration":
-            guard let object = command["configuration"], let data = try? JSONSerialization.data(withJSONObject: object),
-                  var configuration = try? JSONDecoder().decode(Configuration.self, from: data) else { app.notice = "That appearance could not be saved."; return }
-            configuration.normalize()
-            if let requirements = command["requirements"] as? [String], !requirements.isEmpty {
-                do { _ = try app.applySetup(configuration, requirements: requirements, approvalTitle: "Restore this setup’s tools?", spaceID: command["space"] as? Bool == true ? model?.session.spaceID : nil) }
-                catch { app.notice = error.localizedDescription }
-                return
-            }
-            app.applyConfiguration(configuration, to: command["space"] as? Bool == true ? model?.session.spaceID : nil)
+            do {
+                guard let object=command["configuration"],let data=try? JSONSerialization.data(withJSONObject:object),
+                      var configuration=try? JSONDecoder().decode(Configuration.self,from:data) else {throw ValidationError("That appearance could not be saved.")}
+                configuration.normalize()
+                let spaceID=command["space"] as? Bool == true ? model?.session.spaceID : nil
+                if let requirements=command["requirements"] as? [String],!requirements.isEmpty {
+                    guard try app.applySetup(configuration,requirements:requirements,approvalTitle:"Restore this setup’s tools?",spaceID:spaceID) else {
+                        editorResult(action:operation,success:false,message:"Appearance was not applied. Your draft is still here.");return
+                    }
+                } else {
+                    guard app.applyConfiguration(configuration,to:spaceID) else {throw ValidationError(app.notice ?? "The appearance could not be applied.")}
+                }
+                app.notice=nil;editorResult(action:operation,success:true,message:"Appearance saved.")
+            } catch {app.notice=error.localizedDescription;editorResult(action:operation,success:false,message:error.localizedDescription)}
         case "sidebarWidth":
             if let model, let width = command["value"] as? Double, width.isFinite {
                 var configuration = model.configuration; configuration.layout.tabsWidth = min(340, max(200, width))
@@ -752,7 +772,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                             app.library.notes[index].sourceTitle = prepared["sourceTitle"]
                             app.library.notes[index].quotedText = prepared["quote"]
                         }
-                        selectedNoteID=noteID
+                        selectedNoteID=noteID;notesQuery="";libraryPage=0
                     } catch {app.library.notes=original;throw error}
                     scheduleSync()
                 }catch{app.notice=error.localizedDescription}
@@ -760,15 +780,17 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "createNote":
             guard model?.isPrivate != true else { return }
             app.perform {
-                selectedNoteID = try app.createModuleNote(profileID: profileID)
+                selectedNoteID = try app.createModuleNote(profileID: profileID);notesQuery="";libraryPage=0
                 if let index=app.library.notes.firstIndex(where:{$0.id==selectedNoteID}) { app.library.notes[index].spaceID=model?.session.spaceID }
             }
+        case "notesQuery":notesQuery=String((command["value"] as? String ?? "").prefix(160));libraryPage=0
         case "notesScope": allNotes = command["value"] as? String == "all"; libraryPage = 0
         case "openNoteSource":
             guard model?.isPrivate != true, let model, let id,
                   let note=app.library.notes.first(where:{$0.id==id && $0.profileID==profileID}),
                   let url=note.sourceURL, AddressResolver.isWebURL(url) else{return}
-            if let spaceID=note.spaceID, app.library.spaces?.contains(where:{$0.id==spaceID && $0.profileID==profileID}) == true,
+            let sourceSpace=app.library.spaces?.first(where:{$0.profileID==profileID && $0.tabs.contains(where:{$0.id==note.sourceTabID && $0.url==url})})?.id ?? note.spaceID
+            if let spaceID=sourceSpace, app.library.spaces?.contains(where:{$0.id==spaceID && $0.profileID==profileID}) == true,
                model.session.spaceID != spaceID { model.switchSpace(spaceID) }
             if let original=note.sourceTabID, model.session.tabs.contains(where:{$0.id==original && $0.url==url}) {model.selectTab(original)}
             else if let existing=model.session.tabs.first(where:{$0.url==url}) { model.selectTab(existing.id) }

@@ -361,6 +361,32 @@ fn library(mut s: Value) -> Value {
     }
     s
 }
+fn apply_space_configuration(r: &Value, mut s: Value) -> Result<Value, &'static str> {
+    let config = configuration(r["configuration"].clone());
+    let space = array(&s["spaces"]).iter().position(|v| v["id"] == r["id"]);
+    if let Some(i) = space {
+        let setup = s["spaces"][i]["setupID"].clone();
+        if let Some(existing) = array(&s["preferences"]["savedConfigurations"])
+            .iter()
+            .position(|v| v["id"] == setup)
+        {
+            s["preferences"]["savedConfigurations"][existing]["configuration"] = config;
+        } else {
+            if array(&s["preferences"]["savedConfigurations"]).len() >= 50 {
+                return Err("You have 50 saved setups. Replace or delete one before customizing another Space.");
+            }
+            let setup = json!({"id":id(),"name":format!("{} setup",text(&s["spaces"][i],"name")),"configuration":config});
+            s["spaces"][i]["setupID"] = setup["id"].clone();
+            s["preferences"]["savedConfigurations"]
+                .as_array_mut()
+                .ok_or("Invalid saved setups.")?
+                .push(setup);
+        }
+    } else {
+        s["preferences"]["configuration"] = config;
+    }
+    Ok(s)
+}
 fn manage_setup(r: &Value, mut s: Value) -> Result<Value, &'static str> {
     let action = text(r, "action");
     let name = text(r, "name").trim();
@@ -429,6 +455,106 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
     let s = r["value"].clone();
     let id = text(r, "id");
     Ok(match text(r, "op") {
+        "projectNotes" => {
+            let query = text(r, "query").trim().to_lowercase();
+            let mut notes: Vec<_> = array(&s)
+                .iter()
+                .filter(|v| {
+                    v["profileID"] == r["profileID"]
+                        && (flag(r, "all")
+                            || text(v, "spaceID").is_empty()
+                            || v["spaceID"] == r["spaceID"])
+                        && ["title", "sourceTitle", "sourceURL", "spaceName"]
+                            .iter()
+                            .any(|key| text(v, key).to_lowercase().contains(&query))
+                })
+                .collect();
+            notes.sort_by(|a, b| {
+                b["modifiedAt"]
+                    .as_f64()
+                    .unwrap_or(0.)
+                    .total_cmp(&a["modifiedAt"].as_f64().unwrap_or(0.))
+                    .then_with(|| text(a, "id").cmp(text(b, "id")))
+            });
+            json!(notes.iter().map(|v| v["id"].clone()).collect::<Vec<_>>())
+        }
+        "prepareForChromiumRemoval" => {
+            let mut s = s;
+            if let Some(profiles) = s["profiles"].as_array_mut() {
+                for p in profiles {
+                    if p["engineID"] == "chromium" {
+                        p["engineID"] = json!("webkit");
+                    }
+                }
+            }
+            fn convert(tabs: &mut Value) {
+                if let Some(tabs) = tabs.as_array_mut() {
+                    for t in tabs {
+                        if t["engineID"] == "chromium" {
+                            t["engineID"] = json!("webkit");
+                            t["chromiumPages"] = Value::Null;
+                            if !t["url"].is_null() && !web(text(t, "url")) {
+                                t["url"] = Value::Null;
+                                t["title"] = json!("New tab");
+                            }
+                        }
+                    }
+                }
+            }
+            for key in ["sessions", "spaces"] {
+                if let Some(items) = s[key].as_array_mut() {
+                    for item in items {
+                        convert(&mut item["tabs"]);
+                        if key == "spaces" {
+                            convert(&mut item["archivedTabs"]);
+                        }
+                    }
+                }
+            }
+            s
+        }
+        "applyOrganization" => {
+            let proposal = &r["proposal"];
+            crate::core::request(
+                json!({"op":"validateOrganization","proposal":proposal,"knownTabs":array(&s["tabs"]).iter().map(|v|v["id"].clone()).collect::<Vec<_>>() }),
+            )?;
+            if array(&s["folders"]).len() + array(&proposal["folders"]).len() > 100 {
+                return Err("This Space already has too many folders.");
+            }
+            let mut s = s;
+            for folder in array(&proposal["folders"]) {
+                let id = uuid::Uuid::new_v4().to_string().to_uppercase();
+                s["folders"]
+                    .as_array_mut()
+                    .ok_or("Invalid folders.")?
+                    .push(json!({"id":id,"name":folder["name"],"collapsed":false}));
+                if let Some(tabs) = s["tabs"].as_array_mut() {
+                    for t in tabs {
+                        if array(&folder["tabIDs"]).iter().any(|v| *v == t["id"]) {
+                            t["folderID"] = json!(id);
+                        }
+                    }
+                }
+            }
+            s
+        }
+        "liveTabOwnership" => {
+            let mut owners = s;
+            let tab = text(r, "tab");
+            let previous = owners[tab].clone();
+            match text(r, "action") {
+                "claim" => owners[tab] = r["window"].clone(),
+                "release" if owners[tab] == r["window"] => {
+                    owners
+                        .as_object_mut()
+                        .ok_or("Invalid ownership registry.")?
+                        .remove(tab);
+                }
+                _ => {}
+            }
+            json!({"owners":owners,"owner":previous})
+        }
+        "applySpaceConfiguration" => apply_space_configuration(r, s)?,
         "manageNamedSetup" => manage_setup(r, s)?,
         "normalizeSession" => session(s),
         "normalizeSpace" => space(s),

@@ -3,28 +3,13 @@ import Foundation
 import NeutrinoCore
 
 @MainActor extension AppState {
-  func applyConfiguration(_ configuration: Configuration, to spaceID: UUID?) {
-    guard let spaceID, let index = library.spaces?.firstIndex(where: { $0.id == spaceID }) else {
-      applyConfiguration(configuration)
-      return
-    }
-    var configuration = configuration
-    configuration.normalize()
-    if let setupID = library.spaces?[index].setupID,
-      let setupIndex = library.preferences.savedConfigurations.firstIndex(where: {
-        $0.id == setupID
-      })
-    {
-      library.preferences.savedConfigurations[setupIndex].configuration = configuration
-    } else {
-      let setup = NamedConfiguration(
-        name: (library.spaces?[index].name ?? "Space") + " setup", configuration: configuration)
-      library.preferences.savedConfigurations.append(setup)
-      library.spaces?[index].setupID = setup.id
-    }
-    windows.values.compactMap(\.model).filter { $0.session.spaceID == spaceID }.forEach {
-      $0.synchronizeSplit(force: true)
-    }
+  @discardableResult func applyConfiguration(_ configuration:Configuration,to spaceID:UUID?) -> Bool {
+    guard let spaceID, library.spaces?.contains(where:{$0.id==spaceID})==true else {applyConfiguration(configuration);return true}
+    do {
+      library=try RustCore.decode(LibraryState.self,from:RustCore.request(["op":"applySpaceConfiguration","value":RustCore.encoded(library),"id":spaceID.uuidString,"configuration":RustCore.encoded(configuration)]))
+      windows.values.compactMap(\.model).filter{$0.session.spaceID==spaceID}.forEach{$0.synchronizeSplit(force:true)}
+      return true
+    } catch {notice=error.localizedDescription;return false}
   }
   func recordBackgroundTab(
     _ tab: BrowserEngineTab, id: UUID, spaceID: UUID?, profileID: UUID, finished: Bool

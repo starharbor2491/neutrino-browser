@@ -614,6 +614,7 @@
       })
         .then((result) => patch({ ...result, passive: true }))
         .catch((e) => announce("Could not save note. " + e.message));
+    else if (el.dataset.notesQuery) send({op:"native",action:"notesQuery",value:el.value});
     else if (el.dataset.moduleSearch)
       send({ op: "module-query", value: el.value });
     else if (el.id === "command-input") send({ op: "query", value: el.value });

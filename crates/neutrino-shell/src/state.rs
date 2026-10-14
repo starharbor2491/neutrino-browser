@@ -599,8 +599,6 @@ impl Shell {
                     if let Some(config) = &self.draft {
                         if !self.name.is_empty() {
                             commands.push(json!({"op":"saveNamedSetup","name":self.name,"configuration":config,"requirements":config["requiredModuleIDs"]}));
-                            self.name.clear();
-                            self.notice = "Setup saved. Choose it from Saved setups.".into();
                         }
                     }
                 }
@@ -659,16 +657,26 @@ impl Shell {
                     }
                 }
                 "editor-save" => {
-                    if let Some(config) = self.draft.take() {
-                        let pending = self.pending_exit.take();
+                    if let Some(config) = &self.draft {
                         commands.push(json!({"op":"applyConfiguration","requirements":config["requiredModuleIDs"],"configuration":config,"space":self.apply_space}));
-                        self.panel.clear();
-                        self.close_screen();
-                        if let Some(pending) = pending {
-                            let next = self.dispatch(pending);
-                            commands.extend(array(&next["commands"]).iter().cloned());
+                    }
+                }
+                "editor-result" => {
+                    self.notice = bound(text(&request, "message"), 1000);
+                    if flag(&request, "success") {
+                        if text(&request, "action") == "saveNamedSetup" {
+                            self.name.clear();
                         }
-                        self.notice = "Appearance saved.".into();
+                        if text(&request, "action") == "applyConfiguration" {
+                            let pending = self.pending_exit.take();
+                            self.panel.clear();
+                            self.close_screen();
+                            if let Some(pending) = pending {
+                                let next = self.dispatch(pending);
+                                commands.extend(array(&next["commands"]).iter().cloned());
+                            }
+                            self.notice = "Appearance saved.".into();
+                        }
                     }
                 }
                 "sidebar-width" => {
@@ -769,6 +777,7 @@ impl Shell {
                         "createNote",
                         "selectNote",
                         "notesScope",
+                        "notesQuery",
                         "openNoteSource",
                         "noteFromPage",
                         "quoteSelection",
