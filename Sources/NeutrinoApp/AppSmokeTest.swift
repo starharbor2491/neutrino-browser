@@ -522,7 +522,7 @@ enum AppSmokeTest {
     }
     private static func fail(_ message: String) {
         trace("Neutrino smoke test failed: \(message)")
-        if ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_DEBUGGER"] == "1",
+        if ["1", "attach"].contains(ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_DEBUGGER"] ?? ""),
            ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil,
            AppDelegate.state?.ready == true {
             trace("Diagnostic only: requesting normal quit after rejected acceptance")

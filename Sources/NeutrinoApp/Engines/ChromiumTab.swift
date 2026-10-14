@@ -351,6 +351,9 @@ final class ChromiumTab: BrowserEngineTab {
                 guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
                 let timer = Task { [weak self] in
                     do { try await Task.sleep(for: timeout) } catch { return }
+                    if CommandLine.arguments.contains("--smoke-test"), ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil {
+                        print("Neutrino Chromium request timed out: method=\(method), id=\(id), loading=\(self?.loading == true), mounted=\(self?.nativeView.window != nil)")
+                    }
                     self?.completeRequest(id, result: .failure(ValidationError("Chromium did not respond before the request timed out.")))
                 }
                 pending[id] = PendingRequest(continuation: continuation, timeout: timer)

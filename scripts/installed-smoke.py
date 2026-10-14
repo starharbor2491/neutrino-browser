@@ -16,6 +16,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -103,6 +104,8 @@ def run_smoke(command, environment, timeout):
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            print('Owned smoke process group rejected TERM; retaining the original failure.', file=sys.stderr)
         deadline = time.monotonic() + 8
         while True:
             process.poll()  # Reap the leader without conflating it with its group.
@@ -110,13 +113,21 @@ def run_smoke(command, environment, timeout):
                 os.killpg(process.pid, 0)
             except ProcessLookupError:
                 break
+            except PermissionError:
+                print('Owned smoke process group cannot be inspected; retaining the original failure.', file=sys.stderr)
+                break
             if time.monotonic() >= deadline:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+                except PermissionError:
+                    print('Owned smoke process group rejected KILL; retaining the original failure.', file=sys.stderr)
                 if process.poll() is None:
-                    process.wait(timeout=5)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        print('Owned smoke leader did not exit; retaining the original failure.', file=sys.stderr)
                 break
             time.sleep(0.1)
         raise

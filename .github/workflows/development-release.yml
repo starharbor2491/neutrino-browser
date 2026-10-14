@@ -179,14 +179,22 @@ jobs:
           (root / 'catalog.json').write_text(json.dumps({'format': 1, 'releases': entries}, indent=2) + '\n')
           (root / 'RELEASE_TITLE').write_text(Path('PREVIEW_NAME').read_text().strip()+'\n')
           package = json.loads(next(root.glob('*-package.json')).read_text())
+          sparkle = json.loads((root / 'sparkle-status.json').read_text())
           signing = ('Developer ID signed and notarized. ' if package['notarized'] else 'Ad-hoc signed and unnotarized because Apple signing credentials are not configured. macOS may require Open Anyway in Privacy & Security. ')
           (root / 'RELEASE.md').write_text(
               'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
-              '**Studio** brings command-first destinations, source-linked research notes beside live pages, six familiar starting layouts, draggable components, SVG icon packs, and reusable setups with rename/replace/delete. The supplied icon is unchanged.\n\n'
+              '### What changed\n\n'
+              '- Open destinations with **⌘T**, switch tabs with **⌘K**, and edit the address with **⌘L**. No new-tab page.\n'
+              '- Capture quotations beside live sources, search note bodies and quotes, and recover the original source across Spaces and Chromium page groups.\n'
+              '- Start with six familiar browser layouts. Drag tabs and components, choose SVG icons, and save, rename, replace, or delete appearance setups.\n'
+              '- Use modules directly in the workspace. Reader, CPU and memory workers now run in Rust alongside the Rust interface and portable services.\n'
+              '- Remove the app, browser data, settings and credentials with the explicit uninstall control; downloads and exports stay.\n\n'
               'Automatic updates download the complete app, including its pinned Chromium engine, from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
               'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
+              + ('Sparkle uses the signed GitHub feed for this build.\n\n' if sparkle.get('enabled') else
+                 'The verified GitHub updater is active. A Sparkle publisher key is still required to publish signed Sparkle feeds.\n\n') +
               '**Preview:** ' + signing + 
               'This release does not certify the finished core or full browser parity. Native tests, real updater replacement, and installed shell acceptance passed. '
               'Full Blink/extension acceptance: **' + os.environ['BLINK_ACCEPTANCE'] + '**; see the attached receipt/log. '

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('installed_smoke', ROOT / 'scripts/installed-smoke.py')
@@ -16,6 +17,27 @@ spec.loader.exec_module(installed)
 
 
 class InstalledAcceptanceTests(unittest.TestCase):
+    def test_cleanup_permission_error_keeps_original_failure(self):
+        process = MagicMock(pid=12345)
+        process.wait.return_value = 125
+        with patch.object(installed.subprocess, 'Popen', return_value=process), \
+             patch.object(installed.os, 'killpg', side_effect=[None, PermissionError()]):
+            with self.assertRaises(subprocess.CalledProcessError) as failure:
+                installed.run_smoke(['diagnostic'], {}, 1)
+        self.assertEqual(failure.exception.returncode, 125)
+
+    def test_cleanup_timeout_keeps_original_timeout(self):
+        original = subprocess.TimeoutExpired(['diagnostic'], 1)
+        process = MagicMock(pid=12345)
+        process.wait.side_effect = [original, subprocess.TimeoutExpired(['diagnostic'], 5)]
+        process.poll.return_value = None
+        with patch.object(installed.subprocess, 'Popen', return_value=process), \
+             patch.object(installed.os, 'killpg', side_effect=[None, None, PermissionError()]), \
+             patch.object(installed.time, 'monotonic', side_effect=[0, 9]):
+            with self.assertRaises(subprocess.TimeoutExpired) as failure:
+                installed.run_smoke(['diagnostic'], {}, 1)
+        self.assertIs(failure.exception, original)
+
     def check_log(self, content, acceptance='Neutrino packaged-app smoke test passed.'):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'app.log'

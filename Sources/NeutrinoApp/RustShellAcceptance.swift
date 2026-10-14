@@ -100,6 +100,7 @@ import NeutrinoCore
         let originalConfiguration = model.configuration
         guard let source = page.url else { throw ValidationError("The research check needs a loaded website.") }
         let count = app.library.notes.count
+        print("Neutrino research stage: \(page.engineID.rawValue) initial quote")
         try await action(["op":"screen","value":"browse"],web:web)
         _ = try await evaluatePage(page, "(()=>{window.neutrinoResearchDraft='retained';const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);return 'selected';})()")
         let selectedText=try await page.selectedText()
@@ -126,12 +127,14 @@ import NeutrinoCore
             throw ValidationError("The quote did not survive a database reload.")
         }
         try await verifyNoteRetrieval(app: app, model: model, web: web, note: note)
+        print("Neutrino research stage: \(page.engineID.rawValue) comparison quote")
         let comparisonURL = source.appendingPathComponent("comparison")
         model.newTab(url: comparisonURL, engine: page.engineID)
         let comparison = model.session.selectedTabID
         defer { model.endSplit(); model.closeTab(comparison); model.selectTab(originalID); app.applyConfiguration(originalConfiguration, to: model.session.spaceID) }
         let secondDeadline = ContinuousClock.now.advanced(by: .seconds(12))
         while (model.activeWebTab.loading || model.activeWebTab.title != "Neutrino HTTP fixture") && ContinuousClock.now < secondDeadline { try await Task.sleep(for: .milliseconds(40)) }
+        guard !model.activeWebTab.loading, model.activeWebTab.title == "Neutrino HTTP fixture" else {throw ValidationError("The research comparison page did not finish loading before quotation.")}
         _ = try await evaluatePage(model.activeWebTab,"(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);return 'selected';})()")
         try await action(["op":"native","action":"quoteSelection"], web:web)
         let quoteDeadline = ContinuousClock.now.advanced(by:.seconds(8))
@@ -139,6 +142,7 @@ import NeutrinoCore
         guard let other=app.library.notes.last,app.library.notes.count==count+2,other.sourceURL==comparisonURL,
               other.quotedText=="Second research source",other.spaceID==note.spaceID else {throw ValidationError("The second source quote lost its project or source context.")}
         try await action(["op":"split-with","id":originalID.uuidString], web: web)
+        print("Neutrino research stage: \(page.engineID.rawValue) retained split and setups")
         guard model.session.split?.contains(originalID) == true,
               model.webTab(originalID) === page,
               try await evaluatePage(page,"window.neutrinoResearchDraft") == "retained" else {
