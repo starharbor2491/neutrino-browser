@@ -90,14 +90,22 @@ extension NativeIntegrationTests {
       try await RustShellAcceptance.action(["op":"focus-address"],web:web)
       #expect((try await web.evaluateJavaScript("(()=>{const address=document.querySelector('#address-input');return address.selectionStart===0 && address.selectionEnd===address.value.length && address.value.length>5;})()")) as? Bool == true)
       #expect((try await web.evaluateJavaScript("document.activeElement.id==='address-input' && document.querySelector('#address-input').getBoundingClientRect().width>100")) as? Bool == true)
-      let before=model.session.tabs
+      let retainedIDs=model.session.tabs.map(\.id)
+      let retainedSelection=model.session.selectedTabID
+      let retainedURL=model.selectedTab.url
+      let retainedPage=model.activeWebTab
       try await RustShellAcceptance.action(["op":"newTab"],web:web)
-      #expect(model.session.tabs==before)
+      #expect(model.session.tabs.map(\.id)==retainedIDs)
+      #expect(model.session.selectedTabID==retainedSelection)
+      #expect(model.activeWebTab === retainedPage)
       _ = try await web.evaluateJavaScript("(()=>{const input=document.querySelector('#command-input');input.value='Unfinished search';return true;})()")
       try await RustShellAcceptance.action(["op":"newTab"],web:web)
       #expect((try await web.evaluateJavaScript("document.querySelector('#command-input').value==='' && document.activeElement.id==='command-input'")) as? Bool == true)
       try await RustShellAcceptance.action(["op":"escape"],web:web)
-      #expect(model.session.tabs==before)
+      #expect(model.session.tabs.map(\.id)==retainedIDs)
+      #expect(model.session.selectedTabID==retainedSelection)
+      #expect(model.selectedTab.url==retainedURL)
+      #expect(model.activeWebTab === retainedPage)
 
     }
     @Test func auxiliaryDownloadsNeverProjectTheDefaultLibrary() async throws {

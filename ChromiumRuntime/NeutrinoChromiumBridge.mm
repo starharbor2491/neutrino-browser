@@ -1549,6 +1549,23 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
         std::abs(NSWidth(pageRect)-NSWidth(viewport))<2 && std::abs(NSHeight(pageRect)-NSHeight(viewport))<2;
     result->SetBool("customHost",owner->view.chromeClip && window.contentView==owner->view.chromeClip);
     result->SetBool("chromeClipped",clipped);
+    if (!clipped && document) {
+      // Only the isolated native diagnostic request reaches this branch.
+      // Record a bounded structural tree, without page text or credentials.
+      auto tree=CefListValue::Create();
+      std::vector<NSView*> pending{document};
+      while (!pending.empty() && tree->GetSize()<120) {
+        NSView* view=pending.back();pending.pop_back();
+        auto item=CefDictionaryValue::Create();
+        item->SetString("class",NSStringFromClass(view.class).UTF8String);
+        item->SetString("frame",NSStringFromRect(view.frame).UTF8String);
+        item->SetBool("hidden",view.hidden);
+        item->SetBool("ancestorHidden",view.hiddenOrHasHiddenAncestor);
+        tree->SetDictionary(tree->GetSize(),item);
+        for (NSView* child in view.subviews) pending.push_back(child);
+      }
+      result->SetList("viewTree",tree);
+    }
     result->SetString("contentRect",NSStringFromRect(pageRect).UTF8String);
     result->SetString("viewportRect",NSStringFromRect(viewport).UTF8String);
     result->SetString("documentFrame",NSStringFromRect(document.frame).UTF8String);
