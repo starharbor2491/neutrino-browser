@@ -57,6 +57,7 @@ enum AppSmokeTest {
                 trace("Extracting reader text")
                 let text = try await app.readerText(from: browser.activeWebTab)
                 guard text.contains("Local browser check") else { throw ValidationError("Reader could not read the HTTP fixture.") }
+                try await RustShellAcceptance.verifyResearchWorkspace(window: window, app: app, model: browser, output: output)
                 try await RustShellAcceptance.verifyPageGeometry(window: window, model: browser, output: output)
                 trace("Verifying split panes and tree tabs")
                 browser.panel = nil
@@ -107,6 +108,7 @@ enum AppSmokeTest {
                         acceptanceFailures.append(message); trace(message)
                     }
                     do {
+                        try await RustShellAcceptance.verifyResearchWorkspace(window: window, app: app, model: browser, output: output)
                         try await measureIdle("loaded-chromium-with-webkit-pane")
                         trace("Verifying Reader captures in an isolated Chromium world")
                         _ = try await evaluate(chromium, "(() => { window.neutrinoOriginalSerializer = window.XMLSerializer; window.neutrinoSnapshotTouched = false; window.XMLSerializer = class { constructor() { window.neutrinoSnapshotTouched = true; } serializeToString() { return '<html><body>Wrong page-world snapshot</body></html>'; } }; return 'ready'; })()")

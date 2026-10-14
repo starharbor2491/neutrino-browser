@@ -42,7 +42,15 @@ extension NativeIntegrationTests.BrowserIntegrationTests {
         }
         let commands = NativeTabCommands()
         var firstShellRequests = [[String: Any]](), secondShellRequests = [[String: Any]]()
-        first.shellAction = { firstShellRequests.append($0) }
+        first.shellAction = { request in
+            firstShellRequests.append(request)
+            switch request["op"] as? String {
+            case "selectTab": if let value=request["id"] as? String,let id=UUID(uuidString:value) { first.selectTab(id) }
+            case "closeCurrent": first.closeTab(first.session.selectedTabID)
+            case "reopenTab": first.reopenClosedTab()
+            default: break
+            }
+        }
         second.shellAction = { secondShellRequests.append($0) }
         let menu = commandMenu()
         commands.install(in: menu)

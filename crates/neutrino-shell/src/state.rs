@@ -342,6 +342,15 @@ impl Shell {
                     self.selected_result = 0;
                     self.menu.clear();
                 }
+                "closeCurrent" => {
+                    if self.palette {
+                        self.palette = false;
+                    } else {
+                        commands.push(
+                            json!({"op":"closeTab","id":self.snapshot["session"]["selectedTabID"]}),
+                        );
+                    }
+                }
                 "panel" => {
                     let value = text(&request, "value");
                     if [

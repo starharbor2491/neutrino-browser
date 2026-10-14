@@ -195,7 +195,7 @@ final class BrowserModel: ObservableObject {
             case "quickNavigation": self.shellAction?(["op":"palette"])
             case "focusAddress": NotificationCenter.default.post(name: .neutrinoFocusAddress, object: self.session.id)
             case "closeTab":
-                if let action = self.shellAction { action(["op":"closeTab","id":id.uuidString]) }
+                if let action = self.shellAction { action(["op":"closeCurrent"]) }
                 else { self.closeTab(id) }
             case "closeWindow": tab.nativeView.window?.performClose(nil)
             case "newWindow": NotificationCenter.default.post(name: .neutrinoOpenBrowserWindow, object: self.session.id, userInfo: ["private": false])
@@ -240,7 +240,9 @@ final class BrowserModel: ObservableObject {
         switch command {
         case .new:
             shellAction?(["op": "newTab"])
-        case .close: closeTab(session.selectedTabID)
+        case .close:
+            if let action = shellAction { action(["op":"closeCurrent"]) }
+            else { closeTab(session.selectedTabID) }
         case .reopen: reopenClosedTab()
         case .previous: selectRelativeTab(-1)
         case .next: selectRelativeTab(1)

@@ -32,8 +32,8 @@ import NeutrinoCore
         for width in [1240,760] {
             window.setContentSize(NSSize(width: CGFloat(width), height: width == 760 ? 520 : 820))
             try await Task.sleep(for: .milliseconds(160))
-            let fits = try await web.evaluateJavaScript("document.documentElement.scrollWidth <= innerWidth && !!document.querySelector('.start-search') && document.querySelector('.start-search').getBoundingClientRect().right <= innerWidth") as? Bool
-            guard fits == true else { throw ValidationError("The Rust start surface overflows the supported window size.") }
+            let fits = try await web.evaluateJavaScript("document.documentElement.scrollWidth <= innerWidth && !!document.querySelector('.page-workspace') && document.querySelector('.page-workspace').getBoundingClientRect().right <= innerWidth") as? Bool
+            guard fits == true else { throw ValidationError("The browsing workspace overflows the supported window size.") }
             await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-shell-\(width).png"))
         }
         window.setContentSize(NSSize(width:1240,height:820))
@@ -41,10 +41,8 @@ import NeutrinoCore
         // address palette. SwiftPM's test runner does not own that event loop.
         let originalTab = model.session.selectedTabID, tabCount = model.session.tabs.count
         try await action(["op":"newTab"],web:web)
-        guard (try await web.evaluateJavaScript("!!document.querySelector('#start-input') && !document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("New tab did not open its inline search surface.") }
-        try await action(["op":"palette"],web:web)
-        guard model.session.tabs.count == tabCount + 1,
-              (try await web.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("New tab did not create a browser tab with its address palette.") }
+        guard model.session.tabs.count == tabCount, model.session.selectedTabID == originalTab,
+              (try await web.evaluateJavaScript("!!document.querySelector('.command-palette') && document.activeElement.id==='command-input' && !document.querySelector('#start-input')")) as? Bool == true else { throw ValidationError("New Tab must focus commands without creating a blank tab or replacing the current page.") }
         window.makeKey(); window.makeFirstResponder(web)
         for type in [NSEvent.EventType.keyDown,.keyUp] {
             guard let event = NSEvent.keyEvent(with:type,location:.zero,modifierFlags:.command,timestamp:ProcessInfo.processInfo.systemUptime,windowNumber:window.windowNumber,context:nil,characters:"w",charactersIgnoringModifiers:"w",isARepeat:false,keyCode:13) else { throw ValidationError("Could not create the tab-close keyboard event.") }
@@ -58,12 +56,12 @@ import NeutrinoCore
         }
         guard model.session.tabs.count == tabCount, model.session.selectedTabID == originalTab,
               window.isVisible, !model.isClosed,
-              (try await web.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("Command-W did not close the address-palette tab while retaining its browser window.") }
-        print("Neutrino Rust shell acceptance: Command-W closed the palette tab and retained its window")
+              (try await web.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true else { throw ValidationError("Command-W did not cancel commands while retaining the original page and browser window.") }
+        print("Neutrino Rust shell acceptance: Command-W cancelled commands and retained the page")
         // Drive actual DOM buttons through WebKit and the Rust/native command bridge.
-        _ = try await web.evaluateJavaScript("document.querySelector('#start-input').focus()")
+        try await action(["op":"newTab"],web:web)
         try await Task.sleep(for:.milliseconds(100))
-        guard (try await web.evaluateJavaScript("document.activeElement.id === 'start-input'")) as? Bool == true else { throw ValidationError("Search did not receive keyboard focus.") }
+        guard (try await web.evaluateJavaScript("document.activeElement.id === 'command-input'")) as? Bool == true else { throw ValidationError("Commands did not receive keyboard focus.") }
         try await action(["op":"escape"], web:web)
         try await action(["op":"screen","value":"editor"],web:web)
         let original = model.configuration
@@ -94,6 +92,62 @@ import NeutrinoCore
         try await Task.sleep(for:.milliseconds(150))
         await AppSmokeTest.captureWindow(window,to:output.appendingPathComponent("Neutrino-shell-dark.png"))
         app.applyConfiguration(original,to:model.session.spaceID)
+    }
+    static func verifyResearchWorkspace(window: NSWindow, app: AppState, model: BrowserModel, output: URL) async throws {
+        let web = try await waitForShell(in: window)
+        let page = model.activeWebTab, originalID = model.session.selectedTabID
+        let originalConfiguration = model.configuration
+        guard let source = page.url else { throw ValidationError("The research check needs a loaded website.") }
+        let count = app.library.notes.count
+        _ = try await evaluatePage(page, "window.neutrinoResearchDraft='retained'; const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);'selected'")
+        try await action(["op":"section","value":"notes"], web: web)
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-op=quoteSelection]').click()")
+        let deadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while app.library.notes.count == count && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(40)) }
+        try await Task.sleep(for: .milliseconds(160))
+        guard let note = app.library.notes.last, app.library.notes.count == count + 1,
+              note.text.contains("Local browser check"), note.text.contains(source.absoluteString),
+              note.profileID == model.session.profileID,
+              (try await web.evaluateJavaScript("!!document.querySelector('.workspace-panel textarea')")) as? Bool == true,
+              model.activeWebTab === page, !page.nativeView.isHidden else {
+            throw ValidationError("Quote did not create a source-preserving note beside the live page.")
+        }
+        guard await app.flush() else { throw ValidationError("The quote could not be saved.") }
+        let database = try LibraryDatabase(url: app.dataDirectory.appendingPathComponent("library.sqlite"))
+        let restored = try await database.load()
+        guard restored.notes.contains(where: { $0.id == note.id && $0.text == note.text }) else {
+            throw ValidationError("The quote did not survive a database reload.")
+        }
+        model.newTab(url: source, engine: page.engineID)
+        let comparison = model.session.selectedTabID
+        defer { model.endSplit(); model.closeTab(comparison); model.selectTab(originalID); app.applyConfiguration(originalConfiguration, to: model.session.spaceID) }
+        let secondDeadline = ContinuousClock.now.advanced(by: .seconds(12))
+        while (model.activeWebTab.loading || model.activeWebTab.title != "Neutrino HTTP fixture") && ContinuousClock.now < secondDeadline { try await Task.sleep(for: .milliseconds(40)) }
+        try await action(["op":"split-with","id":originalID.uuidString], web: web)
+        guard model.session.split?.contains(originalID) == true,
+              model.webTab(originalID) === page,
+              try await evaluatePage(page,"window.neutrinoResearchDraft") == "retained" else {
+            throw ValidationError("Splitting the research workspace lost the live document.")
+        }
+        model.selectTab(originalID)
+        try await action(["op":"screen","value":"editor"], web: web)
+        try await action(["op":"editor-preset","value":"chrome"], web: web)
+        try await action(["op":"editor-save"], web: web)
+        guard model.configuration.layout.tabs == .top,
+              model.webTab(originalID) === page,
+              try await evaluatePage(page,"window.neutrinoResearchDraft") == "retained" else {
+            throw ValidationError("A saved browser preset discarded the live research page.")
+        }
+        app.applyConfiguration(originalConfiguration, to: model.session.spaceID)
+        model.endSplit()
+        try await action(["op":"section","value":"notes"], web: web)
+        try await Task.sleep(for: .milliseconds(200))
+        await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-research-\(page.engineID.rawValue).png"))
+        let receipt = output.deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
+        var evidence = (try? JSONSerialization.jsonObject(with: Data(contentsOf: receipt))) as? [String: Any] ?? [:]
+        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true]
+        try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted,.sortedKeys]).write(to: receipt, options: .atomic)
+        print("Neutrino research acceptance: \(page.engineID.rawValue) quote, source, durable note, retained split, and saved preset passed")
     }
     static func verifyPageGeometry(window:NSWindow, model:BrowserModel, output:URL) async throws {
         let web=try await waitForShell(in:window)
