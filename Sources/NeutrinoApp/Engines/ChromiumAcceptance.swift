@@ -12,6 +12,7 @@ enum ChromiumAcceptance {
             throw ValidationError("Extension interface acceptance requires the isolated smoke-test launch.")
         }
         let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
+        let app = browser.app
         let originalProfile = browser.session.profileID
         browser.endSplit()
         func openManager() async throws -> ChromiumTab {
@@ -33,7 +34,8 @@ enum ChromiumAcceptance {
         func closeManager(_ page:ChromiumTab,id:UUID) async throws {
             _ = try? await page.request("Page.close",parameters:[:],timeout:.seconds(5))
             let deadline = ContinuousClock.now.advanced(by:.seconds(10))
-            while browser.session.tabs.contains(where:{$0.id == id}) {
+            while browser.session.tabs.contains(where:{$0.id == id}) || page.chromeWindow != nil ||
+                page.nativeView.value(forKey:"chromeClip") != nil {
                 guard ContinuousClock.now < deadline else { throw ValidationError("Chrome did not close its Neutrino manager tab.") }
                 try await Task.sleep(for:.milliseconds(50))
             }
@@ -51,7 +53,27 @@ enum ChromiumAcceptance {
         browser.selectTab(originalID)
         guard browser.activeWebTab === original else { throw ValidationError("Returning to the original Profile replaced its extension manager document.") }
         try await closeManager(original,id:originalID)
-        _ = try await openManager() // Leave a real manager tab open for normal Quit.
+        let manager = try await openManager() // Leave a real manager tab open for normal Quit.
+        let members = Set(try await nativeBrowsers(manager).compactMap { $0["id"] as? Int })
+        guard !members.isEmpty, members.allSatisfy({ $0 > 0 }) else { throw ValidationError("The quit probe has no live native browser identity.") }
+        app.freezeQuitData()
+        do {
+            let deadline = ContinuousClock.now.advanced(by:.seconds(5))
+            while manager.nativeView.window != nil || manager.chromeWindow?.parent != nil {
+                guard ContinuousClock.now < deadline else { throw ValidationError("Final quit freeze retained an attached native page surface.") }
+                try await Task.sleep(for:.milliseconds(50))
+            }
+            guard Set(try await nativeBrowsers(manager).compactMap { $0["id"] as? Int }) == members else { throw ValidationError("Suspending the interface destroyed its live browser.") }
+        } catch { app.unfreezeQuitData(); throw error }
+        app.unfreezeQuitData()
+        let remountDeadline = ContinuousClock.now.advanced(by:.seconds(5))
+        while manager.nativeView.window !== ownerWindow || manager.chromeWindow?.parent !== ownerWindow {
+            guard ContinuousClock.now < remountDeadline else { throw ValidationError("A refused quit did not remount its retained native page.") }
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.activeWebTab === manager,
+              Set(try await nativeBrowsers(manager).compactMap { $0["id"] as? Int }) == members else { throw ValidationError("A refused quit replaced its live native browser.") }
+        try await verifyChromeGeometry(manager, ownerWindow:ownerWindow)
         print("Neutrino Chromium acceptance: Rust extension controls, Profile isolation, retained manager, engine close and quit ownership passed")
     }
     static func verifyKeyboardRouting(browser: BrowserModel, ownerWindow: NSWindow) async throws {

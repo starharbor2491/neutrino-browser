@@ -55,8 +55,11 @@ static NSView* PageContentView(NSView* view) {
 @property(nonatomic, assign) BOOL navigationChrome;
 @property(nonatomic, assign) BOOL activeContentKnown;
 @property(nonatomic, assign) BOOL inputSuspended;
+@property(nonatomic, assign) BOOL closingChrome;
 - (void)synchronizeBrowserWindow;
 - (void)hideNativeControls:(NSNotification*)notification;
+- (void)restoreBrowserContent;
+- (void)browserWillClose:(NSNotification*)notification;
 @end
 @implementation NeutrinoChromiumHostView
 @synthesize browserWindow;
@@ -69,11 +72,38 @@ static NSView* PageContentView(NSView* view) {
 @synthesize navigationChrome;
 @synthesize activeContentKnown;
 @synthesize inputSuspended;
+@synthesize closingChrome;
 - (void)setBrowserWindow:(NSWindow*)value {
   if (browserWindow==value) return;
-  if (browserWindow) [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidUpdateNotification object:browserWindow];
+  [self restoreBrowserContent];
   [browserWindow release]; browserWindow=[value retain];
-  if (browserWindow) [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hideNativeControls:) name:NSWindowDidUpdateNotification object:browserWindow];
+  closingChrome=value==nil;
+  if (browserWindow) {
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hideNativeControls:) name:NSWindowDidUpdateNotification object:browserWindow];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(browserWillClose:) name:NSWindowWillCloseNotification object:browserWindow];
+  }
+}
+- (void)restoreBrowserContent {
+  closingChrome=YES;
+  NSWindow* child=browserWindow;
+  if (child) {
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidUpdateNotification object:child];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowWillCloseNotification object:child];
+    if (child.visible) [child orderOut:nil];
+    if (child.parentWindow) [child.parentWindow removeChildWindow:child];
+  }
+  if (!chromeClip) return;
+  // Return Chrome's original content ownership before requesting its async
+  // close. Retained Swift anchors must not keep cleared native C++ views alive
+  // until AppKit tears down the application after CefShutdown.
+  NSView* document=[chromeClip.documentView retain];
+  chromeClip.documentView=nil;
+  if (child.contentView==chromeClip) child.contentView=document;
+  self.chromeClip=nil;
+  [document release];
+}
+- (void)browserWillClose:(NSNotification*)notification {
+  [self restoreBrowserContent];
 }
 - (void)hideNativeControls:(NSNotification*)notification {
   if (self.auxiliary) return;
@@ -89,7 +119,7 @@ static NSView* PageContentView(NSView* view) {
   [self synchronizeBrowserWindow];
 }
 - (void)synchronizeBrowserWindow {
-  if (self.auxiliary) return;
+  if (self.auxiliary || self.closingChrome) return;
   NSWindow* child = self.browserWindow;
   if (!child) return;
   if (!self.chromeClip || child.contentView!=self.chromeClip) {
@@ -615,7 +645,8 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     owner->view.navigationChrome=NO;
     NSView* handle=(NSView*)browser->GetHost()->GetWindowHandle();
     if (page_==owner) owner->view.browserWindow=[handle window];
-    [owner->view synchronizeBrowserWindow];
+    if (owner->closing) [owner->view restoreBrowserContent];
+    else [owner->view synchronizeBrowserWindow];
     if (!owner->active) owner->active=page_;
     auto capabilities = CefDictionaryValue::Create();
     capabilities->SetBool("chromeStyle",owner->view.chromeStyle);
@@ -1628,6 +1659,7 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
 void Close(void* opaque) {
   auto owner=static_cast<Page*>(opaque); if (!pages.count(owner)) return;
   owner->event=nullptr; owner->popup=nullptr; owner->callback_context=nullptr; owner->closing=true;
+  [owner->view restoreBrowserContent];
   owner->awaiting_context=false;
   owner->restore_urls.clear(); owner->restore_selection=nullptr; owner->restore_created=nullptr; owner->restoring=false;
   std::vector<CefRefPtr<Client>> clients; for (const auto& entry : pages) clients.push_back(entry.first->client);
@@ -1664,7 +1696,10 @@ int Shutdown() {
   if (!initialized) return 1;
   if (!pages.empty() || !unowned_browsers.empty()) { last_error="Chromium pages are still closing."; return 0; }
   stopped=true; CancelPump();
-  contexts.clear(); CefShutdown(); engine_app=nullptr; initialized=false;
+  contexts.clear();
+  Trace("all native pages closed; entering CEF shutdown");
+  CefShutdown(); engine_app=nullptr; initialized=false;
+  Trace("CEF shutdown returned");
   // Never dlclose Chromium: runtime code may remain referenced by ObjC classes.
   return 1;
 }

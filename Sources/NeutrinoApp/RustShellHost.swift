@@ -221,6 +221,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "neutrino")
         resourceWorker.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         app.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
+        app.$finalQuitDataFrozen.sink { [weak self] frozen in
+            // Release AppKit page ownership immediately, including while the
+            // interface renderer is reloading. A refused quit can remount it.
+            if frozen { self?.container.unmount() }
+        }.store(in: &subscriptions)
         model?.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         DistributionManager.shared.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
         ChatGPTAccount.shared.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in: &subscriptions)
@@ -295,7 +300,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             // A pristine selection has no page surface. Detach its anchor even
             // while an overlay is open; the adapter retains its live browser
             // group and will remount when a navigated sibling is selected.
-            container.retainPages(Set(model.session.tabs.filter { $0.url != nil }.map(\.id)))
+            let retained = app.finalQuitDataFrozen ? Set<UUID>() : Set(model.session.tabs.filter { $0.url != nil }.map(\.id))
+            container.retainPages(retained)
         }
         if let center = downloadCenter {
             // Auxiliary windows receive only their own download capability. They
@@ -581,7 +587,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 return NSRect(x:x,y:y,width:width,height:height)
             })
         }
-        guard !showingOverlay, let model, !model.isClosed, body["overlay"] as? Bool == false,
+        guard !app.finalQuitDataFrozen, !showingOverlay, let model, !model.isClosed, body["overlay"] as? Bool == false,
               let pages = body["pages"] as? [[String: Any]], pages.count <= 2 else { container.hidePages(); return }
         var visible = Set<UUID>()
         let allowed = model.session.split.map { Set([$0.first, $0.second]) } ?? Set([model.session.selectedTabID])

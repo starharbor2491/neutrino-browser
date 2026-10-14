@@ -609,6 +609,9 @@ import UniformTypeIdentifiers
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var state: AppState?
     private let nativeTabCommands = NativeTabCommands()
+    func applicationWillTerminate(_ notification: Notification) {
+        smokeTrace("applicationWillTerminate entered")
+    }
     func applicationDidUpdate(_ notification: Notification) {
         nativeTabCommands.install(in: NSApp.mainMenu)
     }
