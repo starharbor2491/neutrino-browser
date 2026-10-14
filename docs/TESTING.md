@@ -14,6 +14,8 @@ The research receipt exercises quote provenance, different same-source excerpts,
 
 Fixture interactions independently cover command cancellation, tab/folder/Space dragging, gestures and Undo, six presets, four SVG packs, component docking/resizing, narrow editor containment, keyboard selection, named setup acknowledgement, module controls, source search/recovery, and reduced motion. These are interface checks, not native-engine compatibility evidence. Native screenshots use the OS compositor to include Blink child windows.
 
+The installed research check uses local sample articles with distinct titles and quotations, plus live forms and file inputs. It edits a source-linked note through the actual textarea input handler and checks its body after SQLite reload. Screenshot presentation uses a wider dark vertical layout, then restores the previous frame and configuration. These sample articles are test content, not third-party pages or a claim of website compatibility.
+
 Swift syntax parsing checks grammar; it cannot establish macOS compilation or execution. Apple Silicon CI separately runs real WKWebView/CEF ownership, worker sampling/reaping, private/Profile isolation, downloads and native distribution tests. The updater helper replaces a sealed application while verifying byte-identical external library, Profile, module and preference data; rejection and rollback are also tested.
 
 Earlier source-specific failures and responses remain recorded in the [Gauntlet log](GAUNTLET.md). Each release publishes its own installed receipts; historical receipts do not certify a later executable.

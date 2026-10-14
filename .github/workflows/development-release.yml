@@ -157,7 +157,7 @@ jobs:
           from pathlib import Path
           if os.environ['BLINK_ACCEPTANCE'] != 'success':
               raise SystemExit('Full Blink/extension acceptance failed; retain diagnostics and refuse publication')
-          required = ('quoteWithSource', 'twoDistinctSources', 'sourceTabIdentity', 'movedSourceRecovery', 'movedSourceNoteVisibility', 'quoteSearch', 'noteContentSearch', 'distinctQuoteExcerpts', 'databaseReload', 'retainedPageThroughSplit', 'namedSetupReload', 'largeNoteProjection')
+          required = ('quoteWithSource', 'editedNoteBody', 'twoDistinctSources', 'sourceTabIdentity', 'movedSourceRecovery', 'movedSourceNoteVisibility', 'quoteSearch', 'noteContentSearch', 'distinctQuoteExcerpts', 'databaseReload', 'retainedPageThroughSplit', 'namedSetupReload', 'largeNoteProjection')
           for engine, key in (('webkit', 'webkit'), ('blink', 'chromium')):
               receipt = json.loads(Path('dist/research-' + engine + '.json').read_text())
               if any(receipt.get(key, {}).get(check) is not True for check in required):
