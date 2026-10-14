@@ -103,7 +103,7 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         defer {pageSnapshots.removeValue(forKey:id)}
         return try await request.capture { [weak self] completion in
             guard let self, !self.disposed else {completion(.failure(CancellationError()));return}
-            self.webView.callAsyncJavaScript("return " + expression + ";", arguments: [:], in:nil,contentWorld:.defaultClient,completionHandler:completion)
+            self.webView.callAsyncJavaScript("return " + expression + ";", arguments: [:], in:nil,in:.defaultClient,completionHandler:completion)
         }
     }
     override func pageText() async throws -> String {try await extractText("(document.body?.innerText ?? '').slice(0, 40000)")}
