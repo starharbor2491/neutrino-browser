@@ -362,6 +362,18 @@ enum ChromiumAcceptance {
     }
     static func verifyChromeGeometry(_ tab: ChromiumTab, ownerWindow: NSWindow) async throws {
         guard let chrome = tab.chromeWindow else { throw ValidationError("Chrome has no native window.") }
+        // Active-tab metadata can arrive before Chrome attaches its renderer.
+        // Wait for the real viewport allocation, with the same strict geometry
+        // requirement and a bounded deadline; a URL alone is not layout proof.
+        let layoutDeadline = ContinuousClock.now.advanced(by:.seconds(5))
+        var nativeState = Data()
+        var state: [String:Any] = [:]
+        repeat {
+            nativeState = try await tab.request("Neutrino.chromeHostState", parameters: [:])
+            state = try JSONSerialization.jsonObject(with:nativeState) as? [String:Any] ?? [:]
+            if state["chromeClipped"] as? Bool == true || ContinuousClock.now >= layoutDeadline { break }
+            try await Task.sleep(for:.milliseconds(40))
+        } while true
         let buttonKinds = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
         // Chrome updates its frame controls after navigation/layout. Require
         // their effective hiding once that native update has settled.
@@ -369,6 +381,10 @@ enum ChromiumAcceptance {
         while buttonKinds.contains(where: { chrome.standardWindowButton($0).map { !$0.isHiddenOrHasHiddenAncestor } ?? false }), ContinuousClock.now < controlsDeadline {
             try await Task.sleep(for:.milliseconds(40))
         }
+        // Refresh once more after the control wait. All final native checks
+        // below inspect this settled allocation without another suspension.
+        nativeState = try await tab.request("Neutrino.chromeHostState", parameters: [:])
+        state = try JSONSerialization.jsonObject(with:nativeState) as? [String:Any] ?? [:]
         let controls = buttonKinds.map { kind -> String in
             guard let button = chrome.standardWindowButton(kind) else { return "\(kind.rawValue):missing" }
             return "\(kind.rawValue):hidden=\(button.isHidden),enabled=\(button.isEnabled),window=\(button.window?.windowNumber ?? -1),super=\(button.superview.map { String(describing: type(of: $0)) } ?? "nil")"
@@ -406,18 +422,6 @@ enum ChromiumAcceptance {
                 throw ValidationError("Chrome overlaps Neutrino's visible native tab strip.")
             }
         }
-        // Active-tab metadata can arrive before Chrome attaches its renderer.
-        // Wait for the real viewport allocation, with the same strict geometry
-        // requirement and a bounded deadline; a URL alone is not layout proof.
-        let layoutDeadline = ContinuousClock.now.advanced(by:.seconds(5))
-        var nativeState = Data()
-        var state: [String:Any] = [:]
-        repeat {
-            nativeState = try await tab.request("Neutrino.chromeHostState", parameters: [:])
-            state = try JSONSerialization.jsonObject(with:nativeState) as? [String:Any] ?? [:]
-            if state["chromeClipped"] as? Bool == true || ContinuousClock.now >= layoutDeadline { break }
-            try await Task.sleep(for:.milliseconds(40))
-        } while true
         print("Neutrino Chromium geometry: owner=\(ownerWindow.windowNumber) \(ownerWindow.frame), child=\(chrome.windowNumber) \(chrome.frame), parent=\(chrome.parent?.windowNumber ?? -1), hostBounds=\(tab.nativeView.bounds), hostFrame=\(tab.nativeView.frame), superBounds=\(String(describing: tab.nativeView.superview?.bounds)), anchor=\(expected), chrome=\(String(decoding: nativeState, as: UTF8.self))")
         guard chrome !== ownerWindow, chrome.parent === ownerWindow,
               abs(chrome.frame.minX - expected.minX) < 2, abs(chrome.frame.minY - expected.minY) < 2,
