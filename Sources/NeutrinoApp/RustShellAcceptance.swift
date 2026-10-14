@@ -345,10 +345,11 @@ import NeutrinoCore
     private static func inputProbeCount(_ page:BrowserEngineTab) async throws -> Int {
         Int(try await evaluatePage(page,"String(window.neutrinoProbeCount)")) ?? -1
     }
-    private static func evaluatePage(_ page:BrowserEngineTab,_ expression:String) async throws -> String {
+    private static func evaluatePage(_ page:BrowserEngineTab,_ expression:String, line:UInt = #line) async throws -> String {
+        print("Neutrino page evaluation: engine=\(page.engineID.rawValue), source=RustShellAcceptance:\(line)")
         if let web=page as? WebTab { return (try await web.webView.evaluateJavaScript(expression)) as? String ?? "" }
         if let chrome=page as? ChromiumTab {
-            let data=try await chrome.request("Runtime.evaluate",parameters:["expression":expression,"returnByValue":true])
+            let data=try await chrome.request("Runtime.evaluate",parameters:["expression":expression,"returnByValue":true],line:line)
             let object=try JSONSerialization.jsonObject(with:data) as? [String:Any]
             guard object?["exceptionDetails"]==nil else {throw ValidationError("The fixture JavaScript failed: " + String(describing:object?["exceptionDetails"]))}
             return (object?["result"] as? [String:Any])?["value"] as? String ?? ""

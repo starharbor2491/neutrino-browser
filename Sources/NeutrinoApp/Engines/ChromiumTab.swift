@@ -339,7 +339,7 @@ final class ChromiumTab: BrowserEngineTab {
         return image
     }
     /// Internal DevTools transport, never a listening debugging port.
-    func request(_ method: String, parameters: [String: Any], timeout: Duration = .seconds(15)) async throws -> Data {
+    func request(_ method: String, parameters: [String: Any], timeout: Duration = .seconds(15), file: StaticString = #fileID, line: UInt = #line) async throws -> Data {
         try Task.checkCancellation()
         guard !restoringPages else { throw ValidationError("This Chromium pane is still restoring its saved tabs.") }
         command(Int(NEUTRINO_CEF_SYNC_ACTIVE))
@@ -352,7 +352,7 @@ final class ChromiumTab: BrowserEngineTab {
                 let timer = Task { [weak self] in
                     do { try await Task.sleep(for: timeout) } catch { return }
                     if CommandLine.arguments.contains("--smoke-test"), ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil {
-                        print("Neutrino Chromium request timed out: method=\(method), id=\(id), loading=\(self?.loading == true), mounted=\(self?.nativeView.window != nil)")
+                        print("Neutrino Chromium request timed out: method=\(method), id=\(id), source=\(file):\(line), loading=\(self?.loading == true), mounted=\(self?.nativeView.window != nil)")
                     }
                     self?.completeRequest(id, result: .failure(ValidationError("Chromium did not respond before the request timed out.")))
                 }
