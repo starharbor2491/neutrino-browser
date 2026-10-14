@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import mmap
 import platform
 import plistlib
 import shutil
@@ -40,6 +41,12 @@ def build(work, arch):
                 shutil.rmtree(source)
             extracted.rename(source)
     output = work / ("adapter-build-" + arch)
+    # Do not silently enable a nonexistent flag on an older upstream SDK.
+    # This temporary opt-in uses upstream loading priority for cold popup loads.
+    engine_binary = source / "Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"
+    with engine_binary.open('rb') as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as engine:
+        if engine.find(b'PMLoadingPageVoter') < 0:
+            raise RuntimeError('The pinned Chromium SDK lacks loading-page priority voting (crbug.com/549552319)')
     proof.checked(["cmake", "-S", ROOT / "ChromiumRuntime", "-B", output, "-G", "Xcode",
                    "-DCEF_ROOT=" + str(source), "-DPROJECT_ARCH=" + arch, "-DUSE_SANDBOX=ON"])
     proof.checked(["cmake", "--build", output, "--config", "Release", "--target", "NeutrinoChromiumBridge", "--", "-quiet"])

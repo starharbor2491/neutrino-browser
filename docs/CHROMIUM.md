@@ -39,6 +39,8 @@ The build obtains the pinned ARM64 CEF package when no `NEUTRINO_CHROMIUM_PACKAG
 
 The framework, five helper variants, resources/locales, and notices remain inside the sealed app. Runtime updates use verified whole-app replacement, not mutation of a running signed bundle. TLS, sandboxing, Gatekeeper, and library validation remain enabled.
 
+The bridge opts into Chromium 154's supported `PMLoadingPageVoter` while investigating [cold extension-popup loading](https://issues.chromium.org/issues/549552319). The [upstream implementation](https://chromium.googlesource.com/chromium/src/+/154.0.8037.98/components/performance_manager/execution_context_priority/loading_page_voter.cc) boosts all loading or initially busy pages: active pages receive user-blocking priority and others user-visible priority. Votes clear when upstream state leaves loading/busy; committed loads can stay boosted until that happens. Idle background policy remains upstream. Packaging rejects an SDK without this feature. Native popup/side-panel acceptance must establish effectiveness before publication. The newer withheld-view-specific fix is absent from the pinned SDK; reassess this opt-in when a supported upstream update contains it.
+
 ## Validation status
 
 Linux checks validate portable state and source syntax, not this Cocoa/CEF integration. Native build/type checking, child-window geometry/focus, document transfer, extension workflows, media permissions, clean-Mac installation, and ordinary shutdown must run on macOS. Earlier Radius acceptance is historical and does not certify this new host.

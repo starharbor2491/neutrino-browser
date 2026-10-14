@@ -147,7 +147,9 @@ static NSView* PageContentView(NSView* view) {
     NSView* document=self.chromeClip.documentView;
     const NSSize viewport=self.chromeClip.bounds.size;
     for (int pass=0;pass<3;++pass) {
-      if (NSView* page=PageContentView(document)) {
+      // Chrome can attach a newly selected inner page to the window's content
+      // view directly. Include those siblings of the retained chrome document.
+      if (NSView* page=PageContentView(self.chromeClip)) {
         // The Cocoa content origin includes scroll offsets. Its height is the
         // actual WebContents allocation; subtract heights to isolate chrome.
         const CGFloat inset=NSHeight(document.bounds)-NSHeight(page.bounds);
@@ -160,7 +162,7 @@ static NSView* PageContentView(NSView* view) {
     }
     // Layout may change the Cocoa page origin when resizing the root view.
     // Scroll to its final rectangle, rather than a pre-layout toolbar estimate.
-    if (NSView* page=PageContentView(document)) {
+    if (NSView* page=PageContentView(self.chromeClip)) {
       const NSRect rect=[page convertRect:page.bounds toView:document];
       const CGFloat y=document.isFlipped ? NSMinY(rect) : NSMaxY(rect)-viewport.height;
       [self.chromeClip scrollToPoint:NSMakePoint(NSMinX(rect),y)];
@@ -220,6 +222,16 @@ class EngineApp final : public CefApp, public CefBrowserProcessHandler {
     // otherwise ignores Neutrino's allow toggle, especially in private contexts
     // where default content settings cannot be changed.
     if (process_type.empty()) command_line->AppendSwitch("disable-popup-blocking");
+    if (process_type.empty()) {
+      // Chromium 154 can starve hidden extension surfaces before first paint
+      // (crbug.com/549552319). Its supported loading voter keeps loading/busy
+      // pages responsive and releases the vote when upstream loading/busy
+      // state ends. Idle background policy stays upstream; packaging checks support.
+      std::string features=command_line->GetSwitchValue("enable-features").ToString();
+      if (!features.empty()) features+=",";
+      features+="PMLoadingPageVoter";
+      command_line->AppendSwitchWithValue("enable-features",features);
+    }
     if (process_type.empty() && diagnostics &&
         [[[NSProcessInfo processInfo] environment] objectForKey:@"NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE"]) {
       // Only isolated acceptance launches expose browser-target CDP. Chrome
@@ -1542,10 +1554,11 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
     auto result=CefDictionaryValue::Create();
     NSWindow* window=owner->view.browserWindow;
     NSView* document=owner->view.chromeClip.documentView;
-    NSView* content=document ? PageContentView(document) : nil;
+    NSView* content=owner->view.chromeClip ? PageContentView(owner->view.chromeClip) : nil;
     NSRect pageRect=content ? [content convertRect:content.bounds toView:owner->view.chromeClip] : NSZeroRect;
     const NSRect viewport=owner->view.chromeClip.bounds;
-    const bool clipped=content && std::abs(NSMinY(pageRect)-NSMinY(viewport))<2 &&
+    const bool clipped=content && std::abs(NSMinX(pageRect)-NSMinX(viewport))<2 &&
+        std::abs(NSMinY(pageRect)-NSMinY(viewport))<2 &&
         std::abs(NSWidth(pageRect)-NSWidth(viewport))<2 && std::abs(NSHeight(pageRect)-NSHeight(viewport))<2;
     result->SetBool("customHost",owner->view.chromeClip && window.contentView==owner->view.chromeClip);
     result->SetBool("chromeClipped",clipped);
@@ -1553,7 +1566,7 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
       // Only the isolated native diagnostic request reaches this branch.
       // Record a bounded structural tree, without page text or credentials.
       auto tree=CefListValue::Create();
-      std::vector<NSView*> pending{document};
+      std::vector<NSView*> pending{owner->view.chromeClip};
       while (!pending.empty() && tree->GetSize()<120) {
         NSView* view=pending.back();pending.pop_back();
         auto item=CefDictionaryValue::Create();
