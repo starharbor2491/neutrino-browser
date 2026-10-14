@@ -18,7 +18,7 @@ Seven screens cover welcome, Profile/Space naming, optional HTML bookmarks impor
 
 The component palette and live layout preview expose tabs, navigation, and Library docking. Tabs support every edge; navigation supports top/bottom; Library supports either side. Drag a component to a highlighted valid edge or use labeled position controls. Sidebar width, accent, light/dark/system appearance, and density are editable. The active page remains mounted in its original engine while its frame follows the draft; interactions with that page are paused during editing. Save applies the draft to this Space or the browser default. Undo, Redo, Cancel, reset, and save/discard before leaving remain reachable.
 
-The live sidebar can be resized with its handle or arrow keys. Tab moves retain their live pages and offer Undo. Site identity and recovery controls remain reachable in supported layouts. Detailed per-component styling, arbitrary component replacement/removal, and a full named-setup management interface remain product work; retained configuration fields alone are not evidence of those workflows.
+The live sidebar can be resized with its handle or arrow keys. Tab moves retain their live pages and offer Undo. Site identity and recovery controls remain reachable in supported layouts. Type, spacing, corner radius, colors, density, SVG icon pack/stroke, panel width, and bookmarks bar update the rendered preview. Named setups can be loaded, renamed, replaced, and deleted. Rejected saves keep the draft until the native adapter acknowledges success. Arbitrary component replacement/removal and additional advanced styling remain product work.
 
 ## Design rules and review
 
@@ -28,6 +28,14 @@ The [gauntlet record](GAUNTLET.md) separates source, browser-harness, native-ima
 
 ## Violet default
 
-The default is Graphite/Dark with violet accents drawn from the supplied icon. Neutral surfaces, 6px control corners, concise labels and explicit action hierarchy replace the former cream/serif presentation. Ordinary browsing uses inline fields and persistent destinations; command search is reserved for quick navigation. Motion acknowledges selection, setup steps, opening surfaces and dragging, and respects both macOS and app reduced-motion preferences. Start-page tips are optional modules.
+The default is Graphite/Dark with violet accents drawn from the supplied icon. Neutral surfaces, 6px control corners, concise labels and explicit action hierarchy replace the former cream/serif presentation. The sidebar edits the current address inline. ⌘T opens the destination command bar without creating a blank tab; ⌘K searches tabs and commands. Library, modules and ordinary settings remain direct surfaces. Motion acknowledges selection, setup steps, opening surfaces and dragging, and respects both macOS and app reduced-motion preferences. Optional workspace widgets live in the sidebar instead of a new-tab page.
 
-Modules are directly accessible from the sidebar and Settings. Installed providers project validated settings, menus, SF Symbol masks, start widgets, theme/layout/tab definitions and removable feature workers. Resources and Focus have visible entry/recovery paths. Theme component scales, densities and corners apply to the Rust shell while site identity, permission confirmations and recovery remain protected.
+Modules are directly accessible from the sidebar and Settings. Installed providers project validated settings, menus, path-only SVG icon packs, workspace widgets, theme/layout/tab definitions and removable feature workers. Resources and Focus have visible entry/recovery paths. Theme component scales, densities and corners apply to the Rust shell while site identity, permission confirmations and recovery remain protected.
+
+## Research and familiar layouts
+
+The first setup screen offers Neutrino, Arc, Chrome, Safari, Brave, and Opera GX inspired configurations. Presets set real tab/navigation placement, color mode, density, accent, icons and optional monitor/bookmark surfaces. They ease transition without claiming affiliation or exact feature parity.
+
+Research notes retain the selected quotation, source address/title, source tab identity, and project Space. Open source locates the original document across the same Profile's Spaces before URL fallback. The project note stays in its original Space even if its live source moves. Notes can be filtered by title, source and Space, and newest captures appear first. At narrow window widths, opening a research panel hides the tab rail; Return to tabs restores it.
+
+The editor preview responds to its own canvas width. A narrow preview temporarily hides a vertical rail when a panel is open so the page remains visible. Selection overlays follow only visible components; tabs, navigation, and the Library panel support pointer dragging and keyboard activation.

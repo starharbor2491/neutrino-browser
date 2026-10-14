@@ -146,56 +146,14 @@ extension AppState {
         notice = "Quit and reopen Neutrino to clear WebKit website data and reset this Chromium profile. Chromium bookmarks, history, extensions, and settings are removed; Neutrino bookmarks, history, notes, tab addresses, and setup are kept."
     }
 
-    func libraryPreparedForChromiumRemoval() -> LibraryState {
-        var prepared = library
-        for index in prepared.profiles.indices where prepared.profiles[index].engineID == .chromium { prepared.profiles[index].engineID = .webkit }
-        for index in prepared.sessions.indices {
-            for tabIndex in prepared.sessions[index].tabs.indices where prepared.sessions[index].tabs[tabIndex].engineID == .chromium {
-                prepared.sessions[index].tabs[tabIndex].engineID = .webkit
-                prepared.sessions[index].tabs[tabIndex].chromiumPages = nil
-                if let url = prepared.sessions[index].tabs[tabIndex].url, !AddressResolver.isWebURL(url) {
-                    prepared.sessions[index].tabs[tabIndex].url = nil
-                    prepared.sessions[index].tabs[tabIndex].title = "New tab"
-                }
-            }
-        }
-        if let spaces = prepared.spaces {
-            for spaceIndex in spaces.indices {
-                prepared.spaces?[spaceIndex].tabs = spaces[spaceIndex].tabs.map(webKitDescriptor)
-                prepared.spaces?[spaceIndex].archivedTabs = spaces[spaceIndex].archivedTabs.map(webKitDescriptor)
-            }
-        }
-        return prepared
+    func libraryPreparedForChromiumRemoval() throws -> LibraryState {
+        try RustCore.transform(library,operation:"prepareForChromiumRemoval")
     }
-    private func webKitDescriptor(_ descriptor: BrowserTab) -> BrowserTab {
-        guard descriptor.engineID == .chromium else { return descriptor }
-        var tab = descriptor; tab.engineID = .webkit; tab.chromiumPages = nil
-        if let url = tab.url, !AddressResolver.isWebURL(url) { tab.url = nil; tab.title = "New tab" }
-        return tab
-    }
-    func prepareForChromiumRemoval() {
-        windows.values.compactMap(\.model).forEach { $0.captureChromiumSessions() }
-        library = libraryPreparedForChromiumRemoval()
-        for model in windows.values.compactMap(\.model) {
-            model.disposeEngineTabs(engine: .chromium)
-            for tab in model.session.tabs where tab.engineID == .chromium {
-                if let url = tab.url, !AddressResolver.isWebURL(url), let index = model.session.tabs.firstIndex(where: { $0.id == tab.id }) {
-                    model.session.tabs[index].url = nil; model.session.tabs[index].title = "New tab"
-                }
-                model.changeEngine(tab.id, to: .webkit)
-            }
-            for index in model.closedTabs.indices where model.closedTabs[index].engineID == .chromium {
-                model.closedTabs[index].engineID = .webkit
-                model.closedTabs[index].chromiumPages = nil
-                if let url = model.closedTabs[index].url, !AddressResolver.isWebURL(url) { model.closedTabs[index].url = nil; model.closedTabs[index].title = "New tab" }
-            }
-            model.address = model.selectedTab.url?.absoluteString ?? ""
-        }
-    }
+
 }
 
 @MainActor
-private final class WebsiteStoreRemoval {
+final class WebsiteStoreRemoval {
     private var continuation: CheckedContinuation<Void, any Error>?
     private var deadline: Task<Void, Never>?
     private init() {}

@@ -97,14 +97,17 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
             }
         }
     }
-    override func pageText() async throws -> String {
-        let result = try await webView.callAsyncJavaScript("return (document.body?.innerText ?? '').slice(0, 40000);", arguments: [:], in: nil, contentWorld: .defaultClient)
-        return result as? String ?? ""
+    private func extractText(_ expression: String) async throws -> String {
+        let id=UUID(), request=WebPageSnapshotRequest()
+        pageSnapshots[id]=request
+        defer {pageSnapshots.removeValue(forKey:id)}
+        return try await request.capture { [weak self] completion in
+            guard let self, !self.disposed else {completion(.failure(CancellationError()));return}
+            self.webView.callAsyncJavaScript("return " + expression + ";", arguments: [:], in:nil,in:.defaultClient,completionHandler:completion)
+        }
     }
-    override func selectedText() async throws -> String {
-        let result = try await webView.callAsyncJavaScript("return (window.getSelection()?.toString() ?? '').slice(0, 8000);", arguments: [:], in: nil, contentWorld: .defaultClient)
-        return result as? String ?? ""
-    }
+    override func pageText() async throws -> String {try await extractText("(document.body?.innerText ?? '').slice(0, 40000)")}
+    override func selectedText() async throws -> String {try await extractText("(window.getSelection()?.toString() ?? '').slice(0, 8000)")}
     override func fillCredential(_ credential: LocalCredential) async throws {
         _ = try await webView.callAsyncJavaScript(credential.autofillScript, arguments: [:], in: nil, contentWorld: .defaultClient)
     }

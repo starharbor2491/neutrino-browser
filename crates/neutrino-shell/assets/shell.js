@@ -16,6 +16,7 @@
     composition = false,
     currentContext = null,
     focusToken = null,
+    commandRevision = null,
     menuAnchor = null,
     dialogPosition = null,
     dialogDrag = null,
@@ -39,7 +40,7 @@
   function selector(el) {
     if (!el) return null;
     if (el.id) return "#" + CSS.escape(el.id);
-    for (const key of ["data-setup", "data-name", "data-note", "data-editor"])
+    for (const key of ["data-setup", "data-setup-name", "data-name", "data-note", "data-editor"])
       if (el.hasAttribute(key))
         return (
           el.tagName.toLowerCase() +
@@ -62,6 +63,7 @@
           : "") +
         [
           "data-op",
+          "data-page",
           "data-id",
           "data-value",
           "data-action",
@@ -152,7 +154,8 @@
           (preserveEditing &&
             current.matches(textInputSelector + ",select") &&
             (current === document.activeElement ||
-              current.closest("form[data-form]")));
+              current.closest("form[data-form]")) &&
+            (current.id !== "address-input" || current.dataset.addressContext === fresh.dataset.addressContext));
         for (const attr of [...current.attributes]) {
           if (
             !fresh.hasAttribute(attr.name) &&
@@ -222,7 +225,13 @@
     const previousStep = root.querySelector(".onboarding")?.className;
     const previousScreen =
       root.querySelector(".utility-screen")?.dataset.screen;
-    const previousTab = root.querySelector(".tab-row.active")?.dataset.tab;
+    const tabPositions = new Map(
+      [...root.querySelectorAll(".tab-row")].map((el) => [
+        el.dataset.tab,
+        el.getBoundingClientRect(),
+      ]),
+    );
+    const hadPanel = !!root.querySelector(".workspace-panel");
     const sameContext =
       currentContext === null || currentContext === result.context;
     if (result.context) currentContext = result.context;
@@ -232,7 +241,7 @@
       active && typeof active.selectionStart === "number"
         ? [active.selectionStart, active.selectionEnd]
         : null;
-    const preserved =
+    let preserved =
       sameContext && key && active.matches(textInputSelector)
         ? active.value
         : null;
@@ -247,10 +256,20 @@
     const hadDialog = !!topDialog();
     const template = document.createElement("template");
     template.innerHTML = result.html;
+    if (active?.id === "address-input" && active.dataset.addressContext !== template.content.querySelector("#address-input")?.dataset.addressContext)
+      preserved = null;
+    const commandValue =
+      template.content.querySelector("#command-input")?.getAttribute("value") ||
+      "";
     if (sameContext) reconcile(root, template.content, true);
     else root.replaceChildren(template.content.cloneNode(true));
     currentOverlay = !!result.overlay;
     currentEditing = !!result.editing;
+    if (result.commandRevision !== commandRevision) {
+      commandRevision = result.commandRevision;
+      const command = root.querySelector("#command-input");
+      if (command) command.value = commandValue;
+    }
     const dialog = topDialog();
     for (const el of root.querySelectorAll(
       ".browser-shell,.editor,.utility-screen,.command-palette",
@@ -298,7 +317,7 @@
       root.querySelector(returnFocus)?.focus({ preventScroll: true });
       returnFocus = null;
     }
-    if (adjustment) {
+    if (adjustment?.element.dataset.editor === "tabsWidth") {
       root
         .querySelector(".editing-preview")
         ?.style.setProperty("--rail-width", adjustment.value + "px");
@@ -348,15 +367,30 @@
         ],
         180,
       );
-    const tab = root.querySelector(".tab-row.active");
-    if (tab && previousTab !== tab.dataset.tab)
+    if (sameContext && motionAllowed() && !root.querySelector(".dragging")) {
+      for (const tab of root.querySelectorAll(".tab-row")) {
+        const before = tabPositions.get(tab.dataset.tab),
+          after = tab.getBoundingClientRect();
+        if (before && Math.abs(before.top - after.top) > 1)
+          animate(
+            tab,
+            [
+              { transform: `translateY(${before.top - after.top}px)` },
+              { transform: "translateY(0)" },
+            ],
+            180,
+          );
+      }
+    }
+    const panel = root.querySelector(".workspace-panel");
+    if (panel && !hadPanel)
       animate(
-        tab,
+        panel,
         [
-          { boxShadow: "inset 2px 0 var(--accent),0 0 0 1px var(--accent)" },
-          { boxShadow: "inset 2px 0 var(--accent),0 0 0 1px transparent" },
+          { opacity: 0, transform: "translateX(8px)" },
+          { opacity: 1, transform: "translateX(0)" },
         ],
-        240,
+        180,
       );
     announce(result.announce);
     patching = false;
@@ -384,14 +418,17 @@
     if (!menu) return;
     const rail = root.querySelector(".workspace-rail"),
       r = rail?.getBoundingClientRect();
-    const width = r?.width ? Math.max(180, r.width - 20) : 260;
+    const scope = menu.dataset.menu === "notes-scope"
+      ? document.getElementById("notes-scope-trigger")?.getBoundingClientRect()
+      : null;
+    const width = scope ? 220 : r?.width ? Math.max(180, r.width - 20) : 260;
     menu.style.width = Math.min(width, innerWidth - 24) + "px";
-    const anchor = menuAnchor || { x: r?.left || 10, y: 44 };
+    const anchor = scope ? { x: scope.left, y: scope.bottom + 4 } : menuAnchor || { x: r?.left || 10, y: 44 };
     menu.style.left =
       Math.max(
         12,
         Math.min(
-          r?.width ? r.left + 10 : anchor.x,
+          !scope && r?.width ? r.left + 10 : anchor.x,
           innerWidth - menu.offsetWidth - 12,
         ),
       ) + "px";
@@ -435,6 +472,33 @@
     canvas.style.transform = "none";
     canvas.style.left = "0";
     canvas.style.top = "0";
+    const frameRect = frame.getBoundingClientRect();
+    for (const [selector, target] of [
+      [".tabs-selection", ".workspace-rail"],
+      [".nav-selection", ".page-toolbar"],
+      [".panel-selection", ".workspace-panel"],
+    ]) {
+      const selection = frame.querySelector(selector);
+      let source = canvas.querySelector(target);
+      if (
+        target === ".workspace-rail" &&
+        source &&
+        getComputedStyle(source).visibility === "hidden"
+      )
+        source = canvas.querySelector(".horizontal-tabs");
+      if (!selection) continue;
+      const rect = source?.getBoundingClientRect();
+      selection.hidden = !rect || !rect.width || !rect.height ||
+        getComputedStyle(source).visibility === "hidden";
+      if (!selection.hidden) {
+        selection.style.left = rect.left - frameRect.left + "px";
+        selection.style.top = rect.top - frameRect.top + "px";
+        selection.style.width = rect.width + "px";
+        selection.style.height = rect.height + "px";
+        selection.style.right = "auto";
+        selection.style.bottom = "auto";
+      }
+    }
   }
   function scheduleGeometry() {
     scalePreview();
@@ -451,6 +515,10 @@
           y: r.y,
           width: r.width,
           height: r.height,
+          radius:
+            parseFloat(
+              getComputedStyle(el.closest(".page-frame") || el).borderRadius,
+            ) || 0,
         };
       });
       positionMenu();
@@ -500,6 +568,7 @@
     if (r.op === "editor-scope" || el.dataset.type === "bool")
       r.value = r.value === "true";
     if (r.index !== undefined) r.index = Number(r.index);
+    if (r.page !== undefined) r.page = Number(r.page);
     return r;
   }
   document.addEventListener("click", (e) => {
@@ -554,6 +623,7 @@
       })
         .then((result) => patch({ ...result, passive: true }))
         .catch((e) => announce("Could not save note. " + e.message));
+    else if (el.dataset.notesQuery) send({op:"native",action:"notesQuery",value:el.value});
     else if (el.dataset.moduleSearch)
       send({ op: "module-query", value: el.value });
     else if (el.id === "command-input") send({ op: "query", value: el.value });
@@ -564,7 +634,8 @@
   });
   document.addEventListener("change", (e) => {
     const el = e.target;
-    if (el.dataset.moduleSetting) {
+    if (el.dataset.setupName) {send({op:"editor-rename-named",id:el.dataset.setupName,value:el.value});}
+    else if (el.dataset.moduleSetting) {
       const value = el.type === "number" ? Number(el.value) : el.value;
       if (
         el.type !== "number" ||
@@ -719,7 +790,7 @@
         finishResize(false);
         return;
       }
-      send({ op: "escape" });
+      send({ op: "escape", restoreFocus: true });
       return;
     }
     if (e.key === "Tab") {

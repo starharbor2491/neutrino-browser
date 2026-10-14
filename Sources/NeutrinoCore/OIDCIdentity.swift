@@ -3,7 +3,7 @@ import Foundation
 
 /// Claim validation follows signature verification by the account adapter.
 /// JSONDecoder rejects booleans and strings where numeric dates are required.
-public struct OIDCIdentity: Decodable, Sendable {
+public struct OIDCIdentity: Codable, Sendable {
   public let issuer: String
   public let subject: String
   public let audiences: [String]
@@ -47,17 +47,7 @@ public struct OIDCIdentity: Decodable, Sendable {
   public func validate(
     issuer: String, clientID: String, nonce: String?, subject: String? = nil, now: Date = Date()
   ) throws {
-    let time = now.timeIntervalSince1970
-    guard self.issuer == issuer, !self.subject.isEmpty, self.subject.utf8.count <= 256,
-      subject == nil || self.subject == subject,
-      !audiences.isEmpty, audiences.count <= 20, audiences.contains(clientID),
-      (audiences.count == 1 && authorizedParty == nil) || authorizedParty == clientID,
-      nonce == nil || self.nonce == nonce,
-      expiresAt.isFinite, issuedAt.isFinite, expiresAt > time,
-      issuedAt > 0, issuedAt <= time + 60, expiresAt > issuedAt,
-      notBefore == nil || (notBefore!.isFinite && notBefore! <= time + 60)
-    else {
-      throw ValidationError("The account identity claims do not match this authorization.")
-    }
+    _ = try RustCore.policy(["op":"validateIdentity","value":RustCore.encoded(self),"issuer":issuer,"clientID":clientID,
+      "nonce":nonce as Any? ?? NSNull(),"subject":subject as Any? ?? NSNull(),"now":now.timeIntervalSince1970])
   }
 }

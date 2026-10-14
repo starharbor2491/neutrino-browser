@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+import Foundation
 import NeutrinoCore
 
 @MainActor
@@ -28,7 +29,7 @@ extension AppState {
         }
         applyConfiguration(next)
     }
-    func applySetup(_ configuration: Configuration, requirements: [String], approvalTitle: String? = nil) throws -> Bool {
+    func applySetup(_ configuration: Configuration, requirements: [String], approvalTitle: String? = nil, spaceID: UUID? = nil) throws -> Bool {
         try requireModuleMutationAllowed()
         var required = requirements
         // A setup's tab behavior must have a real interchangeable provider.
@@ -52,11 +53,14 @@ extension AppState {
         }
         // Preview publisher, all dependencies, and permission differences before
         // any installation, role replacement, or configuration mutation.
-        guard approveModules(requirements, activateRequirements: true, activationTitle: approvalTitle) else { return false }
-        try applyApprovedSetup(configuration, requirements: requirements, approval: approval)
+        let needsApproval=requirements.contains { requirement in
+            !installedModules.contains(where:{$0.manifest==requirement && $0.enabled})
+        }
+        if needsApproval, !approveModules(requirements,activateRequirements:true,activationTitle:approvalTitle) {return false}
+        try applyApprovedSetup(configuration, requirements: requirements, approval: approval, spaceID: spaceID)
         return true
     }
-    func applyApprovedSetup(_ configuration: Configuration, requirements: [ModuleManifest], approval: ModuleApprovalSnapshot? = nil) throws {
+    func applyApprovedSetup(_ configuration: Configuration, requirements: [ModuleManifest], approval: ModuleApprovalSnapshot? = nil, spaceID: UUID? = nil) throws {
         if let approval {
             guard requirements == approval.requirements else { throw ValidationError("This setup no longer matches its approved modules. Review its requirements again.") }
             let current = try validateModuleRequirements(for: approval.rootIDs)
@@ -67,11 +71,11 @@ extension AppState {
             // setup before replacing any providers; required ID order is inert.
             try installApprovedModuleCode(requirements)
             try activateApprovedModuleRequirements(requirements)
-            applyConfiguration(configuration)
+            guard applyConfiguration(configuration,to:spaceID) else {throw ValidationError(notice ?? "This Space's appearance could not be applied.")}
         }
         // The setup explicitly supplies customized values; preserve them after
         // contribution defaults have been synchronized at the transaction boundary.
-        applyConfiguration(configuration)
+        applyConfiguration(configuration, to: spaceID)
     }
     var configurationModuleRequirements: [String] {
         installedModules.filter { $0.enabled && [.tabSystem, .theme, .layout, .icons, .menu, .startWidget].contains($0.manifest.capability) }.map(\.id)

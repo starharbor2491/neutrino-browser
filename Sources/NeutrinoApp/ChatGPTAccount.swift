@@ -49,11 +49,12 @@ private struct ChatGPTCredentials: Codable, Sendable {
   }
   func cancelSignIn() {
     credentialGeneration += 1
+    refreshTask?.cancel()
     listener?.cancel()
     listener = nil
   }
   func signIn() async {
-    guard !busy else { return }
+    guard !Task.isCancelled, !busy else { return }
     busy = true
     status = nil
     credentialGeneration += 1
@@ -81,6 +82,8 @@ private struct ChatGPTCredentials: Codable, Sendable {
       let loopback = try OAuthLoopback()
       listener = loopback
       let callback = try await loopback.start()
+      try Task.checkCancellation()
+      guard generation==credentialGeneration else {throw CancellationError()}
       var parts = URLComponents(string: "https://auth.openai.com/api/accounts/authorize")!
       let registeredID = try SecureVault.get(account: "client-id", service: service).flatMap {
         String(data: $0, encoding: .utf8)
@@ -105,6 +108,8 @@ private struct ChatGPTCredentials: Codable, Sendable {
         throw ValidationError("The system browser could not open the sign-in page.")
       }
       let returned = try await loopback.waitForCallback(expectedState: state)
+      try Task.checkCancellation()
+      guard generation==credentialGeneration else {throw CancellationError()}
       let issuedID = returned["client_id"] ?? values["client_id"]
       guard let clientID = issuedID, clientID != "dynamic_agent_client", clientID.count <= 256,
         let code = returned["code"], !code.isEmpty
@@ -130,6 +135,7 @@ private struct ChatGPTCredentials: Codable, Sendable {
       let record = try makeCredentials(
         tokens, previous: nil, clientID: clientID, subject: claims.subject,
         email: claims.email, idToken: idToken)
+      try Task.checkCancellation()
       guard generation == credentialGeneration else { throw CancellationError() }
       try save(record)
       status =

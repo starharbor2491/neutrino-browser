@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
 import SwiftUI
+@preconcurrency import WebKit
 import NeutrinoCore
 
 /// Executed only by the packaged application's isolated native smoke test.
@@ -12,6 +13,7 @@ enum ChromiumAcceptance {
             throw ValidationError("Extension interface acceptance requires the isolated smoke-test launch.")
         }
         let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
+        let app = browser.app
         let originalProfile = browser.session.profileID
         browser.endSplit()
         func openManager() async throws -> ChromiumTab {
@@ -33,7 +35,8 @@ enum ChromiumAcceptance {
         func closeManager(_ page:ChromiumTab,id:UUID) async throws {
             _ = try? await page.request("Page.close",parameters:[:],timeout:.seconds(5))
             let deadline = ContinuousClock.now.advanced(by:.seconds(10))
-            while browser.session.tabs.contains(where:{$0.id == id}) {
+            while browser.session.tabs.contains(where:{$0.id == id}) || page.chromeWindow != nil ||
+                page.nativeView.value(forKey:"chromeClip") != nil {
                 guard ContinuousClock.now < deadline else { throw ValidationError("Chrome did not close its Neutrino manager tab.") }
                 try await Task.sleep(for:.milliseconds(50))
             }
@@ -51,7 +54,27 @@ enum ChromiumAcceptance {
         browser.selectTab(originalID)
         guard browser.activeWebTab === original else { throw ValidationError("Returning to the original Profile replaced its extension manager document.") }
         try await closeManager(original,id:originalID)
-        _ = try await openManager() // Leave a real manager tab open for normal Quit.
+        let manager = try await openManager() // Leave a real manager tab open for normal Quit.
+        let members = Set(try await nativeBrowsers(manager).compactMap { $0["id"] as? Int })
+        guard !members.isEmpty, members.allSatisfy({ $0 > 0 }) else { throw ValidationError("The quit probe has no live native browser identity.") }
+        app.freezeQuitData()
+        do {
+            let deadline = ContinuousClock.now.advanced(by:.seconds(5))
+            while manager.nativeView.window != nil || manager.chromeWindow?.parent != nil {
+                guard ContinuousClock.now < deadline else { throw ValidationError("Final quit freeze retained an attached native page surface.") }
+                try await Task.sleep(for:.milliseconds(50))
+            }
+            guard Set(try await nativeBrowsers(manager).compactMap { $0["id"] as? Int }) == members else { throw ValidationError("Suspending the interface destroyed its live browser.") }
+        } catch { app.unfreezeQuitData(); throw error }
+        app.unfreezeQuitData()
+        let remountDeadline = ContinuousClock.now.advanced(by:.seconds(5))
+        while manager.nativeView.window !== ownerWindow || manager.chromeWindow?.parent !== ownerWindow {
+            guard ContinuousClock.now < remountDeadline else { throw ValidationError("A refused quit did not remount its retained native page.") }
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.activeWebTab === manager,
+              Set(try await nativeBrowsers(manager).compactMap { $0["id"] as? Int }) == members else { throw ValidationError("A refused quit replaced its live native browser.") }
+        try await verifyChromeGeometry(manager, ownerWindow:ownerWindow)
         print("Neutrino Chromium acceptance: Rust extension controls, Profile isolation, retained manager, engine close and quit ownership passed")
     }
     static func verifyKeyboardRouting(browser: BrowserModel, ownerWindow: NSWindow) async throws {
@@ -81,17 +104,22 @@ enum ChromiumAcceptance {
         try await verifyChromeGeometry(page, ownerWindow: ownerWindow)
         _ = try await evaluate(page, "(window.neutrinoLiveMarker=73, 'ready')")
         let count = browser.session.tabs.count
+        let shell=try await RustShellAcceptance.waitForShell(in:ownerWindow)
         page.focus()
-        try key("t", code: 17, modifiers: .command, window: page.chromeWindow!)
-        try await wait("Command-T") { browser.session.tabs.count == count + 1 }
-        guard browser.session.selectedTabID != probe else { throw ValidationError("Command-T did not create a Neutrino tab.") }
-        try key("w", code: 13, modifiers: .command, window: ownerWindow)
-        try await wait("Command-W") { browser.session.tabs.count == count && ownerWindow.isVisible && !browser.isClosed }
+        try key("t",code:17,modifiers:.command,window:page.chromeWindow!)
+        try await wait("Command-T opens destinations") {
+            let open=(try await shell.evaluateJavaScript("!!document.querySelector('.command-palette') && document.activeElement.id==='command-input'")) as? Bool == true
+            return browser.session.tabs.count==count && browser.session.selectedTabID==probe && open
+        }
+        try key("w",code:13,modifiers:.command,window:ownerWindow)
+        try await wait("Command-W cancels destinations") {
+            let closed=(try await shell.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true
+            return browser.session.tabs.count==count && ownerWindow.isVisible && !browser.isClosed && closed
+        }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("Creating and closing a tab replaced the existing document.") }
         page.focus()
         try key("l", code: 37, modifiers: .command, window: page.chromeWindow!)
-        let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
         let addressDeadline = ContinuousClock.now.advanced(by:.seconds(15))
         while true {
             let responder = ownerWindow.firstResponder as? NSView
@@ -147,9 +175,23 @@ enum ChromiumAcceptance {
         page.focus()
         try await wait("page focus before File menu") { page.chromeWindow?.isKeyWindow == true }
         try await performWhenReady("New tab")
-        try await wait("New tab menu") { browser.session.tabs.count == count + 1 }
+        try await wait("New tab menu opens destinations") {
+            let open=(try await shell.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true
+            return browser.session.tabs.count==count && open
+        }
         try await performWhenReady("Close tab")
-        try await wait("Close tab menu") { browser.session.tabs.count == count }
+        try await wait("Close tab menu cancels destinations") {
+            let closed=(try await shell.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true
+            return browser.session.tabs.count==count && closed
+        }
+        // Committing a destination creates the actual new tab; opening and
+        // canceling the command UI must never create an empty document.
+        try await performWhenReady("New tab")
+        _ = try await shell.callAsyncJavaScript("const input=document.getElementById('command-input');input.value=url;input.dispatchEvent(new Event('input',{bubbles:true}));",arguments:["url":address],in:nil,contentWorld:.page)
+        try key("\r",code:36,window:ownerWindow)
+        try await wait("Destination creates a live tab") {browser.session.tabs.count==count+1 && browser.session.selectedTabID != probe && browser.activeWebTab.url==url && !browser.activeWebTab.loading}
+        try await performWhenReady("Close tab")
+        try await wait("Close committed destination") {browser.session.tabs.count==count}
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("File-menu tab actions replaced the existing document.") }
         try await verifyNavigationRetry(browser: browser, tab: page, fixtureURL: url)
@@ -343,7 +385,29 @@ enum ChromiumAcceptance {
     }
     static func verifyChromeGeometry(_ tab: ChromiumTab, ownerWindow: NSWindow) async throws {
         guard let chrome = tab.chromeWindow else { throw ValidationError("Chrome has no native window.") }
+        // Active-tab metadata can arrive before Chrome attaches its renderer.
+        // Wait for the real viewport allocation, with the same strict geometry
+        // requirement and a bounded deadline; a URL alone is not layout proof.
+        let layoutDeadline = ContinuousClock.now.advanced(by:.seconds(5))
+        var nativeState = Data()
+        var state: [String:Any] = [:]
+        repeat {
+            nativeState = try await tab.request("Neutrino.chromeHostState", parameters: [:])
+            state = try JSONSerialization.jsonObject(with:nativeState) as? [String:Any] ?? [:]
+            if state["chromeClipped"] as? Bool == true || ContinuousClock.now >= layoutDeadline { break }
+            try await Task.sleep(for:.milliseconds(40))
+        } while true
         let buttonKinds = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+        // Chrome updates its frame controls after navigation/layout. Require
+        // their effective hiding once that native update has settled.
+        let controlsDeadline = ContinuousClock.now.advanced(by:.seconds(2))
+        while buttonKinds.contains(where: { chrome.standardWindowButton($0).map { !$0.isHiddenOrHasHiddenAncestor } ?? false }), ContinuousClock.now < controlsDeadline {
+            try await Task.sleep(for:.milliseconds(40))
+        }
+        // Refresh once more after the control wait. All final native checks
+        // below inspect this settled allocation without another suspension.
+        nativeState = try await tab.request("Neutrino.chromeHostState", parameters: [:])
+        state = try JSONSerialization.jsonObject(with:nativeState) as? [String:Any] ?? [:]
         let controls = buttonKinds.map { kind -> String in
             guard let button = chrome.standardWindowButton(kind) else { return "\(kind.rawValue):missing" }
             return "\(kind.rawValue):hidden=\(button.isHidden),enabled=\(button.isEnabled),window=\(button.window?.windowNumber ?? -1),super=\(button.superview.map { String(describing: type(of: $0)) } ?? "nil")"
@@ -355,7 +419,7 @@ enum ChromiumAcceptance {
             throw ValidationError("The embedded Chrome window can move independently or lost its required native frame (\(frameState)).")
         }
         for kind in buttonKinds {
-            if let button = chrome.standardWindowButton(kind), !button.isHidden || button.isEnabled {
+            if let button = chrome.standardWindowButton(kind), !button.isHiddenOrHasHiddenAncestor {
                 throw ValidationError("An embedded Chrome window exposes a second set of native window controls (\(frameState)).")
             }
         }
@@ -381,15 +445,14 @@ enum ChromiumAcceptance {
                 throw ValidationError("Chrome overlaps Neutrino's visible native tab strip.")
             }
         }
-        let nativeState = try await tab.request("Neutrino.chromeHostState", parameters: [:])
-        let state = try JSONSerialization.jsonObject(with: nativeState) as? [String: Any] ?? [:]
         print("Neutrino Chromium geometry: owner=\(ownerWindow.windowNumber) \(ownerWindow.frame), child=\(chrome.windowNumber) \(chrome.frame), parent=\(chrome.parent?.windowNumber ?? -1), hostBounds=\(tab.nativeView.bounds), hostFrame=\(tab.nativeView.frame), superBounds=\(String(describing: tab.nativeView.superview?.bounds)), anchor=\(expected), chrome=\(String(decoding: nativeState, as: UTF8.self))")
         guard chrome !== ownerWindow, chrome.parent === ownerWindow,
               abs(chrome.frame.minX - expected.minX) < 2, abs(chrome.frame.minY - expected.minY) < 2,
               abs(chrome.frame.width - expected.width) < 2, abs(chrome.frame.height - expected.height) < 2 else {
             throw ValidationError("The Chrome window does not fit its native page anchor; see the recorded window frames.")
         }
-        guard state["customHost"] as? Bool == true, !tab.hasNativeNavigationChrome, state["toolbarPresent"] as? Bool == false else {
+        guard state["customHost"] as? Bool == true, !tab.hasNativeNavigationChrome,
+              state["chromeClipped"] as? Bool == true else {
             throw ValidationError("Chrome’s native toolbar is visible inside Neutrino’s page surface.")
         }
     }
@@ -884,6 +947,7 @@ enum ChromiumAcceptance {
         guard let blank = browser.activeWebTab as? ChromiumTab else {
             throw ValidationError("The pristine pane did not create Chromium.")
         }
+        let shell = try await RustShellAcceptance.waitForShell(in:window)
         let initialDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while !blank.isReadyForEngineSwitch || blank.chromiumSessionPages?.count != 1 || blank.loading {
             guard ContinuousClock.now < initialDeadline else { throw ValidationError("The pristine Chromium pane did not become ready.") }
@@ -911,20 +975,22 @@ enum ChromiumAcceptance {
         let created = try await evaluate(options, "String((await chrome.tabs.create({windowId:\(nativeWindowID),active:false,url:\(address)})).id)")
         guard let createdID = Int(created) else { throw ValidationError("The extension did not create an inactive tab.") }
         let siblingDeadline = ContinuousClock.now.advanced(by: .seconds(10))
-        while blank.chromiumSessionPages?.count != 2 ||
-            blank.chromiumSessionPages?.last?.url != targetURL ||
-            browser.selectedTab.chromiumPages?.count != 2 ||
-            blank.nativeView.window !== window || !blank.hasNativeNavigationChrome {
+        while true {
+            let rowVisible = (try await shell.evaluateJavaScript("!!document.querySelector('[data-op=chrome-page][data-id=\"\(browser.session.selectedTabID.uuidString)\"]')")) as? Bool == true
+            if blank.chromiumSessionPages?.count == 2,
+               blank.chromiumSessionPages?.last?.url == targetURL,
+               browser.selectedTab.chromiumPages?.count == 2,
+               blank.nativeView.window == nil, !blank.hasNativeNavigationChrome, rowVisible { break }
             guard ContinuousClock.now < siblingDeadline else {
-                throw ValidationError("An inactive extension tab stayed hidden or absent from its pristine pane's saved inventory.")
+                throw ValidationError("An inactive extension page is absent from Neutrino’s tab controls or saved inventory.")
             }
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for:.milliseconds(100))
         }
         browser.captureChromiumSessions()
         let members = try await nativeBrowsers(blank)
         let selectedIDs = Set(members.filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int })
         guard members.count == 2, selectedIDs == initialIDs,
-              blank.chromeWindow === chromeWindow, chromeWindow.parent === window,
+              blank.chromeWindow === chromeWindow, chromeWindow.parent == nil,
               blank.url == nil, browser.selectedTab.url == nil,
               blank.chromiumSessionPages?.first?.url == nil,
               browser.selectedTab.chromiumPages?.last?.url == targetURL,
@@ -933,13 +999,13 @@ enum ChromiumAcceptance {
               try await evaluate(options, "String((await chrome.tabs.get(\(createdID))).windowId)") == String(nativeWindowID) else {
             throw ValidationError("Exposing an inactive sibling changed the pristine page's actual selection, identity, or session records.")
         }
-        try await verifyChromeGeometry(blank, ownerWindow: window)
-        _ = try await evaluate(options, "String((await chrome.tabs.update(\(createdID),{active:true})).id)")
+        _ = try await shell.evaluateJavaScript("document.querySelector('[data-op=chrome-page][data-id=\"\(browser.session.selectedTabID.uuidString)\"]').click()")
         let selectedDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while blank.url != targetURL || browser.selectedTab.url != targetURL {
             guard ContinuousClock.now < selectedDeadline else { throw ValidationError("Selecting the new sibling did not update the active URL and native Neutrino descriptor.") }
             try await Task.sleep(for: .milliseconds(100))
         }
+        try await verifyChromeGeometry(blank,ownerWindow:window)
         let savedZoom = try await evaluate(options, "String(await chrome.tabs.getZoom(\(createdID)))")
         guard let siblingZoom = Double(savedZoom), siblingZoom.isFinite else { throw ValidationError("The fixture did not report its native zoom.") }
         _ = try await evaluate(blank, "(history.pushState(null, '', location.href), 'ready')")
@@ -952,14 +1018,16 @@ enum ChromiumAcceptance {
         _ = try await evaluate(options, "String((await chrome.tabs.update(\(initialTabID),{active:true})).id)")
         let returnedDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while !blank.isShowingStartPage || blank.url != nil || browser.selectedTab.url != nil ||
-            !browser.address.isEmpty || blank.chromiumSessionPages?.first?.url != nil {
-            guard ContinuousClock.now < returnedDeadline else { throw ValidationError("Returning to the untouched blank tab retained the sibling's URL, address, or saved selection.") }
+            !browser.address.isEmpty || blank.chromiumSessionPages?.first?.url != nil ||
+            blank.nativeView.window != nil || blank.hasNativeNavigationChrome {
+            guard ContinuousClock.now < returnedDeadline else { throw ValidationError("Returning to the untouched blank tab did not settle its page visibility, address, and saved selection.") }
             try await Task.sleep(for: .milliseconds(100))
         }
-        guard Set(try await nativeBrowsers(blank).filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int }) == initialIDs,
-              blank.nativeView.window === window, blank.hasNativeNavigationChrome,
+        let returnedIDs = Set(try await nativeBrowsers(blank).filter { $0["active"] as? Bool == true }.compactMap { $0["id"] as? Int })
+        guard returnedIDs == initialIDs,
+              blank.nativeView.window == nil, !blank.hasNativeNavigationChrome,
               browser.selectedTab.chromiumPages?.last?.url == targetURL else {
-            throw ValidationError("Returning to the pristine tab lost the selected browser identity or hid its surviving sibling.")
+            throw ValidationError("Returning to the pristine tab lost identity or sibling state (selected=\(returnedIDs.sorted()), expected=\(initialIDs.sorted()), mount=\(blank.nativeView.window?.windowNumber ?? -1), sibling=\(browser.selectedTab.chromiumPages?.last?.url?.absoluteString ?? "nil")).")
         }
         let historyData = try await blank.request("Page.getNavigationHistory", parameters: [:])
         guard let history = try JSONSerialization.jsonObject(with: historyData) as? [String: Any],
@@ -970,7 +1038,7 @@ enum ChromiumAcceptance {
             throw ValidationError("Returning to the pristine browser retained its sibling's loading, history controls, or zoom.")
         }
         _ = try await evaluate(options, "String(await chrome.tabs.setZoom(\(createdID),\(siblingZoom)))")
-        _ = try await evaluate(options, "String(await chrome.tabs.remove(\(createdID)))")
+        _ = try await shell.evaluateJavaScript("document.querySelector('[data-op=chrome-page-close][data-id=\"\(browser.session.selectedTabID.uuidString)\"]').click()")
         let removalDeadline = ContinuousClock.now.advanced(by: .seconds(10))
         while blank.chromiumSessionPages?.count != 1 || blank.nativeView.window != nil {
             guard ContinuousClock.now < removalDeadline else { throw ValidationError("Closing the inactive sibling did not return the untouched pane to native Start.") }
@@ -981,7 +1049,95 @@ enum ChromiumAcceptance {
               browser.activeWebTab === blank, blank.url == nil, browser.selectedTab.chromiumPages == nil else {
             throw ValidationError("Closing the inactive sibling discarded its original pristine browser or persisted a different Start surface.")
         }
-        print("Neutrino Chromium acceptance: pristine pane preserved inactive extension tab identity, mounted its native strip, saved both entries, and returned to Start after removal")
+        print("Neutrino Chromium acceptance: pristine pane preserved inactive extension tab identity, exposed and selected its Neutrino subrow, saved both entries, and returned to Start after removal")
+        try await verifyInnerPageNoteSource(options:options,browser:browser,window:window,shell:shell,
+                                           nativeWindowID:nativeWindowID,fixtureURL:fixtureURL)
+    }
+    private static func verifyInnerPageNoteSource(options:ChromiumTab,browser:BrowserModel,window:NSWindow,
+                                                  shell:WKWebView,nativeWindowID:Int,fixtureURL:URL) async throws {
+        let app=browser.app,groupID=browser.session.selectedTabID
+        guard let sourceSpace=app.createSpace(name:"Inner source acceptance",profileID:options.profileID),
+              let movedSpace=app.createSpace(name:"Moved inner source",profileID:options.profileID),
+              let page=browser.activeWebTab as? ChromiumTab else {throw ValidationError("Inner source workspace could not start.")}
+        let previousNotes=Set(app.library.notes.map(\.id))
+        defer {
+            app.library.notes.removeAll{!previousNotes.contains($0.id) && $0.profileID==options.profileID}
+            app.library.spaces?.removeAll{$0.id==sourceSpace || $0.id==movedSpace}
+        }
+        browser.session.spaceID=sourceSpace
+        let address=String(decoding:try JSONSerialization.data(withJSONObject:fixtureURL.absoluteString,options:[.fragmentsAllowed]),as:UTF8.self)
+        _ = try await evaluate(options,"String((await chrome.tabs.create({windowId:\(nativeWindowID),active:true,url:\(address)})).id)")
+        let loaded=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.url != fixtureURL || page.loading || page.selectedSourcePageToken == nil {
+            guard ContinuousClock.now < loaded else {throw ValidationError("Original inner source did not load.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        let originalToken=page.selectedSourcePageToken
+        _ = try await evaluate(page,"(()=>{window.neutrinoSourceDraft='original';const input=document.querySelector('input');input.value='retained original form';const range=document.createRange();range.selectNodeContents(document.querySelector('main h1'));getSelection().removeAllRanges();getSelection().addRange(range);return 'ready';})()")
+        try await RustShellAcceptance.action(["op":"section","value":"notes"],web:shell)
+        try await RustShellAcceptance.action(["op":"native","action":"quoteSelection"],web:shell)
+        let captured=ContinuousClock.now.advanced(by:.seconds(8))
+        while app.library.notes.count==previousNotes.count && ContinuousClock.now < captured {try await Task.sleep(for:.milliseconds(50))}
+        guard let note=app.library.notes.last,!previousNotes.contains(note.id),note.sourceTabID==groupID,
+              note.sourcePageToken==originalToken,originalToken != nil else {throw ValidationError("The quote did not retain its inner source identity.")}
+        _ = try await evaluate(options,"String((await chrome.tabs.create({windowId:\(nativeWindowID),active:true,url:\(address)})).id)")
+        let sibling=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.loading || page.selectedSourcePageToken==originalToken || page.url != fixtureURL {
+            guard ContinuousClock.now < sibling else {throw ValidationError("An equal-URL sibling did not become active.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        _ = try await evaluate(page,"(window.neutrinoSourceDraft='duplicate', 'ready')")
+        browser.moveTab(groupID,toSpace:movedSpace)
+        guard let expectedIDs=app.library.spaces?.first(where:{$0.id==movedSpace})?.tabs.map(\.id) else {throw ValidationError("The source group was not moved.")}
+        browser.switchSpace(sourceSpace)
+        try await RustShellAcceptance.action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:shell)
+        let recovered=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.selectedSourcePageToken != originalToken {
+            guard ContinuousClock.now < recovered else {throw ValidationError("Open source selected the wrong equal-URL inner page.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.session.spaceID==movedSpace,browser.session.selectedTabID==groupID,browser.activeWebTab===page,
+              browser.session.tabs.map(\.id)==expectedIDs,
+              try await evaluate(page,"window.neutrinoSourceDraft")=="original",
+              try await evaluate(page,"document.querySelector('input').value")=="retained original form" else {
+            throw ValidationError("Moved inner-source recovery duplicated a page or lost its live form/document.")
+        }
+        try await verifyChromeGeometry(page,ownerWindow:window)
+        // Model a group which has not been instantiated after relaunch: its
+        // saved selected URL differs from the note, and no engine is cached.
+        let otherURL=fixtureURL.appendingPathComponent("comparison")
+        let otherAddress=String(decoding:try JSONSerialization.data(withJSONObject:otherURL.absoluteString,options:[.fragmentsAllowed]),as:UTF8.self)
+        _ = try await evaluate(options,"String((await chrome.tabs.create({windowId:\(nativeWindowID),active:true,url:\(otherAddress)})).id)")
+        let otherLoaded=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.url != otherURL || page.loading {
+            guard ContinuousClock.now < otherLoaded else {throw ValidationError("The cold-source comparison page did not load.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        browser.captureChromiumSessions();browser.switchSpace(sourceSpace)
+        browser.disposeEngineTabs(engine:.chromium)
+        let disposed=ContinuousClock.now.advanced(by:.seconds(10))
+        while page.chromeWindow != nil {
+            guard ContinuousClock.now < disposed else {throw ValidationError("The cold-source engine did not close.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.cachedEngineTab(groupID,profileID:options.profileID)==nil else {throw ValidationError("The cold-source fixture kept a cached engine.")}
+        try await RustShellAcceptance.action(["op":"native","action":"openNoteSource","id":note.id.uuidString],web:shell)
+        let restored=ContinuousClock.now.advanced(by:.seconds(30))
+        while browser.activeWebTab.url != fixtureURL || browser.activeWebTab.loading {
+            guard ContinuousClock.now < restored else {throw ValidationError("The source page was not selected in its restored original group.")}
+            try await Task.sleep(for:.milliseconds(50))
+        }
+        guard browser.session.spaceID==movedSpace,browser.session.selectedTabID==groupID,
+              browser.session.tabs.map(\.id)==expectedIDs,browser.activeWebTab !== page else {
+            throw ValidationError("Cold-source recovery created a duplicate outer tab.")
+        }
+        guard let output=ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_OUTPUT"] else {throw ValidationError("Missing research receipt directory.")}
+        let receipt=URL(fileURLWithPath:output).deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
+        var evidence=(try JSONSerialization.jsonObject(with:Data(contentsOf:receipt))) as? [String:Any] ?? [:]
+        var chromium=evidence["chromium"] as? [String:Any] ?? [:]
+        chromium["innerPageSourceIdentity"]=true;chromium["innerPageSourceRestore"]=true;evidence["chromium"]=chromium
+        try JSONSerialization.data(withJSONObject:evidence,options:[.prettyPrinted,.sortedKeys]).write(to:receipt,options:.atomic)
+        print("Neutrino Chromium acceptance: equal-URL inner quote source recovered its original live form across a Space move without duplicating the group")
     }
     private static func fixtureState(_ tab: ChromiumTab) async throws -> [String: String] {
         if tab.loading { return [:] }

@@ -104,7 +104,7 @@ final class NativeTabCommands: NSObject, NSMenuItemValidation {
             switch command {
             case .new: action(["op":"newTab"])
             case .reopen: action(["op":"reopenTab"])
-            case .close: action(["op":"closeTab","id":browser.session.selectedTabID.uuidString])
+            case .close: action(["op":"closeCurrent"])
             case .previous, .next:
                 let tabs = browser.session.tabs
                 guard let index = tabs.firstIndex(where: { $0.id == browser.session.selectedTabID }), !tabs.isEmpty else { return }

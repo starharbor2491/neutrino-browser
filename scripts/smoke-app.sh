@@ -35,6 +35,9 @@ cleanup() {
     if [[ -f dist/smoke-sample.txt ]]; then
       python3 -c 'import sys; sys.stderr.buffer.write(open(sys.argv[1], "rb").read(65536))' dist/smoke-sample.txt
     fi
+    if [[ -f dist/smoke-debugger.log ]]; then
+      python3 -c 'import sys; sys.stderr.buffer.write(open(sys.argv[1], "rb").read(262144))' dist/smoke-debugger.log
+    fi
     if [[ "$smoke_status" -ge 128 ]]; then
       # ReportCrash can finish after the app exits. Collect only this launch's
       # Neutrino reports, with a short deadline and a bounded artifact size.
@@ -72,7 +75,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 : >dist/smoke-app.log
-rm -f dist/smoke-sample.txt dist/smoke-sample.log dist/smoke-port.txt "$smoke_timeout_marker"
+rm -f dist/smoke-sample.txt dist/smoke-sample.log dist/smoke-debugger.log dist/smoke-port.txt "$smoke_timeout_marker"
 python3 -u scripts/smoke-server.py --port-file dist/smoke-port.txt >dist/smoke-server.log 2>&1 &
 smoke_server_pid=$!
 smoke_server_ready=false
@@ -102,11 +105,20 @@ import json, pathlib, sys, time
 pathlib.Path(sys.argv[1]).write_text(json.dumps({'monotonic': time.monotonic()}))
 PY
 fi
+smoke_command=("$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test)
+if [[ "${NEUTRINO_SMOKE_DEBUGGER:-}" == 1 ]]; then
+  # Diagnostic-only launch: capture the actual stopped crash, not a sample
+  # taken minutes earlier. Debugger runs never certify installed acceptance.
+  smoke_command=(/usr/bin/lldb --batch
+    -o 'settings set target.disable-aslr false' -o run
+    -k 'thread backtrace all' -k 'register read' -k 'image list -o -f'
+    -- "${smoke_command[@]}")
+fi
 NEUTRINO_SMOKE_TEST_DATA="$PWD/dist/smoke-data" \
 NEUTRINO_SMOKE_TEST_OUTPUT="$PWD/dist/screenshots" \
 NEUTRINO_SMOKE_TEST_URL="$smoke_url" \
 NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE="$PWD/Tests/Fixtures/ChromiumExtension" \
-  "$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test >dist/smoke-app.log 2>&1 &
+  "${smoke_command[@]}" >dist/smoke-app.log 2>&1 &
 smoke_app_pid=$!
 if [[ -n "${NEUTRINO_SMOKE_PID_RECORD:-}" ]]; then
   printf '%s\n' "$smoke_app_pid" >"$NEUTRINO_SMOKE_PID_RECORD" || echo 'Optional process measurement record unavailable.' >&2
@@ -114,9 +126,10 @@ fi
 (
   timer_pid=""
   sample_pid=""
+  debugger_pid=""
   stop_watchdog() {
     trap - EXIT HUP INT TERM
-    for child_pid in "$timer_pid" "$sample_pid"; do
+    for child_pid in "$timer_pid" "$sample_pid" "$debugger_pid"; do
       if [[ -n "$child_pid" ]]; then
         kill "$child_pid" 2>/dev/null || true
         wait "$child_pid" 2>/dev/null || true
@@ -137,6 +150,13 @@ fi
   remaining=$((smoke_deadline - 45))
   quit_remaining=45
   while [[ "$remaining" -gt 0 ]]; do
+    if [[ "${NEUTRINO_SMOKE_DEBUGGER:-}" == attach && -z "$debugger_pid" ]] &&
+       /usr/bin/grep -q '^NEUTRINO_SMOKE_ATTACH_READY$' dist/smoke-app.log; then
+      /usr/bin/lldb --batch --attach-pid "$smoke_app_pid" -o continue \
+        -k 'thread backtrace all' -k 'register read' -k 'image list -o -f' \
+        >dist/smoke-debugger.log 2>&1 &
+      debugger_pid=$!
+    fi
     if /usr/bin/grep -q 'Neutrino packaged-app smoke test passed.' dist/smoke-app.log; then
       if [[ "$quit_remaining" -eq 0 ]]; then
         echo 'Neutrino did not quit within 45 seconds after completing acceptance.' >&2
@@ -175,6 +195,10 @@ kill "$smoke_watchdog_pid" 2>/dev/null || true
 wait "$smoke_watchdog_pid" 2>/dev/null || true
 smoke_watchdog_pid=""
 if [[ -f "$smoke_timeout_marker" ]]; then smoke_status=124; fi
+if [[ "${NEUTRINO_SMOKE_DEBUGGER:-}" == 1 || "${NEUTRINO_SMOKE_DEBUGGER:-}" == attach ]]; then
+  echo 'Debugger launch is diagnostic only; installed acceptance remains unverified.' >&2
+  smoke_status=125
+fi
 if [[ "$smoke_status" -eq 0 ]]; then
   # Native acceptance records this path only after a real incomplete Chromium
   # download survives its inner-tab close and the owning pane reaches CLOSED.

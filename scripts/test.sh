@@ -8,6 +8,7 @@ python3 scripts/test-installed-acceptance.py
 python3 scripts/test-core-acceptance.py
 python3 scripts/test-disk-images.py
 python3 scripts/test-chromium-updates.py
+python3 scripts/test-appcast.py
 if [[ "$(uname -s)" == Darwin ]]; then
   configuration=debug
   previous_argument=""
@@ -15,9 +16,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     if [[ "$previous_argument" == -c || "$previous_argument" == --configuration ]]; then configuration="$argument"; fi
     previous_argument="$argument"
   done
-  swift build -c "$configuration" --product NeutrinoResourceMonitor
-  swift build -c "$configuration" --product NeutrinoMemoryMonitor
-  swift build -c "$configuration" --product NeutrinoReaderWorker
+  ./scripts/build-workers.sh "$configuration"
   python3 scripts/native-tests.py "$@"
 else
   swift test "$@"

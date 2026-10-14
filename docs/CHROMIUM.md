@@ -4,11 +4,11 @@ Neutrino owns the tabs, address bar, workspace rail, start surface, and navigati
 
 ## Host boundary
 
-The bridge uses upstream CEF Chrome-style Views: a `CefBrowserView` in a frameless `CefWindow`, with `CEF_CTT_NONE`. Its Cocoa window follows a Neutrino page anchor as a managed child. Rendering stays in Chromium's process model and sandbox. The integration does not replace Chromium's rendering or browser internals.
+The bridge creates a normal upstream CEF Chrome-style browser window. CEF Views forces popup-type windows, which Chromium rejects for extension action popups. A macOS clip view positions the native toolbar and tab strip above the visible page viewport while leaving their upstream services intact. The child window follows Neutrino’s native page anchor; geometry acceptance checks the actual WebContents viewport. Rendering stays in Chromium’s process model and sandbox. No rendering or browser-internals fork is maintained.
 
 One Neutrino tab owns one live engine adapter. Spaces share descriptors across windows; selecting elsewhere transfers the existing adapter/native surface rather than creating a second document. Background Space adapters retain their original Profile and callbacks. Popups must preserve original POST/opener state while becoming Neutrino tabs. These are source implementations requiring macOS acceptance.
 
-The bridge ABI is **7**, manifest format **2**, and `runtimeStyle` is **chromeViews**. Old normal-Chrome-window packages are rejected. The pinned upstream CEF distribution is `154.0.34+g14c5a08+chromium-154.0.8037.98`, [commit 14c5a08](https://github.com/chromiumembedded/cef/commit/14c5a089e8452874cb1a556dc3fde26ed2d87723).
+The bridge ABI is **8**, manifest format **2**, and `runtimeStyle` remains **chromeViews** and `hostPresentation` is **clippedNative**. Predecessor Views and stock-window packages are rejected. The pinned upstream CEF distribution is `154.0.34+g14c5a08+chromium-154.0.8037.98`, [commit 14c5a08](https://github.com/chromiumembedded/cef/commit/14c5a089e8452874cb1a556dc3fde26ed2d87723).
 
 ## Compatibility gates
 
@@ -39,6 +39,10 @@ The build obtains the pinned ARM64 CEF package when no `NEUTRINO_CHROMIUM_PACKAG
 
 The framework, five helper variants, resources/locales, and notices remain inside the sealed app. Runtime updates use verified whole-app replacement, not mutation of a running signed bundle. TLS, sandboxing, Gatekeeper, and library validation remain enabled.
 
+The bridge opts into Chromium 154's supported `PMLoadingPageVoter` while investigating [cold extension-popup loading](https://issues.chromium.org/issues/549552319). The [upstream implementation](https://chromium.googlesource.com/chromium/src/+/154.0.8037.98/components/performance_manager/execution_context_priority/loading_page_voter.cc) boosts all loading or initially busy pages: active pages receive user-blocking priority and others user-visible priority. Votes clear when upstream state leaves loading/busy; committed loads can stay boosted until that happens. Idle background policy remains upstream. Packaging rejects an SDK without this feature. Native popup/side-panel acceptance must establish effectiveness before publication. The newer withheld-view-specific fix is absent from the pinned SDK; reassess this opt-in when a supported upstream update contains it.
+
 ## Validation status
 
 Linux checks validate portable state and source syntax, not this Cocoa/CEF integration. Native build/type checking, child-window geometry/focus, document transfer, extension workflows, media permissions, clean-Mac installation, and ordinary shutdown must run on macOS. Earlier Radius acceptance is historical and does not certify this new host.
+
+The `chromeViews` manifest family label is retained for complete-application updates from existing previews. ABI 8 and `hostPresentation=clippedNative` identify the actual new hosting integration; the replacement host enforces both. This does not allow predecessor engine packages to load in Studio.

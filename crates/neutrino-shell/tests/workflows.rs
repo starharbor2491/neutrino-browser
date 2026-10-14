@@ -10,6 +10,42 @@ fn commands(result: &Value) -> &[Value] {
     result["commands"].as_array().unwrap()
 }
 #[test]
+fn panel_navigation_and_saved_setup_requirements_survive_dispatch() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"panel","value":"notes"}));
+    let r = s.dispatch(json!({"op":"section","value":"history"}));
+    assert_eq!(s.panel, "history");
+    assert!(commands(&r)
+        .iter()
+        .any(|c| c["op"] == "projectLibrary" && c["section"] == "history"));
+    s.snapshot["savedConfigurations"] = json!([{"id":"saved","name":"Research","configuration":s.snapshot["configuration"],"requiredModuleIDs":["org.neutrino.notes"]}]);
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-load-named","id":"saved"}));
+    let r = s.dispatch(json!({"op":"editor-save"}));
+    assert_eq!(
+        commands(&r)[0]["requirements"],
+        json!(["org.neutrino.notes"])
+    );
+}
+#[test]
+fn svg_semantic_keys_reach_the_rendered_glyphs_and_updates_reject_epoch_rollback() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["iconPack"] = json!("module");
+    s.snapshot["svgIcons"] = json!({"newTab":"M1 2h3","downloads":"M4 5h6"});
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("d=\"M1 2h3\""));
+    assert!(html.contains("d=\"M4 5h6\""));
+    assert!(neutrino_shell::core_request(
+        json!({"op":"validateUpdatePolicy","build":11,"currentBuild":10,"epoch":153,"floor":154})
+    )
+    .is_err());
+    assert!(neutrino_shell::core_request(
+        json!({"op":"validateUpdatePolicy","build":11,"currentBuild":10,"epoch":155,"floor":154})
+    )
+    .is_ok());
+}
+#[test]
 fn tab_move_keeps_document_fields_and_undo_is_context_bound() {
     let mut s = shell();
     let old = s.snapshot["session"]["tabs"].clone();
@@ -90,6 +126,11 @@ fn editor_draft_is_isolated_recoverable_and_scoped() {
         commands(&result)[0]["configuration"]["theme"]["accent"],
         "teal"
     );
+    assert!(s.draft.is_some());
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":false,"message":"Approval was cancelled."}));
+    assert!(s.draft.is_some());
+    assert_eq!(s.screen, "editor");
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":true}));
     assert!(s.draft.is_none());
 }
 #[test]
@@ -279,7 +320,8 @@ fn undo_feedback_is_attached_only_to_the_tab_move() {
     let mut s = shell();
     s.dispatch(json!({"op":"move-tab","id":"a","group":"pinned"}));
     s.dispatch(json!({"op":"screen","value":"editor"}));
-    let r = s.dispatch(json!({"op":"editor-save"}));
+    s.dispatch(json!({"op":"editor-save"}));
+    let r = s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":true}));
     assert!(r["html"].as_str().unwrap().contains("Appearance saved."));
     assert!(!r["html"]
         .as_str()
@@ -333,6 +375,8 @@ fn keep_editing_forgets_the_cancelled_exit_and_save_completes_the_new_one() {
     s.dispatch(json!({"op":"screen","value":"settings"}));
     let r = s.dispatch(json!({"op":"editor-save"}));
     assert_eq!(commands(&r)[0]["op"], "applyConfiguration");
+    assert_eq!(s.screen, "editor");
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":true}));
     assert_eq!(s.screen, "settings");
     assert!(s.draft.is_none());
 }
@@ -355,7 +399,9 @@ fn global_search_reveals_results_but_cancel_returns_to_settings() {
     assert_eq!(s.screen, "browse");
     s.dispatch(json!({"op":"screen","value":"library"}));
     s.sidebar_hidden = true;
+    s.snapshot["configuration"]["layout"]["secondaryPanel"] = json!("notes");
     s.dispatch(json!({"op":"reveal-workspace"}));
+    assert!(s.panel_key().is_empty());
     assert_eq!(s.screen, "browse");
     assert!(!s.sidebar_hidden);
 }
@@ -381,19 +427,25 @@ fn continuous_width_drag_is_one_undo_step_despite_passive_updates() {
 }
 
 #[test]
-fn new_tab_uses_inline_search_and_palette_commands_are_explicit() {
+fn command_tab_creation_is_deferred_and_cancel_preserves_the_live_page() {
     let mut s = shell();
+    let before = s.snapshot["session"].clone();
     let r = s.dispatch(json!({"op":"newTab"}));
+    assert!(commands(&r).is_empty());
+    assert!(s.palette);
+    assert_eq!(r["focus"], "command-input");
+    s.dispatch(json!({"op":"escape"}));
+    assert_eq!(s.snapshot["session"], before);
+    s.dispatch(json!({"op":"newTab"}));
+    s.dispatch(json!({"op":"query","value":"https://example.org/research"}));
+    let r = s.dispatch(json!({"op":"activate-result"}));
+    assert_eq!(commands(&r).len(), 1);
     assert_eq!(commands(&r)[0]["op"], "newTab");
-    assert!(!s.palette);
-    assert_eq!(r["focus"], "start-input");
+    assert_eq!(commands(&r)[0]["url"], "https://example.org/research");
     s.dispatch(json!({"op":"palette","value":"Modules"}));
-    let results = s.results();
-    assert_eq!(results[0]["kind"], "command");
-    assert_eq!(results[0]["value"], "modules");
+    assert_eq!(s.results()[0]["kind"], "command");
     s.dispatch(json!({"op":"activate-result"}));
     assert_eq!(s.screen, "modules");
-    assert!(!s.palette);
 }
 
 #[test]
@@ -475,4 +527,422 @@ fn focus_recovers_after_overlays_and_address_focus_and_spaces_stay_in_profile() 
         commands(&s.dispatch(json!({"op":"switchSpace","id":"s2"})))[0]["id"],
         "s2"
     );
+}
+
+#[test]
+fn presets_and_saved_panel_edits_produce_real_browsing_surfaces() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-preset","value":"chrome"}));
+    assert_eq!(s.config()["layout"]["tabs"], "top");
+    s.dispatch(json!({"op":"editor-preset","value":"neutrino"}));
+    s.dispatch(json!({"op":"dock","component":"panels","region":"trailing"}));
+    s.dispatch(json!({"op":"editor-value","key":"iconPack","value":"precision"}));
+    s.dispatch(json!({"op":"editor-value","key":"cornerRadius","value":12.0}));
+    let result = s.dispatch(json!({"op":"editor-save"}));
+    let c = commands(&result)[0]["configuration"].clone();
+    assert_eq!(c["layout"]["secondaryPanel"], "bookmarks");
+    assert_eq!(c["theme"]["iconPack"], "precision");
+    s.snapshot["configuration"] = c;
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot}));
+    assert!(r["html"].as_str().unwrap().contains("workspace-panel"));
+    assert!(r["html"]
+        .as_str()
+        .unwrap()
+        .contains("--component-radius:12px"));
+}
+#[test]
+fn svg_packages_cannot_import_markup_or_external_resources() {
+    use neutrino_shell::core_request;
+    assert!(
+        core_request(json!({"op":"validateSVGIcons","icons":{"back":"M15 4 7 12l8 8"}})).is_ok()
+    );
+    for path in [
+        "<svg onload=alert(1)>",
+        "https://example.com/x.svg",
+        "url(#icon)",
+        "M0 0<script>",
+    ] {
+        assert!(core_request(json!({"op":"validateSVGIcons","icons":{"back":path}})).is_err());
+    }
+}
+#[test]
+fn full_uninstall_scope_excludes_other_apps_downloads_and_publisher_keys() {
+    use neutrino_shell::core_request;
+    let result=core_request(json!({"op":"uninstallPaths","home":"/Users/researcher","dataDirectory":"/Users/researcher/Library/Application Support/org.neutrino.browser"})).unwrap();
+    assert_eq!(result.as_array().unwrap().len(), 7);
+    assert!(!result.to_string().contains("Downloads"));
+    assert!(
+        core_request(json!({"op":"uninstallPaths","home":"/","dataDirectory":"/Library"})).is_err()
+    );
+    assert!(core_request(json!({"op":"uninstallPaths","home":"/Users/researcher","dataDirectory":"/Users/researcher"})).is_err());
+    for service in [
+        "org.neutrino.browser.passwords.anything",
+        "org.neutrino.browser.other",
+        "Sparkle Private Key",
+        "org.brave.browser.passwords",
+    ] {
+        assert_eq!(
+            core_request(json!({"op":"uninstallKeychainService","service":service})).unwrap(),
+            false
+        );
+    }
+}
+
+#[test]
+fn named_setups_have_a_complete_lifecycle_and_space_recovery() {
+    use neutrino_shell::core_request;
+    let config = neutrino_shell::core_request(json!({"op":"appearancePreset","id":"arc"})).unwrap();
+    let mut library = json!({"preferences":{"savedConfigurations":[]},"spaces":[]});
+    library=core_request(json!({"op":"manageNamedSetup","action":"save","name":"Research","configuration":config,"requirements":["org.neutrino.notes"],"value":library})).unwrap();
+    let id = library["preferences"]["savedConfigurations"][0]["id"].clone();
+    library["spaces"] = json!([{"setupID":id}]);
+    library = core_request(
+        json!({"op":"manageNamedSetup","action":"rename","id":id,"name":"Reading","value":library}),
+    )
+    .unwrap();
+    assert_eq!(
+        library["preferences"]["savedConfigurations"][0]["name"],
+        "Reading"
+    );
+    let chrome = core_request(json!({"op":"appearancePreset","id":"chrome"})).unwrap();
+    library=core_request(json!({"op":"manageNamedSetup","action":"replace","id":id,"configuration":chrome,"requirements":[],"value":library})).unwrap();
+    assert_eq!(library["preferences"]["savedConfigurations"][0]["id"], id);
+    assert_eq!(
+        library["preferences"]["savedConfigurations"][0]["configuration"]["layout"]["tabs"],
+        "top"
+    );
+    let mut full = library.clone();
+    full["preferences"]["savedConfigurations"] =
+        json!(vec![
+            full["preferences"]["savedConfigurations"][0].clone();
+            50
+        ]);
+    assert!(core_request(json!({"op":"manageNamedSetup","action":"save","name":"Overflow","configuration":config,"value":full})).is_err());
+    library =
+        core_request(json!({"op":"manageNamedSetup","action":"delete","id":id,"value":library}))
+            .unwrap();
+    assert!(library["spaces"][0]["setupID"].is_null());
+    assert_eq!(library["preferences"]["savedConfigurations"], json!([]));
+    assert!(core_request(
+        json!({"op":"manageNamedSetup","action":"rename","id":id,"name":"Gone","value":library})
+    )
+    .is_err());
+}
+#[test]
+fn module_recovery_reclaims_only_recognized_orphan_transaction_directories() {
+    let root = std::env::temp_dir().join(format!("neutrino-orphan-{}", uuid::Uuid::new_v4()));
+    let container = root;
+    let root = container.join("Modules");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut orphans = vec![];
+    for prefix in [".stage-", ".backup-", ".restore-", ".batch-", ".write-"] {
+        let p = root.join(format!("{prefix}{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&p).unwrap();
+        std::fs::write(p.join("payload"), "orphan").unwrap();
+        orphans.push(p);
+    }
+    let unrelated = root.join(".stage-user-export");
+    std::fs::create_dir(&unrelated).unwrap();
+    let result = neutrino_shell::core_request(
+        json!({"op":"moduleRepository","action":"initialize","root":root}),
+    )
+    .unwrap();
+    assert!(result["error"].is_null(), "{result}");
+    assert!(orphans.iter().all(|p| !p.exists()));
+    assert!(unrelated.exists());
+    std::fs::remove_dir_all(container).unwrap();
+}
+
+#[test]
+fn rejected_editor_saves_keep_drafts_and_named_input_until_acknowledged() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-preset","value":"chrome"}));
+    let draft = s.draft.clone();
+    s.dispatch(json!({"op":"name","value":"Research"}));
+    let r = s.dispatch(json!({"op":"editor-save-named"}));
+    assert_eq!(commands(&r)[0]["op"], "saveNamedSetup");
+    assert!(!s.notice.contains("saved"));
+    s.dispatch(json!({"op":"editor-result","action":"saveNamedSetup","success":false,"message":"Use a name."}));
+    assert_eq!(s.name, "Research");
+    assert_eq!(s.draft, draft);
+    assert_eq!(s.notice, "Use a name.");
+    s.dispatch(json!({"op":"editor-save"}));
+    s.dispatch(json!({"op":"editor-result","action":"applyConfiguration","success":false,"message":"Approval cancelled."}));
+    assert_eq!(s.screen, "editor");
+    assert_eq!(s.draft, draft);
+}
+#[test]
+fn note_search_is_profile_and_space_scoped_with_newest_first() {
+    let notes = json!([
+        {"id":"old","profileID":"p1","spaceID":"s1","title":"Rust","modifiedAt":1},
+        {"id":"new","profileID":"p1","spaceID":"s1","title":"Arc","sourceURL":"https://docs.rs/a","modifiedAt":5},
+        {"id":"other","profileID":"p1","spaceID":"s2","title":"Rust","modifiedAt":7},
+        {"id":"secret","profileID":"p2","spaceID":"s1","title":"Rust","modifiedAt":9}
+    ]);
+    let project = |all, query| {
+        neutrino_shell::core_request(json!({"op":"projectNotes","value":notes,"profileID":"p1","spaceID":"s1","all":all,"query":query})).unwrap()
+    };
+    assert_eq!(project(false, ""), json!(["new", "old"]));
+    assert_eq!(project(true, "RUST"), json!(["other", "old"]));
+    assert_eq!(project(false, "docs.rs"), json!(["new"]));
+}
+
+#[test]
+fn note_content_matches_remain_scoped_and_excerpts_distinguish_same_source() {
+    let notes = json!([
+        {"id":"one","profileID":"p1","spaceID":"s1","title":"An article","sourceURL":"https://example.org","excerpt":"First quotation","contentMatch":true},
+        {"id":"two","profileID":"p1","spaceID":"s1","title":"An article","sourceURL":"https://example.org","excerpt":"Second quotation","contentMatch":false},
+        {"id":"away","profileID":"p1","spaceID":"s2","contentMatch":true},
+        {"id":"secret","profileID":"p2","spaceID":"s1","contentMatch":true}
+    ]);
+    let project = |all| neutrino_shell::core_request(json!({"op":"projectNotes","value":notes,"profileID":"p1","spaceID":"s1","all":all,"query":"phrase in body"})).unwrap();
+    assert_eq!(project(false), json!(["one"]));
+    assert_eq!(project(true), json!(["away", "one"]));
+    let mut s = shell();
+    s.snapshot["notes"] = json!([notes[0], notes[1]]);
+    s.snapshot["selectedNote"] = json!({"id":"one","title":"An article","excerpt":"First quotation","quotedText":"First quotation","text":"draft"});
+    let r = s.dispatch(json!({"op":"section","value":"notes"}));
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("First quotation") && html.contains("Second quotation"));
+    assert!(html.contains("note-quotation quote-one") && html.contains("Note actions"));
+    assert!(!html.contains("Saved as you type"));
+    for reference in html.split("href=\"#glyph-").skip(1) {
+        let name = reference.split('"').next().unwrap();
+        assert!(html.contains(&format!("id=\"glyph-{name}\"")), "Unresolved icon: {name}");
+    }
+    s.dispatch(json!({"op":"menu","value":"notes-scope"}));
+    let scope = s.dispatch(json!({"op":"native","action":"notesScope","value":"all"}));
+    assert_eq!(commands(&scope)[0]["op"], "notesScope");
+    assert!(s.menu.is_empty());
+    assert_eq!(scope["focus"], "notes-scope-trigger");
+    s.dispatch(json!({"op":"menu","value":"notes-scope"}));
+    assert_eq!(s.dispatch(json!({"op":"escape","restoreFocus":true}))["focus"], "notes-scope-trigger");
+    s.dispatch(json!({"op":"menu","value":"notes-scope"}));
+    assert_eq!(s.dispatch(json!({"op":"escape"}))["focus"], "");
+}
+
+#[test]
+fn borrowed_note_search_handles_unicode_whitespace_nuls_and_bounds() {
+    let search = |text: &[u8], query: &[u8]| unsafe {
+        neutrino_shell::neutrino_text_contains(text.as_ptr().cast(), text.len(), query.as_ptr().cast(), query.len())
+    };
+    assert!(search("ÜBER\n  source\t漢字\0 preserved".as_bytes(), "über source 漢字".as_bytes()));
+    assert!(search(b"before\0after", b"after"));
+    assert!(!search(b"quotation", b"missing"));
+    assert!(!search(&[0xff], b"anything"));
+    assert!(!search(b"anything", &vec![b'x'; 1025]));
+    assert!(!search(&vec![b'x'; 1_048_577], b"x"));
+    let body = format!("{}needle at the end", "漢".repeat(200_000));
+    assert!(search(body.as_bytes(), b"NEEDLE AT THE END"));
+}
+
+#[test]
+fn crashed_receipt_writes_do_not_block_future_package_transactions() {
+    let root = std::env::temp_dir().join(format!("neutrino-receipt-{}", uuid::Uuid::new_v4()));
+    let container = root;
+    let root = container.join("Modules");
+    let call = |action: &str, extra: Value| {
+        let mut r = json!({"op":"moduleRepository","root":root,"action":action});
+        for (k, v) in extra.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        let response = neutrino_shell::core_request(r).unwrap();
+        assert!(response["error"].is_null(), "{response}");
+        response
+    };
+    call("initialize", json!({}));
+    let manifest = json!({"id":"org.test.widget","name":"Widget","version":1,"summary":"Research widget","publisher":"Fixture","source":"https://example.com","capability":"startWidget","dependencies":[],"defaultInstalled":true,"runtime":"declarative"});
+    use base64::Engine;
+    let payload = base64::engine::general_purpose::STANDARD
+        .encode(br#"{"formatVersion":1,"widgetTitle":"Reading","widgetBody":"Keep sources here"}"#);
+    call(
+        "install",
+        json!({"id":"org.test.widget","manifest":manifest,"payload":payload}),
+    );
+    let scratch = root
+        .join("org.test.widget")
+        .join(format!(".write-{}", uuid::Uuid::new_v4()));
+    std::fs::write(&scratch, "interrupted receipt").unwrap();
+    call("initialize", json!({}));
+    assert!(!scratch.exists());
+    call("begin", json!({"ids":["org.test.widget"]}));
+    call("rollback", json!({}));
+    std::fs::remove_dir_all(container).unwrap();
+}
+
+#[test]
+fn removing_chromium_preserves_background_addresses_and_bounded_overflow() {
+    let active = json!({"id":"a","engineID":"chromium","url":"https://example.com/a","title":"A","pinned":false,"chromiumPages":[{"url":"https://example.com/a","title":"A"},{"url":"https://example.com/b","title":"B"}]});
+    let convert = |tabs| {
+        neutrino_shell::core_request(json!({"op":"prepareForChromiumRemoval","value":{"profiles":[{"id":"p","engineID":"chromium"}],"spaces":[{"id":"s","profileID":"p","tabs":tabs,"archivedTabs":[]}],"sessions":[{"id":"w","profileID":"p","spaceID":"s","selectedTabID":"a","tabs":[]}],"bookmarks":[]}})).unwrap()
+    };
+    let result = convert(json!([active]));
+    assert_eq!(result["spaces"][0]["tabs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        result["spaces"][0]["tabs"][1]["url"],
+        "https://example.com/b"
+    );
+    assert_eq!(result["sessions"][0]["tabs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        result["sessions"][0]["tabs"][1]["id"],
+        result["spaces"][0]["tabs"][1]["id"]
+    );
+    assert_eq!(
+        result["sessions"][0]["tabs"][1]["url"],
+        "https://example.com/b"
+    );
+    let mut full = vec![active];
+    for i in 1..200 {
+        full.push(json!({"id":format!("t{i}"),"title":"Other","pinned":false,"engineID":"webkit"}));
+    }
+    let result = convert(json!(full));
+    assert_eq!(result["spaces"][0]["tabs"].as_array().unwrap().len(), 200);
+    assert_eq!(result["bookmarks"][0]["url"], "https://example.com/b");
+    assert_eq!(result["bookmarks"][0]["profileID"], "p");
+}
+
+#[test]
+fn removing_chromium_preserves_large_overflow_once_in_original_order() {
+    let tabs: Vec<_> = (0..200).map(|t|json!({"id":format!("tab-{t}"),"title":"Source","engineID":"chromium","pinned":false,"chromiumPages":(0..200).map(|p|json!({"id":format!("{t}-{p}"),"url":format!("https://example.com/{t}/{p}"),"title":format!("{t}/{p}"),"active":p==0})).collect::<Vec<_>>() })).collect();
+    let existing = json!({"id":"existing","profileID":"p","url":"https://example.com/0/1","title":"0/1","createdAt":1});
+    let result=neutrino_shell::core_request(json!({"op":"prepareForChromiumRemoval","value":{"profiles":[{"id":"p","engineID":"chromium"}],"spaces":[{"id":"s","profileID":"p","tabs":tabs,"archivedTabs":[]}],"sessions":[],"bookmarks":[existing]}})).unwrap();
+    let bookmarks = result["bookmarks"].as_array().unwrap();
+    assert_eq!(bookmarks.len(), 39_800);
+    assert_eq!(bookmarks[0], existing);
+    assert_eq!(bookmarks[1]["url"], "https://example.com/0/2");
+    assert_eq!(
+        bookmarks.last().unwrap()["url"],
+        "https://example.com/199/199"
+    );
+}
+#[test]
+fn module_presentation_is_validated_in_one_projection_and_corruption_is_local() {
+    use base64::Engine;
+    let directory =
+        std::env::temp_dir().join(format!("neutrino-projection-{}", uuid::Uuid::new_v4()));
+    let root = directory.join("Modules");
+    let call = |action: &str, fields: Value| {
+        let mut r = json!({"op":"moduleRepository","root":root,"action":action});
+        for (k, v) in fields.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        let response = neutrino_shell::core_request(r).unwrap();
+        assert!(response["error"].is_null(), "{response}");
+        response["result"].clone()
+    };
+    call("initialize", json!({}));
+    for id in ["org.test.first", "org.test.second"] {
+        let m = json!({"id":id,"name":id,"version":1,"summary":"Widget","publisher":"Fixture","source":"https://example.com","capability":"startWidget","dependencies":[],"defaultInstalled":true,"runtime":"declarative","settings":[{"id":"label","title":"Label","kind":"text","defaultValue":"Sources"}]});
+        call(
+            "install",
+            json!({"manifest":m,"payload":base64::engine::general_purpose::STANDARD.encode(br#"{"formatVersion":1,"widgetTitle":"Research","widgetBody":"Sources"}"#)}),
+        );
+    }
+    std::fs::write(root.join("org.test.first/definition.json"), b"tampered").unwrap();
+    let projection = call("presentation", json!({}));
+    assert_eq!(
+        projection["settings"]["org.test.second"]["label"],
+        "Sources"
+    );
+    assert_eq!(
+        projection["definitions"]["org.test.second"]["widgetTitle"],
+        "Research"
+    );
+    assert!(projection["definitions"]["org.test.first"].is_null());
+    assert!(projection["errors"]["org.test.first"]
+        .as_str()
+        .unwrap()
+        .contains("receipt"));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
+fn portable_note_mutations_keep_sources_and_profile_boundaries() {
+    let note = json!({"id":"n","profileID":"p","title":"Note","text":"draft","modifiedAt":1,"sourceURL":"https://example.com","sourceTabID":"t","quotedText":"immutable"});
+    let update = |profile: &str, field: &str, output: Value| {
+        neutrino_shell::core_request(
+            json!({"op":"moduleNote","action":"update","id":"n","profileID":profile,"field":field,"output":output,"value":note}),
+        )
+    };
+    assert!(update("other", "text", json!({"value":"changed"})).is_err());
+    assert!(update("p", "sourceURL", json!({"value":"changed"})).is_err());
+    let result = update("p", "text", json!({"value":"annotation"})).unwrap();
+    assert_eq!(result["note"]["quotedText"], "immutable");
+    assert_eq!(result["note"]["sourceTabID"], "t");
+    assert_eq!(result["note"]["text"], "annotation");
+    assert!(neutrino_shell::core_request(json!({"op":"moduleNote","action":"delete","id":"n","profileID":"p","output":{"delete":false},"value":note})).is_err());
+}
+
+#[test]
+fn extension_pages_have_owned_controls_and_reject_unknown_native_ids() {
+    let mut s = shell();
+    s.snapshot["session"]["tabs"][0]["url"] = Value::Null;
+    s.snapshot["session"]["tabs"][0]["title"] = json!("New tab");
+    s.snapshot["chromePageCounts"] = json!({"a":2});
+    s.snapshot["chromePages"] = json!({"a":[{"id":10,"selected":true,"url":"about:blank","title":""},{"id":11,"selected":false,"url":"https://example.com/source","title":"Background source"}]});
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(r["html"].as_str().unwrap().contains("Background source"));
+    assert!(r["html"].as_str().unwrap().contains("Extension pages"));
+    assert!(commands(&s.dispatch(json!({"op":"chrome-page","id":"a","page":999}))).is_empty());
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"chrome-page","id":"a","page":11})))[0],
+        json!({"op":"selectChromePage","id":"a","page":11})
+    );
+    assert_eq!(
+        commands(&s.dispatch(json!({"op":"chrome-page-close","id":"a","page":11})))[0],
+        json!({"op":"closeChromePage","id":"a","page":11})
+    );
+}
+
+#[test]
+fn source_recovery_distinguishes_equal_url_pages_and_follows_the_original_group() {
+    let mut request = json!({"op":"resolveNoteSource","profileID":"p1","spaceID":"s1",
+        "spaces":[{"id":"s1","profileID":"p1"},{"id":"s2","profileID":"p1"},{"id":"private","profileID":"p2"}],
+        "note":{"profileID":"p1","spaceID":"s1","sourceTabID":"original","sourceURL":"https://example.com/a","sourcePageToken":"process-one:42"},
+        "candidates":[{"id":"unrelated","profileID":"p1","spaceID":"s1","url":"https://example.com/a"},
+            {"id":"original","profileID":"p2","spaceID":"private","url":"https://example.com/a"},
+            {"id":"original","profileID":"p1","spaceID":"s2","url":"https://example.com/b","pages":[
+                {"id":43,"url":"https://example.com/a","token":"process-one:43"},
+                {"id":42,"url":"https://example.com/a","token":"process-one:42"}]}]});
+    let result = neutrino_shell::core_request(request.clone()).unwrap();
+    assert_eq!(
+        result,
+        json!({"spaceID":"s2","tabID":"original","pageID":42})
+    );
+    // A new process may reuse 42 for a different URL. Old tokens must not
+    // override URL verification; the matching restored URL remains usable.
+    request["candidates"][2]["pages"] = json!([
+        {"id":42,"url":"https://example.com/b","token":"process-two:42"},
+        {"id":99,"url":"https://example.com/a","token":"process-two:99"}]);
+    assert_eq!(
+        neutrino_shell::core_request(request.clone()).unwrap()["pageID"],
+        99
+    );
+    request["candidates"][2]["pages"] = json!([]);
+    request["candidates"][2]["restorableURLs"] = json!(["https://example.com/b", "https://example.com/a"]);
+    assert_eq!(neutrino_shell::core_request(request.clone()).unwrap(),
+        json!({"spaceID":"s2","tabID":"original","restoreURL":"https://example.com/a"}));
+    request["note"]["profileID"] = json!("p2");
+    assert!(neutrino_shell::core_request(request).is_err());
+}
+
+#[test]
+fn source_recovery_falls_back_to_an_existing_safe_destination_or_reopens() {
+    let mut request = json!({"op":"resolveNoteSource","profileID":"p1","spaceID":"current",
+        "spaces":[{"id":"current","profileID":"p1"},{"id":"old","profileID":"p2"}],
+        "note":{"profileID":"p1","spaceID":"old","sourceTabID":"gone","sourceURL":"https://example.com/a"},
+        "candidates":[{"id":"foreign","profileID":"p2","spaceID":"old","url":"https://example.com/a"},
+            {"id":"local","profileID":"p1","spaceID":"current","url":"https://example.com/a"}]});
+    assert_eq!(
+        neutrino_shell::core_request(request.clone()).unwrap(),
+        json!({"spaceID":"current","tabID":"local"})
+    );
+    request["candidates"] = json!([]);
+    assert_eq!(
+        neutrino_shell::core_request(request.clone()).unwrap(),
+        json!({"spaceID":"current"})
+    );
+    request["note"]["sourceURL"] = json!("file:///private/source");
+    assert!(neutrino_shell::core_request(request).is_err());
 }

@@ -11,6 +11,9 @@ import SwiftUI
 @MainActor
 final class ChromiumRuntime: ObservableObject {
     static let shared = ChromiumRuntime()
+    // CEF numeric browser IDs can repeat after process restart. A source token
+    // must never select an unrelated newly created page using an old number.
+    let sourceProcessID = UUID()
     nonisolated static let cefVersion: String = {
         let file=Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/CEF-Version.json")
         guard let size=try? file.resourceValues(forKeys:[.fileSizeKey]).fileSize,size>0,size<=4096,
@@ -162,7 +165,7 @@ final class ChromiumRuntime: ObservableObject {
         library = handle
         guard let symbol = dlsym(handle, "neutrino_cef_get_api") else { throw ValidationError("This runtime has no Neutrino engine API.") }
         let getter = unsafeBitCast(symbol, to: neutrino_cef_get_api_function.self)
-        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 7 else {
+        guard let pointer = getter(), UnsafeRawPointer(pointer).load(as: UInt32.self) == 8 else {
             throw ValidationError("This runtime uses an incompatible Neutrino engine API.")
         }
         let loadedAPI = pointer.pointee
@@ -207,7 +210,7 @@ final class ChromiumRuntime: ObservableObject {
             }
             try? await Task.sleep(for: .milliseconds(50))
         }
-        status = "Chromium pages did not finish closing. Retry quitting Neutrino."
+        status = "Chromium pages or native windows did not finish closing. Retry quitting Neutrino."
         return false
     }
 }
@@ -220,6 +223,7 @@ private struct ChromiumManifest: Decodable {
     let architecture: String
     let cefVersion: String
     let runtimeStyle: String
+    let hostPresentation: String?
 }
 
 /// Ad-hoc signatures establish code integrity, not publisher identity.
@@ -235,7 +239,7 @@ private enum ChromiumPackage {
         #else
         let architecture = "x86_64"
         #endif
-        guard manifest.format == 2, manifest.abi == 7, manifest.runtimeStyle == "chromeViews",
+        guard manifest.format == 2, manifest.abi == 8, manifest.runtimeStyle == "chromeViews", manifest.hostPresentation == "clippedNative",
               manifest.architecture == architecture, manifest.cefVersion == ChromiumRuntime.cefVersion else {
             throw ValidationError("This Chromium package is incompatible with this Neutrino build or Mac architecture.")
         }

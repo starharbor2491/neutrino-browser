@@ -80,54 +80,65 @@ extension AppState {
         return try repository.behaviorProgram(for: module.id).run(event, input: values)
     }
     func declarativeDefinition(_ capability: ModuleCapability) -> ModuleDefinition? {
-        guard let repository, let module = installedModules.first(where: {
+        guard let module = installedModules.first(where: {
             $0.enabled && $0.manifest.capability == capability && $0.manifest.runtime == .declarative
         }) else { return nil }
-        guard let definition = try? repository.definition(for: module.id), (try? validateDefinitionForPlatform(definition)) != nil else { return nil }
-        return definition
+        return modulePresentation.definitions[module.id]
+    }
+    var modulePresentation: ModulePresentation {
+        if let modulePresentationCache { return modulePresentationCache }
+        let projection: ModulePresentation
+        do { projection = try repository?.presentation() ?? ModulePresentation() }
+        catch { projection = ModulePresentation(errors:["*":error.localizedDescription]) }
+        modulePresentationCache = projection
+        return projection
     }
     var startWidgets: [ModuleDefinition] {
-        guard let repository else { return [] }
+        let definitions = modulePresentation.definitions
         return installedModules.filter { $0.enabled && $0.manifest.capability == .startWidget && $0.manifest.runtime == .declarative }
-            .compactMap { try? repository.definition(for: $0.id) }
+            .compactMap { definitions[$0.id] }
     }
     func requestedFocusPresentation() throws -> (moduleID: String, hiddenComponents: Set<String>) {
         let output = try behaviorResult(.focusMode, event: "enter")
-        guard let active = output["active"]?.bool, let components = output["hiddenComponents"]?.array,
-              components.allSatisfy({ $0.string != nil }), let module = installedModules.first(where: { $0.enabled && $0.manifest.capability == .focusMode && $0.manifest.runtime == .behaviorProgram }) else { throw ValidationError("Focus Mode returned an invalid transition.") }
-        let names = Set(components.compactMap(\.string))
-        guard names.isSubset(of: ["tabs", "navigation", "sidebar", "bookmarks", "status"]), names.count <= 5 else { throw ValidationError("Focus Mode requested unsupported interface components.") }
-        return (module.id, active ? names : [])
+        guard let module = installedModules.first(where: { $0.enabled && $0.manifest.capability == .focusMode && $0.manifest.runtime == .behaviorProgram }) else { throw ValidationError("Enable a Focus Mode provider first.") }
+        let names = try RustCore.decode([String].self,from:RustCore.request(["op":"focusPresentation","output":RustCore.encoded(output)]))
+        return (module.id, Set(names))
     }
+    private struct CaptureSpecification: Decodable { let filename: String; let visibleOnly: Bool }
     func pageCaptureSpecification() throws -> (filename: String, visibleOnly: Bool) {
-        let values = try behaviorResult(.screenshot, event: "prepare")
-        guard values["format"]?.string == "png", let name = values["filename"]?.string,
-              let visibleOnly = values["visibleOnly"]?.bool, visibleOnly else { throw ValidationError("This Page Capture package requested an unsupported format or capture area.") }
-        let cleaned = name.filter { !"/\\:\0\r\n".contains($0) }
-        return (cleaned.isEmpty ? "Page Capture.png" : String(cleaned.prefix(100)) + ".png", visibleOnly)
+        let output = try behaviorResult(.screenshot, event: "prepare")
+        let result = try RustCore.decode(CaptureSpecification.self,from:RustCore.request(["op":"captureSpecification","output":RustCore.encoded(output)]))
+        return (result.filename,result.visibleOnly)
+    }
+    private struct NoteMutation: Decodable { let note: Note?; let remove: Bool }
+    private func mutateModuleNote(action: String, profileID: UUID, output: [String:ModuleValue], id: UUID? = nil, field: String = "") throws -> UUID? {
+        let index = library.notes.firstIndex { $0.id == id && $0.profileID == profileID }
+        var request: [String:Any] = ["op":"moduleNote","action":action,"profileID":profileID.uuidString,"profiles":library.profiles.map { $0.id.uuidString },"output":try RustCore.encoded(output),"field":field]
+        if let index { request["value"] = try RustCore.encoded(library.notes[index]) }
+        if let id { request["id"] = id.uuidString }
+        let result = try RustCore.decode(NoteMutation.self,from:RustCore.request(request))
+        if result.remove { library.notes.removeAll { $0.id == id && $0.profileID == profileID } }
+        else if let note = result.note {
+            if let index { library.notes[index] = note }
+            else { library.notes.append(note) }
+            return note.id
+        }
+        return nil
     }
     func createModuleNote(profileID: UUID) throws -> UUID {
-        guard library.profiles.contains(where: { $0.id == profileID }) else { throw ValidationError("This profile no longer exists.") }
-        let values = try behaviorResult(.notes, event: "create")
-        guard let title = values["title"]?.string, let text = values["text"]?.string,
-              title.count <= 100, text.count <= 200_000 else { throw ValidationError("The Notes package returned invalid note fields.") }
-        let note = Note(profileID: profileID, title: title, text: text)
-        library.notes.append(note); return note.id
+        let output = try behaviorResult(.notes,event:"create")
+        guard let id = try mutateModuleNote(action:"create",profileID:profileID,output:output) else { throw ValidationError("The Notes package did not create a note.") }
+        return id
     }
     func updateModuleNote(id: UUID, profileID: UUID, field: String, value: String) throws {
-        guard ["title", "text"].contains(field), let index = library.notes.firstIndex(where: { $0.id == id && $0.profileID == profileID }) else { throw ValidationError("This note no longer exists in this profile.") }
-        let result = try behaviorResult(.notes, event: "update", input: ["field": .string(field), "value": .string(value)])
-        guard let output = result["value"]?.string, output.count <= (field == "title" ? 100 : 200_000) else { throw ValidationError("The Notes package returned an oversized field.") }
-        if field == "title" { library.notes[index].title = output }
-        else { library.notes[index].text = output }
-        library.notes[index].modifiedAt = Date()
+        let output = try behaviorResult(.notes,event:"update",input:["field":.string(field),"value":.string(value)])
+        _ = try mutateModuleNote(action:"update",profileID:profileID,output:output,id:id,field:field)
     }
     func deleteModuleNote(id: UUID, profileID: UUID) throws {
-        guard try behaviorResult(.notes, event: "delete")["delete"]?.bool == true else { throw ValidationError("The Notes package did not approve this operation.") }
-        library.notes.removeAll { $0.id == id && $0.profileID == profileID }
+        _ = try mutateModuleNote(action:"delete",profileID:profileID,output:behaviorResult(.notes,event:"delete"),id:id)
     }
     func moduleSetting(_ schema: ModuleSetting, moduleID: String) -> ModuleValue {
-        guard let repository, let values = try? repository.settings(for: moduleID) else { return schema.defaultValue }
+        let values = modulePresentation.settings[moduleID] ?? [:]
         return values[schema.id] ?? schema.defaultValue
     }
     func setModuleSetting(_ schema: ModuleSetting, value: ModuleValue, moduleID: String) {
@@ -135,6 +146,7 @@ extension AppState {
             try requireModuleMutationAllowed()
             guard let repository else { throw ValidationError("Repair module storage first.") }
             try repository.setSetting(schema.id, value: value, for: moduleID)
+            modulePresentationCache = nil
             // Preferences are separate data, so publishing an edit must not
             // invalidate running workers or unrelated in-flight page actions.
             objectWillChange.send()
@@ -146,24 +158,9 @@ extension AppState {
         case .nativeReaderWorker, .nativeResourceWorker:
             _ = try validatedWorkerPackage(id: module.id, requireEnabled: requireEnabled)
         case .behaviorProgram: _ = try repository.behaviorProgram(for: module.id, requireEnabled: requireEnabled)
-        case .declarative: try validateDefinitionForPlatform(repository.definition(for: module.id, requireEnabled: requireEnabled))
+        case .declarative: _ = try repository.definition(for: module.id, requireEnabled: requireEnabled)
         case nil: throw ValidationError("This legacy descriptor no longer provides a feature. Update or replace it in Modules.")
         }
-    }
-    func validateDefinitionForPlatform(_ definition: ModuleDefinition) throws {
-        if let icons = definition.icons, !icons.values.allSatisfy({ NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil }) {
-            throw ValidationError("This icon package contains symbols unavailable on this Mac.")
-        }
-    }
-    func moduleInstallationPlan(for ids: [String]) throws -> [ModuleManifest] {
-        guard ids.count <= 64, let repository else { throw ValidationError("Repair module storage before installing setup requirements.") }
-        var seen = Set<String>(), result: [ModuleManifest] = []
-        for id in ids {
-            for manifest in try repository.installationPlan(for: id, catalog: catalog) where seen.insert(manifest.id).inserted {
-                result.append(manifest)
-            }
-        }
-        return result
     }
     func moduleManifestCandidate(_ id: String) -> ModuleManifest? {
         let available = catalog.first(where: { $0.id == id }), existing = installedModules.first(where: { $0.id == id })?.manifest
@@ -171,46 +168,18 @@ extension AppState {
         return available ?? existing
     }
     func validateModuleRequirements(for ids: [String], replacingRootProviders: Bool = true, preparingActivation: Bool = true, repairingIDs: Set<String> = []) throws -> [ModuleManifest] {
-        guard ids.count <= 64, let repository else { throw ValidationError("Repair module storage first.") }
-        var result: [ModuleManifest] = [], seen = Set<String>(), roles: [ModuleCapability: String] = [:]
-        for id in ids {
-            for manifest in try repository.installationPlan(for: id, catalog: catalog, includeInstalled: true) where seen.insert(manifest.id).inserted {
-                if manifest.capability.isExclusive, let other = roles[manifest.capability], other != manifest.id {
-                    throw ValidationError("These requirements choose multiple providers for \(manifest.capability.rawValue). Choose one before applying the setup.")
-                }
-                if manifest.capability.isExclusive { roles[manifest.capability] = manifest.id }
-                if let existing = installedModules.first(where: { $0.id == manifest.id }),
-                   existing.manifest.capability != manifest.capability || (existing.manifest.runtime != nil && existing.manifest.runtime != manifest.runtime) {
-                    throw ValidationError("A package update cannot change its module role or runtime. Import it with a new module ID instead.")
-                }
-                if !repairingIDs.contains(manifest.id), let existing = installedModules.first(where: { $0.id == manifest.id && $0.manifest == manifest }) {
-                    try validateModulePayload(existing, requireEnabled: false)
-                } else {
-                    guard let payload = modulePayloads[manifest.id] else { throw ValidationError("The catalog is missing \(manifest.name)'s package payload.") }
-                    if manifest.runtime == .behaviorProgram { try ModuleProgram.decode(payload).validate(capability: manifest.capability) }
-                    else if manifest.runtime == .declarative { try validateDefinitionForPlatform(ModuleDefinition.decode(payload, capability: manifest.capability)) }
-                    else { guard manifest.runtime?.isNative == true, bundledModuleIDs.contains(manifest.id), !payload.isEmpty, payload.count <= 8 * 1024 * 1024 else { throw ValidationError("This native package is not a trusted bundled worker.") } }
-                }
-                result.append(manifest)
-            }
-        }
-        if !preparingActivation {
-            for manifest in result where installedModules.contains(where: { $0.id == manifest.id && $0.enabled }) {
-                guard manifest.dependencies.allSatisfy({ id in
-                    installedModules.contains { $0.id == id && $0.enabled } &&
-                    (result.first(where: { $0.id == id })?.version ?? 0) >= (manifest.dependencyVersions?[id] ?? 1)
-                }) else { throw ValidationError("Update \(manifest.name) separately first. Updating this disabled module must not disable or replace an active dependency.") }
-            }
-        }
-        // An enabled external dependent cannot be left attached to a provider
-        // that a setup replaces. Dependencies included in this plan are checked
-        // against their candidate manifests instead of their old manifests.
-        for active in installedModules where active.enabled && active.manifest.capability.isExclusive {
-            guard let next = roles[active.manifest.capability], next != active.id else { continue }
-            if !preparingActivation || (!replacingRootProviders && ids.contains(next)) { continue }
-            for dependent in installedModules where dependent.enabled && dependent.manifest.dependencies.contains(active.id) {
-                let candidate = result.first(where: { $0.id == dependent.id })?.dependencies
-                guard candidate != nil && candidate?.contains(active.id) == false else { throw ValidationError("Disable \(dependent.manifest.name) before replacing \(active.manifest.name).") }
+        guard let repository else { throw ValidationError("Repair module storage first.") }
+        let result = try repository.requirementsPlan(for:ids,catalog:catalog,replacingRootProviders:replacingRootProviders,preparingActivation:preparingActivation)
+        // macOS retains executable signature/first-party checks. Portable plan
+        // selection, conflicts, dependencies and output validation live in Rust.
+        for manifest in result {
+            if !repairingIDs.contains(manifest.id), let existing = installedModules.first(where: { $0.id == manifest.id && $0.manifest == manifest }) {
+                try validateModulePayload(existing, requireEnabled:false)
+            } else {
+                guard let payload = modulePayloads[manifest.id] else { throw ValidationError("The catalog is missing \(manifest.name)'s package payload.") }
+                if manifest.runtime == .behaviorProgram { try ModuleProgram.decode(payload).validate(capability:manifest.capability) }
+                else if manifest.runtime == .declarative { _ = try ModuleDefinition.decode(payload,capability:manifest.capability) }
+                else { guard manifest.runtime?.isNative == true, bundledModuleIDs.contains(manifest.id), !payload.isEmpty, payload.count <= 8 * 1024 * 1024 else { throw ValidationError("This native package is not a trusted bundled worker.") } }
             }
         }
         return result

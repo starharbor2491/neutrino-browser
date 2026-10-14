@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -26,43 +27,139 @@
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/wrapper/cef_library_loader.h"
-#include "include/views/cef_browser_view.h"
-#include "include/views/cef_browser_view_delegate.h"
-#include "include/views/cef_fill_layout.h"
-#include "include/views/cef_window.h"
-#include "include/views/cef_window_delegate.h"
 
-// Chrome-style Views preserves the upstream runtime without Chrome's toolbar.
-// A frameless CEF window is attached to this AppKit layout anchor. Do not set
-// parent_view: that switches macOS embedding to Alloy and loses extension APIs.
+// OnBeforeClose ends WebContents ownership before Chrome's asynchronous native
+// window close. Keep weak identities across Page destruction and reparenting;
+// a cleared delegate is Chromium's native close-completion invariant.
+static NSHashTable<NSWindow*>* engineWindows = nil;
+static void TrackEngineWindow(NSWindow* window) {
+  if (!window) return;
+  if (!engineWindows) engineWindows=[[NSHashTable weakObjectsHashTable] retain];
+  [engineWindows addObject:window];
+}
+static int PendingEngineWindows() {
+  int pending=0;
+  @autoreleasepool {
+    for (NSWindow* window in [engineWindows allObjects]) {
+      if (window.delegate) ++pending;
+      else [engineWindows removeObject:window];
+    }
+  }
+  return pending;
+}
+
+// Keep a normal upstream Chrome browser (extension action APIs reject the
+// popup type forced by CEF Views). Clip its native chrome above the page;
+// Neutrino owns the controls surrounding this viewport.
+@interface NeutrinoChromeClipView : NSClipView
+@end
+@implementation NeutrinoChromeClipView
+- (BOOL)isFlipped { return self.documentView.isFlipped; }
+@end
+static NSView* PageContentView(NSView* view) {
+  if (view.hiddenOrHasHiddenAncestor) return nil;
+  NSString* name=NSStringFromClass(view.class);
+  if (([name containsString:@"WebContentsView"] || [name containsString:@"RenderWidgetHostView"]) &&
+      !view.hidden && NSWidth(view.bounds)>40 && NSHeight(view.bounds)>40) return view;
+  for (NSView* child in view.subviews) if (NSView* page=PageContentView(child)) return page;
+  return nil;
+}
 @interface NeutrinoChromiumHostView : NSView
 @property(nonatomic, retain) NSWindow* browserWindow;
+@property(nonatomic, retain) NeutrinoChromeClipView* chromeClip;
+@property(nonatomic, assign) CGFloat chromeInset;
+@property(nonatomic, assign) BOOL arrangingChrome;
 @property(nonatomic, assign) BOOL contentHidden;
 @property(nonatomic, assign) BOOL auxiliary;
 @property(nonatomic, assign) BOOL chromeStyle;
 @property(nonatomic, assign) BOOL navigationChrome;
 @property(nonatomic, assign) BOOL activeContentKnown;
 @property(nonatomic, assign) BOOL inputSuspended;
+@property(nonatomic, assign) BOOL closingChrome;
 - (void)synchronizeBrowserWindow;
+- (void)hideNativeControls:(NSNotification*)notification;
+- (void)restoreBrowserContent;
+- (void)browserWillClose:(NSNotification*)notification;
 @end
 @implementation NeutrinoChromiumHostView
 @synthesize browserWindow;
+@synthesize chromeClip;
+@synthesize chromeInset;
+@synthesize arrangingChrome;
 @synthesize contentHidden;
 @synthesize auxiliary;
 @synthesize chromeStyle;
 @synthesize navigationChrome;
 @synthesize activeContentKnown;
 @synthesize inputSuspended;
+@synthesize closingChrome;
+- (void)setBrowserWindow:(NSWindow*)value {
+  TrackEngineWindow(value);
+  if (browserWindow==value) return;
+  [self restoreBrowserContent];
+  [browserWindow release]; browserWindow=[value retain];
+  closingChrome=value==nil;
+  if (browserWindow) {
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hideNativeControls:) name:NSWindowDidUpdateNotification object:browserWindow];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(browserWillClose:) name:NSWindowWillCloseNotification object:browserWindow];
+  }
+}
+- (void)restoreBrowserContent {
+  closingChrome=YES;
+  NSWindow* child=browserWindow;
+  if (child) {
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidUpdateNotification object:child];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowWillCloseNotification object:child];
+    if (child.visible) [child orderOut:nil];
+    if (child.parentWindow) [child.parentWindow removeChildWindow:child];
+  }
+  if (!chromeClip) return;
+  // Return Chrome's original content ownership before requesting its async
+  // close. Retained Swift anchors must not keep cleared native C++ views alive
+  // until AppKit tears down the application after CefShutdown.
+  NSView* document=[chromeClip.documentView retain];
+  chromeClip.documentView=nil;
+  if (child.contentView==chromeClip) child.contentView=document;
+  self.chromeClip=nil;
+  [document release];
+}
+- (void)browserWillClose:(NSNotification*)notification {
+  [self restoreBrowserContent];
+}
+- (void)hideNativeControls:(NSNotification*)notification {
+  if (self.auxiliary) return;
+  for (NSWindowButton button : {NSWindowCloseButton,NSWindowMiniaturizeButton,NSWindowZoomButton}) {
+    NSButton* control=[self.browserWindow standardWindowButton:button];
+    if (!control.hidden) control.hidden=YES;
+    if (control.enabled) control.enabled=NO;
+    [control setAccessibilityHidden:YES];
+  }
+}
 - (void)setInputSuspended:(BOOL)value {
   inputSuspended=value;
   [self synchronizeBrowserWindow];
 }
 - (void)synchronizeBrowserWindow {
-  if (self.auxiliary) return;
+  if (self.auxiliary || self.closingChrome) return;
   NSWindow* child = self.browserWindow;
   if (!child) return;
-  // Neutrino owns this page's outer window. Keep the frameless Views child
-  // anchored inside the page and suppress any redundant window controls.
+  if (!self.chromeClip || child.contentView!=self.chromeClip) {
+    NSView* document=child.contentView;
+    if (!document) return;
+    [document retain];
+    child.styleMask=NSWindowStyleMaskBorderless;
+    NeutrinoChromeClipView* clip=[[NeutrinoChromeClipView alloc] initWithFrame:document.bounds];
+    clip.drawsBackground=NO;
+    clip.automaticallyAdjustsContentInsets=NO;
+    clip.contentInsets=NSEdgeInsetsMake(0,0,0,0);
+    clip.autoresizingMask=NSViewWidthSizable | NSViewHeightSizable;
+    child.contentView=clip;
+    clip.documentView=document;
+    [document release];
+    document.autoresizingMask=NSViewNotSizable;
+    self.chromeClip=clip;[clip release];
+    self.chromeInset=100;
+  }
   child.hasShadow=NO;
   child.excludedFromWindowsMenu=YES;
   child.movable=NO;
@@ -94,14 +191,39 @@
   }
   NSRect bounds = [parent convertRectToScreen:[self convertRect:visible toView:nil]];
   if (!NSEqualRects(child.frame,bounds)) [child setFrame:bounds display:YES];
+  const NSRect viewport_frame=NSMakeRect(0,0,NSWidth(bounds),NSHeight(bounds));
+  if (!NSEqualRects(self.chromeClip.frame,viewport_frame)) self.chromeClip.frame=viewport_frame;
+  if (!self.arrangingChrome) {
+    self.arrangingChrome=YES;
+    NSView* document=self.chromeClip.documentView;
+    const NSSize viewport=self.chromeClip.bounds.size;
+    for (int pass=0;pass<3;++pass) {
+      // Chrome can attach a newly selected inner page to the window's content
+      // view directly. Include those siblings of the retained chrome document.
+      if (NSView* page=PageContentView(self.chromeClip)) {
+        // The Cocoa content origin includes scroll offsets. Its height is the
+        // actual WebContents allocation; subtract heights to isolate chrome.
+        const CGFloat inset=NSHeight(document.bounds)-NSHeight(page.bounds);
+        if (inset>=0 && inset<=220) self.chromeInset=inset;
+      }
+      const NSRect frame=NSMakeRect(0,0,viewport.width,viewport.height+self.chromeInset);
+      if (NSEqualRects(document.frame,frame)) break;
+      document.frame=frame;
+      [document layoutSubtreeIfNeeded];
+    }
+    // Layout may change the Cocoa page origin when resizing the root view.
+    // Scroll to its final rectangle, rather than a pre-layout toolbar estimate.
+    if (NSView* page=PageContentView(self.chromeClip)) {
+      const NSRect rect=[page convertRect:page.bounds toView:document];
+      const CGFloat y=document.isFlipped ? NSMinY(rect) : NSMaxY(rect)-viewport.height;
+      [self.chromeClip scrollToPoint:NSMakePoint(NSMinX(rect),y)];
+    }
+    self.arrangingChrome=NO;
+  }
   if (!child.visible) [child orderFront:nil];
   // Chrome's size-constraint/layout work can re-enable the zoom button.
   // Apply pane-owned controls after native attachment, layout and ordering.
-  for (NSWindowButton button : {NSWindowCloseButton,NSWindowMiniaturizeButton,NSWindowZoomButton}) {
-    NSButton* control=[child standardWindowButton:button];
-    if (!control.hidden) control.hidden=YES;
-    if (control.enabled) control.enabled=NO;
-  }
+  [self hideNativeControls:nil];
 }
 - (void)viewDidMoveToWindow { [super viewDidMoveToWindow]; [self synchronizeBrowserWindow]; }
 - (void)setFrame:(NSRect)frame { [super setFrame:frame]; [self synchronizeBrowserWindow]; }
@@ -113,7 +235,9 @@
   return YES;
 }
 - (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   if (self.browserWindow.parentWindow) [self.browserWindow.parentWindow removeChildWindow:self.browserWindow];
+  [chromeClip release];
   [browserWindow release];
   [super dealloc];
 }
@@ -124,6 +248,7 @@ void SynchronizeViews();
 bool initialized = false;
 bool stopped = false;
 bool final_quit_frozen = false;
+unsigned internal_chrome_commands = 0;
 std::string last_error;
 std::string data_root;
 NSTimer* pump_timer = nil;
@@ -148,6 +273,16 @@ class EngineApp final : public CefApp, public CefBrowserProcessHandler {
     // otherwise ignores Neutrino's allow toggle, especially in private contexts
     // where default content settings cannot be changed.
     if (process_type.empty()) command_line->AppendSwitch("disable-popup-blocking");
+    if (process_type.empty()) {
+      // Chromium 154 can starve hidden extension surfaces before first paint
+      // (crbug.com/549552319). Its supported loading voter keeps loading/busy
+      // pages responsive and releases the vote when upstream loading/busy
+      // state ends. Idle background policy stays upstream; packaging checks support.
+      std::string features=command_line->GetSwitchValue("enable-features").ToString();
+      if (!features.empty()) features+=",";
+      features+="PMLoadingPageVoter";
+      command_line->AppendSwitchWithValue("enable-features",features);
+    }
     if (process_type.empty() && diagnostics &&
         [[[NSProcessInfo processInfo] environment] objectForKey:@"NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE"]) {
       // Only isolated acceptance launches expose browser-target CDP. Chrome
@@ -210,8 +345,6 @@ std::map<int,CefRefPtr<CefBrowser>> unowned_browsers;
 struct Page {
   NeutrinoChromiumHostView* view = [[NeutrinoChromiumHostView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
   CefRefPtr<CefBrowser> browser;
-  CefRefPtr<CefBrowserView> browser_view;
-  CefRefPtr<CefWindow> native_window;
   CefRefPtr<Client> client;
   CefRefPtr<CefRegistration> observer;
   int browser_id = 0;
@@ -481,6 +614,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
       return true;
     }
     if (final_quit_frozen) return true;
+    if (internal_chrome_commands) return false;
     SetActive(page_);
     const struct { const char* chromium; const char* native; } commands[] = {
       {"IDC_NEW_WINDOW","newWindow"}, {"IDC_NEW_INCOGNITO_WINDOW","privateWindow"},
@@ -508,6 +642,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     return true;
   }
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    TrackEngineWindow([(NSView*)browser->GetHost()->GetWindowHandle() window]);
     if (!page_ || page_->browser_created) {
       Page* preferred=page_ ? Group(page_) : popup_owner_;
       if (popup_owner_ && (!pages.count(popup_owner_) || popup_owner_->generation!=popup_owner_generation_ || popup_owner_->closing || popup_owner_->admission_closed)) preferred=nullptr;
@@ -532,7 +667,8 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     owner->view.navigationChrome=NO;
     NSView* handle=(NSView*)browser->GetHost()->GetWindowHandle();
     if (page_==owner) owner->view.browserWindow=[handle window];
-    [owner->view synchronizeBrowserWindow];
+    if (owner->closing) [owner->view restoreBrowserContent];
+    else [owner->view synchronizeBrowserWindow];
     if (!owner->active) owner->active=page_;
     auto capabilities = CefDictionaryValue::Create();
     capabilities->SetBool("chromeStyle",owner->view.chromeStyle);
@@ -553,6 +689,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (auto active=Active(owner)) State(active);
   }
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+    TrackEngineWindow([(NSView*)browser->GetHost()->GetWindowHandle() window]);
     if (auto client = ForBrowser(browser); client && client != this) return client->OnBeforeClose(browser);
     if (unowned_browsers.erase(browser->GetIdentifier()) != 0) return;
     if (!page_ || !page_->browser || !page_->browser->IsSame(browser)) return;
@@ -832,8 +969,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   std::map<int,Download> downloads_;
   IMPLEMENT_REFCOUNTING(Client);
 };
-// Extension APIs that depend on Chrome's toolbar require a separate upstream
-// integration patch and native acceptance. Views alone does not prove parity.
+// Upstream extension APIs remain active behind the clipped native chrome.
 Page::Page() { [view setWantsLayer:YES]; generation=++next_page_generation; group=this; }
 Page::~Page() { [view release]; }
 void SetActive(Page* page) {
@@ -909,6 +1045,10 @@ void FinishEmptyGroup(Page* owner) {
   for (Page* member : members) if (member!=owner && pages.count(member)) Destroy(member);
   if (pages.count(owner)) Destroy(owner);
 }
+void ExecuteInternal(CefRefPtr<CefBrowser> browser,int command) {
+  struct Scope { Scope(){++internal_chrome_commands;} ~Scope(){--internal_chrome_commands;} } scope;
+  browser->GetHost()->ExecuteChromeCommand(command,CEF_WOD_CURRENT_TAB);
+}
 void RestoreInnerPages(Page* owner) {
   if (!owner->restoring || owner->restore_failed || owner->closing) return;
   if (CFAbsoluteTimeGetCurrent()>owner->restore_deadline) {
@@ -941,7 +1081,7 @@ void RestoreInnerPages(Page* owner) {
     const int command=cef_id_for_command_id_name("IDC_NEW_TAB");
     if (!member->browser->GetHost()->CanExecuteChromeCommand(command)) return;
     owner->awaiting_restore_browser=true;
-    member->browser->GetHost()->ExecuteChromeCommand(command,CEF_WOD_CURRENT_TAB);
+    ExecuteInternal(member->browser,command);
     return;
   }
   // The saved selection occupies the fresh window's first tab; IDC_NEW_TAB
@@ -950,7 +1090,7 @@ void RestoreInnerPages(Page* owner) {
   if (!member->browser->IsSame(owner->restore_selection)) {
     const int command=cef_id_for_command_id_name("IDC_SELECT_TAB_0");
     if (member->browser->GetHost()->CanExecuteChromeCommand(command))
-      member->browser->GetHost()->ExecuteChromeCommand(command,CEF_WOD_CURRENT_TAB);
+      ExecuteInternal(member->browser,command);
     return;
   }
   owner->restore_selection=nullptr; owner->restoring=false;
@@ -983,9 +1123,6 @@ void Destroy(Page* page) {
   NSWindow* child = page->view.browserWindow;
   if (child.parentWindow) [child.parentWindow removeChildWindow:child];
   page->view.browserWindow = nil;
-  // Views windows have their own lifetime. Releasing the Page's reference must
-  // not leave an unowned native window after its WebContents has closed.
-  if (page->native_window && !page->native_window->IsClosed()) page->native_window->Close();
   browser_pages.erase(page->browser_id);
   auto context = contexts.find(page->context_key);
   if (context != contexts.end() && --context->second.pages == 0 && !context->second.retained) contexts.erase(context);
@@ -1049,6 +1186,7 @@ void ReconcileWindows() {
     Page* old_owner=Group(member);
     NSView* handle=(NSView*)member->browser->GetHost()->GetWindowHandle();
     NSWindow* window=[handle window];
+    TrackEngineWindow(window);
     if (!window || old_owner->creating) continue;
     if (old_owner->closing || old_owner->admission_closed) {
       if (member->awaiting_window || old_owner->view.browserWindow!=window) member->browser->GetHost()->CloseBrowser(true);
@@ -1118,70 +1256,14 @@ void ReconcileWindows() {
   }
 }
 
-class PaneWindowDelegate final : public CefWindowDelegate {
- public:
-  PaneWindowDelegate(Page* page,CefRefPtr<CefBrowserView> view)
-      : page_(page),generation_(page->generation),view_(view) {}
-  void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->SetToFillLayout();
-    window->AddChildView(view_);
-    window->SetBounds(CefRect(0,0,800,600));
-    if (pages.count(page_) && page_->generation==generation_) {
-      NSView* handle=(NSView*)window->GetWindowHandle();
-      page_->view.browserWindow=[handle window];
-      [page_->view synchronizeBrowserWindow];
-    }
-  }
-  bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }
-  bool WithStandardWindowButtons(CefRefPtr<CefWindow>) override { return false; }
-  bool CanClose(CefRefPtr<CefWindow>) override {
-    auto browser=view_->GetBrowser();
-    return !browser || browser->GetHost()->TryCloseBrowser();
-  }
- private:
-  Page* page_; uint64_t generation_; CefRefPtr<CefBrowserView> view_;
-  IMPLEMENT_REFCOUNTING(PaneWindowDelegate);
-};
-
-class PaneBrowserDelegate final : public CefBrowserViewDelegate {
- public:
-  cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
-  ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NONE; }
-  CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(
-      CefRefPtr<CefBrowserView>, const CefBrowserSettings&, CefRefPtr<CefClient>, bool) override {
-    return new PaneBrowserDelegate();
-  }
-  bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> parent,
-      CefRefPtr<CefBrowserView> popup,bool is_devtools) override {
-    if (is_devtools) return false;
-    auto found=browser_pages.find(popup->GetBrowser()->GetIdentifier());
-    if (found==browser_pages.end()) return false;
-    Page* child=found->second; Page* owner=Group(child);
-    if (!owner->popup || owner->closing || owner->admission_closed) { popup->GetBrowser()->GetHost()->CloseBrowser(true); return true; }
-    // Transfer the original popup WebContents, including POST and opener state.
-    // It becomes a Neutrino tab rather than an invisible Chrome inner tab.
-    if (child==owner) return false;
-    if (owner->active==child) owner->active=nullptr;
-    child->group=nullptr; child->active=child; child->awaiting_window=false;
-    child->view.auxiliary=NO; child->view.navigationChrome=NO;
-    child->browser_view=popup;
-    child->native_window=CefWindow::CreateTopLevelWindow(new PaneWindowDelegate(child,popup));
-    const std::string url=popup->GetBrowser()->GetMainFrame()->GetURL().ToString();
-    if (!owner->popup(owner->callback_context,child,url.c_str())) popup->GetBrowser()->GetHost()->CloseBrowser(true);
-    RefreshActive(owner); return true;
-  }
- private:
-  IMPLEMENT_REFCOUNTING(PaneBrowserDelegate);
-};
-
 void CreateReadyPage(Page* page) {
   page->awaiting_context = false;
   page->creating=true;
   CefBrowserSettings settings;
-  page->browser_view=CefBrowserView::CreateBrowserView(page->client,"about:blank",settings,nullptr,
-      contexts.at(page->context_key).value,new PaneBrowserDelegate());
-  page->native_window=CefWindow::CreateTopLevelWindow(new PaneWindowDelegate(page,page->browser_view));
-  auto browser=page->browser_view->GetBrowser();
+  CefWindowInfo info;
+  info.runtime_style=CEF_RUNTIME_STYLE_CHROME;
+  auto browser=CefBrowserHost::CreateBrowserSync(info,page->client,"about:blank",settings,nullptr,
+      contexts.at(page->context_key).value);
   page->creating=false;
   if (browser) {
     NSView* handle=(NSView*)browser->GetHost()->GetWindowHandle();
@@ -1319,7 +1401,7 @@ int NativeTabCommand(void* opaque,int command) {
   const int id=cef_id_for_command_id_name(name);
   auto host=page->browser->GetHost();
   if (!host->CanExecuteChromeCommand(id)) return 0;
-  host->ExecuteChromeCommand(id,CEF_WOD_CURRENT_TAB);
+  ExecuteInternal(page->browser,id);
   return 1;
 }
 void Command(void* opaque,int command,const char* text,double value) {
@@ -1373,6 +1455,17 @@ void Command(void* opaque,int command,const char* text,double value) {
     }
     owner->restoring=true; owner->restore_failed=false;
     owner->restore_deadline=CFAbsoluteTimeGetCurrent()+30;
+    return;
+  }
+  if (command==NEUTRINO_CEF_SELECT_INNER_PAGE || command==NEUTRINO_CEF_CLOSE_INNER_PAGE) {
+    if (final_quit_frozen || owner->admission_closed || !std::isfinite(value) || value<1 || value>INT_MAX || std::floor(value)!=value) return;
+    for (Page* member : Members(owner)) if (member->browser && member->browser_id==static_cast<int>(value)) {
+      if (command==NEUTRINO_CEF_CLOSE_INNER_PAGE) member->browser->GetHost()->CloseBrowser(false);
+      // CEF allocates an ID even for fire-and-forget calls. Sharing the same
+      // increasing sequence prevents it from reassigning the next tracked ID.
+      else member->browser->GetHost()->ExecuteDevToolsMethod(++next_devtools_id,"Page.bringToFront",nullptr);
+      return;
+    }
     return;
   }
   ReconcileWindows(); if (!pages.count(owner)) return;
@@ -1517,12 +1610,38 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
   if (diagnostics && std::string(method)=="Neutrino.chromeHostState") {
     auto result=CefDictionaryValue::Create();
     NSWindow* window=owner->view.browserWindow;
-    CefRefPtr<CefView> toolbar;
-    if (page && page->browser_view) toolbar=page->browser_view->GetChromeToolbar();
-    result->SetBool("customHost",page && page->browser_view);
-    result->SetBool("toolbarPresent",toolbar!=nullptr);
-    result->SetBool("toolbarVisible",toolbar && toolbar->IsVisible());
-    result->SetBool("toolbarDrawn",toolbar && toolbar->IsDrawn());
+    NSView* document=owner->view.chromeClip.documentView;
+    NSView* content=owner->view.chromeClip ? PageContentView(owner->view.chromeClip) : nil;
+    NSRect pageRect=content ? [content convertRect:content.bounds toView:owner->view.chromeClip] : NSZeroRect;
+    const NSRect viewport=owner->view.chromeClip.bounds;
+    const bool clipped=content && std::abs(NSMinX(pageRect)-NSMinX(viewport))<2 &&
+        std::abs(NSMinY(pageRect)-NSMinY(viewport))<2 &&
+        std::abs(NSWidth(pageRect)-NSWidth(viewport))<2 && std::abs(NSHeight(pageRect)-NSHeight(viewport))<2;
+    result->SetBool("customHost",owner->view.chromeClip && window.contentView==owner->view.chromeClip);
+    result->SetBool("chromeClipped",clipped);
+    if (!clipped && document) {
+      // Only the isolated native diagnostic request reaches this branch.
+      // Record a bounded structural tree, without page text or credentials.
+      auto tree=CefListValue::Create();
+      std::vector<NSView*> pending{owner->view.chromeClip};
+      while (!pending.empty() && tree->GetSize()<120) {
+        NSView* view=pending.back();pending.pop_back();
+        auto item=CefDictionaryValue::Create();
+        item->SetString("class",NSStringFromClass(view.class).UTF8String);
+        item->SetString("frame",NSStringFromRect(view.frame).UTF8String);
+        item->SetBool("hidden",view.hidden);
+        item->SetBool("ancestorHidden",view.hiddenOrHasHiddenAncestor);
+        tree->SetDictionary(tree->GetSize(),item);
+        for (NSView* child in view.subviews) pending.push_back(child);
+      }
+      result->SetList("viewTree",tree);
+    }
+    result->SetString("contentRect",NSStringFromRect(pageRect).UTF8String);
+    result->SetString("viewportRect",NSStringFromRect(viewport).UTF8String);
+    result->SetString("documentFrame",NSStringFromRect(document.frame).UTF8String);
+    result->SetString("documentBounds",NSStringFromRect(document.bounds).UTF8String);
+    result->SetBool("documentFlipped",document.isFlipped);
+    result->SetDouble("chromeInset",owner->view.chromeInset);
     result->SetBool("windowVisible",window.visible);
     result->SetBool("windowActive",window.keyWindow);
     result->SetInt("activeBrowser",page ? page->browser_id : 0);
@@ -1566,6 +1685,7 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
 void Close(void* opaque) {
   auto owner=static_cast<Page*>(opaque); if (!pages.count(owner)) return;
   owner->event=nullptr; owner->popup=nullptr; owner->callback_context=nullptr; owner->closing=true;
+  [owner->view restoreBrowserContent];
   owner->awaiting_context=false;
   owner->restore_urls.clear(); owner->restore_selection=nullptr; owner->restore_created=nullptr; owner->restoring=false;
   std::vector<CefRefPtr<Client>> clients; for (const auto& entry : pages) clients.push_back(entry.first->client);
@@ -1580,7 +1700,10 @@ void Close(void* opaque) {
   }
   if (!waiting && pages.count(owner)) FinishEmptyGroup(owner);
 }
-int Live() { return static_cast<int>(pages.size() + unowned_browsers.size()); }
+int Live() {
+  const int browsers=static_cast<int>(pages.size() + unowned_browsers.size());
+  return browsers ? browsers : pumping ? 1 : PendingEngineWindows();
+}
 void ReleasePrivateContexts(const char* private_window,const char* profile) {
   const std::string window_id=private_window ? private_window : "";
   const std::string profile_id=profile ? profile : "";
@@ -1600,14 +1723,20 @@ void ReleasePrivateContexts(const char* private_window,const char* profile) {
 }
 int Shutdown() {
   if (!initialized) return 1;
+  if (pumping) { last_error="Chromium's message pump is still running."; return 0; }
   if (!pages.empty() || !unowned_browsers.empty()) { last_error="Chromium pages are still closing."; return 0; }
+  if (PendingEngineWindows()!=0) { last_error="Chromium native windows are still closing."; return 0; }
   stopped=true; CancelPump();
-  contexts.clear(); CefShutdown(); engine_app=nullptr; initialized=false;
+  contexts.clear();
+  Trace("all native pages and windows closed; entering CEF shutdown");
+  CefShutdown(); engine_app=nullptr; initialized=false;
+  [engineWindows release]; engineWindows=nil;
+  Trace("CEF shutdown returned");
   // Never dlclose Chromium: runtime code may remain referenced by ObjC classes.
   return 1;
 }
 const char* Error() { return last_error.c_str(); }
 void SetFinalQuitFrozen(int frozen) { final_quit_frozen=frozen!=0; }
-const neutrino_cef_api api={7,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
+const neutrino_cef_api api={8,Initialize,Error,Create,NativeView,Callbacks,Command,DevTools,Close,Live,Shutdown,ReleasePrivateContexts,NativeTabCommand,SetFinalQuitFrozen};
 }
 extern "C" __attribute__((visibility("default"))) const neutrino_cef_api* neutrino_cef_get_api() { return &api; }

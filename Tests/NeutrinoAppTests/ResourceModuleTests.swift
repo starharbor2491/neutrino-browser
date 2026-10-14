@@ -15,8 +15,8 @@ struct ResourceModuleTests {
     @Test func realWorkerReapingRejectsNestedApprovedUpdatesAndPreservesUnrelatedLayoutEdits() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("neutrino-worker-reentry-" + UUID().uuidString)
         let previous = AppDelegate.state
-        let app = AppState(directory: directory), worker = ResourceWorker()
-        defer { worker.stop(); app.ready = false; AppDelegate.state = previous; try? FileManager.default.removeItem(at: directory) }
+        let app = AppState(directory: directory)
+        defer { app.ready = false; AppDelegate.state = previous; try? FileManager.default.removeItem(at: directory) }
         await app.load()
         try #require(app.ready, Comment(rawValue: app.startupError ?? "Native worker fixture did not load"))
         let repository = try #require(app.repository)
@@ -30,6 +30,8 @@ struct ResourceModuleTests {
         let trustedBytes = try Data(contentsOf: package.url)
 
         for rollback in [false, true] {
+            let worker=ResourceWorker()
+            defer {worker.stop()}
             let requirements = try app.validateModuleRequirements(for: [widget.id])
             let approval = try app.captureModuleApproval(requirements, rootIDs: [widget.id])
             let inventory = try repository.installed()
@@ -46,7 +48,7 @@ struct ResourceModuleTests {
             // A preflight can service the run loop before worker reaping starts.
             // Keep a real source pending until the guarded critical section, then
             // invalidate it before the probe itself can reenter the run loop.
-            let runLoop = CFRunLoopGetMain()
+            let runLoop = workerReapingRunLoop()
             let timer = try #require(CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent(), 0.001, 0, 0) { timer in
                 MainActor.assumeIsolated {
                     guard probe.app.stoppingModuleWorkers, !probe.fired else { return }
@@ -54,16 +56,21 @@ struct ResourceModuleTests {
                     probe.attemptUpdate()
                 }
             })
-            CFRunLoopAddTimer(runLoop, timer, CFRunLoopMode.commonModes)
+            // The production reap loop runs the default mode. Swift Testing's
+            // executor run loop need not include it in its common-mode set.
+            CFRunLoopAddTimer(runLoop, timer, CFRunLoopMode.defaultMode)
             defer { CFRunLoopTimerInvalidate(timer) }
 
             if rollback {
-                #expect(throws: (any Error).self) {
+                var repaired = false
+                do {
                     try app.withAtomicModuleChanges(for: [package.id]) {
                         try app.reinstallApprovedWorker(package.id)
+                        repaired = true
                         throw ValidationError("Reject this fixture transaction after its real repair.")
                     }
-                }
+                    #expect(Bool(false), "The fixture transaction did not roll back.")
+                } catch { #expect(repaired, Comment(rawValue: "Repair failed before the intended rollback: " + error.localizedDescription)) }
             } else { try app.reinstallApprovedWorker(package.id) }
             #expect(probe.fired && probe.duringWorkerStop)
             #expect(probe.rejection != nil)
@@ -212,6 +219,9 @@ struct ResourceModuleTests {
         #expect(await app.flush())
     }
 
+    // The SDK disallows querying a run loop directly in an async function.
+    // No suspension occurs between this synchronous lookup and worker reaping.
+    private func workerReapingRunLoop() -> CFRunLoop {CFRunLoopGetCurrent()}
     private func waitForStoppedProcess(_ process: Process) async throws {
         for _ in 0..<50 {
             var info = kinfo_proc()

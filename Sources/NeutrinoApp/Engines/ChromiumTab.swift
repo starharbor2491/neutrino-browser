@@ -39,6 +39,22 @@ final class ChromiumTab: BrowserEngineTab {
     private var pageTitle: String?
     private var restoringPages = false
     private var sessionPages: [ChromiumSessionPage] = []
+    private(set) var interfacePages: [[String:Any]] = []
+    var noteSourcePages: [[String:Any]] {
+        interfacePages.compactMap { item in
+            guard let id=item["id"] as? Int,id>0,let address=item["url"] as? String,
+                  let url=URL(string:address),AddressResolver.isWebURL(url) else{return nil}
+            return ["id":id,"url":address,"token":"\(runtime.sourceProcessID.uuidString):\(id)"]
+        }
+    }
+    var selectedSourcePageToken: String? {
+        guard let id=interfacePages.first(where:{$0["selected"] as? Bool == true})?["id"] as? Int else{return nil}
+        return noteSourcePages.first(where:{$0["id"] as? Int == id})?["token"] as? String
+    }
+    func selectInterfacePage(_ id: Int, close: Bool = false) {
+        guard interfacePages.contains(where: { $0["id"] as? Int == id }) else { return }
+        command(Int(close ? NEUTRINO_CEF_CLOSE_INNER_PAGE : NEUTRINO_CEF_SELECT_INNER_PAGE),value:Double(id))
+    }
     private var nextRequest = 1
     private struct PendingRequest {
         let continuation: CheckedContinuation<Data, any Error>
@@ -68,9 +84,9 @@ final class ChromiumTab: BrowserEngineTab {
         restoringPages || !activeContentKnown || sessionPages.isEmpty ? nil : sessionPages
     }
     override func restoreChromiumSessionPages(_ pages: [ChromiumSessionPage]) {
-        // Each Neutrino tab has one WebContents. Do not recreate grouped
-        // Chrome-native tabs from the previous window-hosting integration.
-        if let first = pages.first?.url { load(first) }
+        let addresses = ChromiumSessionPage.normalized(pages).map { $0.url?.absoluteString ?? "" }
+        guard !addresses.isEmpty, let data = try? JSONSerialization.data(withJSONObject:addresses), let text = String(data:data,encoding:.utf8) else { return }
+        command(Int(NEUTRINO_CEF_RESTORE_TABS),text:text)
     }
     override var engineID: BrowserEngineID { .chromium }
 
@@ -213,6 +229,7 @@ final class ChromiumTab: BrowserEngineTab {
     }
     private func evaluateIsolated(_ expression: String) async throws -> Any {
         let revision = navigationRevision
+        _ = try await request("Runtime.enable",parameters:[:])
         let tree = try await request("Page.getFrameTree", parameters: [:])
         guard let body = try JSONSerialization.jsonObject(with: tree) as? [String: Any], let frameTree = body["frameTree"] as? [String: Any], let frame = frameTree["frame"] as? [String: Any], let frameID = frame["id"] as? String else { throw ValidationError("The page is unavailable.") }
         let world = try await request("Page.createIsolatedWorld", parameters: ["frameId": frameID, "worldName": "org.neutrino.reader"])
@@ -322,7 +339,7 @@ final class ChromiumTab: BrowserEngineTab {
         return image
     }
     /// Internal DevTools transport, never a listening debugging port.
-    func request(_ method: String, parameters: [String: Any], timeout: Duration = .seconds(15)) async throws -> Data {
+    func request(_ method: String, parameters: [String: Any], timeout: Duration = .seconds(15), file: StaticString = #fileID, line: UInt = #line) async throws -> Data {
         try Task.checkCancellation()
         guard !restoringPages else { throw ValidationError("This Chromium pane is still restoring its saved tabs.") }
         command(Int(NEUTRINO_CEF_SYNC_ACTIVE))
@@ -334,6 +351,9 @@ final class ChromiumTab: BrowserEngineTab {
                 guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
                 let timer = Task { [weak self] in
                     do { try await Task.sleep(for: timeout) } catch { return }
+                    if CommandLine.arguments.contains("--smoke-test"), ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil {
+                        print("Neutrino Chromium request timed out: method=\(method), id=\(id), source=\(file):\(line), loading=\(self?.loading == true), mounted=\(self?.nativeView.window != nil)")
+                    }
                     self?.completeRequest(id, result: .failure(ValidationError("Chromium did not respond before the request timed out.")))
                 }
                 pending[id] = PendingRequest(continuation: continuation, timeout: timer)
@@ -363,11 +383,14 @@ final class ChromiumTab: BrowserEngineTab {
             if let restoring = value["restoring"] as? Bool { restoringPages = restoring }
             if let pages = value["innerPages"] as? [[String: Any]], pages.count <= 200 {
                 let ordered = pages.filter { $0["selected"] as? Bool == true } + pages.filter { $0["selected"] as? Bool != true }
+                interfacePages = ordered.map { item in
+                    ["id":item["id"] as? Int ?? 0,"title":boundedPageTitle(item["title"] as? String ?? "Page"),"url":item["url"] as? String ?? "","selected":item["selected"] as? Bool ?? false]
+                }
                 sessionPages = ordered.map { item in
                     let candidate = (item["url"] as? String).flatMap(URL.init(string:))
                     let url = candidate.flatMap { AddressResolver.isWebURL($0) && $0.absoluteString.utf8.count <= 8192 ? $0 : nil }
                     let title = url == nil ? "New tab" : boundedPageTitle(item["title"] as? String ?? "Untitled")
-                    return ChromiumSessionPage(url: url, title: title)
+                    return ChromiumSessionPage(url:url,title:title)
                 }
             }
             if let chrome = value["chromeStyle"] as? Bool { chromeStyle = chrome }

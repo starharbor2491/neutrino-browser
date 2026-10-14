@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 from disk_images import run as run_disk_image
+from sparkle import signed_appcast
 
 
 def digest(path):
@@ -114,12 +115,14 @@ def package(app, output, development, allow_webkit_development=False, notarize_p
     if archive.exists():
         archive.unlink()
     checked(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, archive])
+    sparkle = signed_appcast(app, archive, output)
     signature = subprocess.run(['codesign', '-d', '--verbose=4', '--arch', 'arm64', str(app)],
                                check=True, capture_output=True, text=True)
     code_hash = re.search(r'^CDHash=([0-9a-f]{40})$', signature.stderr, re.MULTILINE)
     if not code_hash:
         raise RuntimeError('The application has no Apple Silicon code directory hash')
     evidence = {'release': metadata, 'developerID': sealed, 'notarized': sealed,
+                'sparkle': sparkle,
                 'file': dmg.name, 'bytes': dmg.stat().st_size,
                 'sha256': digest(dmg), 'codeDirectoryHash': code_hash.group(1),
                 'applicationArchive': {'file': archive.name, 'bytes': archive.stat().st_size, 'sha256': digest(archive)}}

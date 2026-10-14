@@ -1,11 +1,11 @@
 {
   "formatVersion": 1,
-  "icons": {
-    "back": "chevron.left",
-    "forward": "chevron.right",
-    "reload": "arrow.clockwise",
-    "bookmarks": "bookmark",
-    "history": "clock",
-    "modules": "shippingbox"
+  "svgIcons": {
+    "back": "M15 4 7 12l8 8",
+    "forward": "m9 4 8 8-8 8",
+    "reload": "M20 10V4h-6M20 4H4v16h16v-6",
+    "bookmarks": "M6 3h12v18l-6-4-6 4V3z",
+    "history": "M3 3h18v18H3zM12 6v6h5",
+    "modules": "M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z"
   }
 }

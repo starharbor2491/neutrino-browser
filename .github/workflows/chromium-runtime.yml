@@ -17,10 +17,6 @@ on:
       - 'Sources/NeutrinoDistribution/**'
       - 'Sources/NeutrinoUpdater/**'
       - 'Sources/NeutrinoReaderLogic/**'
-      - 'Sources/NeutrinoReaderWorker/**'
-      - 'Sources/NeutrinoResourcePlatform/**'
-      - 'Sources/NeutrinoResourceMonitor/**'
-      - 'Sources/NeutrinoMemoryMonitor/**'
       - 'Tests/NeutrinoAppTests/**'
       - 'Tests/NeutrinoCoreTests/**'
       - 'Tests/NeutrinoReaderTests/**'
@@ -29,6 +25,7 @@ on:
       - 'scripts/chromium-runtime.py'
       - 'scripts/build-app.sh'
       - 'scripts/build-rust.sh'
+      - 'scripts/build-workers.sh'
       - 'scripts/distribution-metadata.py'
       - 'scripts/sign-release.py'
       - 'scripts/package-release.py'
@@ -117,6 +114,7 @@ jobs:
           evidence['neutrinoEmbeddedRuntimeValidated'] = True
           evidence['chromeExtensions'] = True
           evidence['runtimeStyle'] = 'chromeViews'
+          evidence['hostPresentation'] = 'clippedNative'
           evidence['testedSource'] = os.environ['GITHUB_SHA']
           evidence['nativeChecks'] = ['HTTP', 'HTTPS', 'reader', 'PNG capture', 'profiles', 'private windows', 'normal/private popup policy and opener', 'Neutrino page geometry and focus', 'MV3 lifecycle and APIs', 'extension auxiliary window identity and lifetime', 'Chrome Web Store installation', 'extension persistence after process restart', 'extension removal', 'tab close', 'extension manager open during normal quit']
           path.write_text(json.dumps(evidence, indent=2) + '\n')
@@ -129,6 +127,7 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
+            dist/research-acceptance.json
             dist/Chromium-*.neutrinoengine.zip
             dist/Neutrino-Chromium-*.zip
           if-no-files-found: error
@@ -147,5 +146,6 @@ jobs:
             dist/*-package.json
             dist/installed-smoke.json
             dist/smoke-performance.json
+            dist/research-acceptance.json
             ${{ runner.temp }}/neutrino-cef-runtime/neutrino-adapter-*.json
           if-no-files-found: warn

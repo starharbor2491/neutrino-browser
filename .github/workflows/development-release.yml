@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 60
     env:
       NEUTRINO_UPDATE_CHANNEL: preview
+      NEUTRINO_SPARKLE_PUBLIC_KEY: ${{ vars.NEUTRINO_SPARKLE_PUBLIC_KEY }}
+      NEUTRINO_SPARKLE_PRIVATE_KEY: ${{ secrets.NEUTRINO_SPARKLE_PRIVATE_KEY }}
       NEUTRINO_SIGNING_IDENTITY: ${{ secrets.NEUTRINO_SIGNING_IDENTITY }}
       NEUTRINO_NOTARY_KEY_ID: ${{ secrets.NEUTRINO_NOTARY_KEY_ID }}
       NEUTRINO_NOTARY_ISSUER: ${{ secrets.NEUTRINO_NOTARY_ISSUER }}
@@ -94,6 +96,8 @@ jobs:
             dist/*-catalog-entry.json
             dist/SHA256SUMS
             dist/signing-status.json
+            dist/sparkle-status.json
+            dist/preview.xml
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -125,9 +129,10 @@ jobs:
         run: |
           python3 scripts/installed-smoke.py
           cp dist/installed-smoke.json dist/shell-acceptance.json
+          if [[ -f dist/research-acceptance.json ]]; then cp dist/research-acceptance.json dist/research-webkit.json; fi
           mv dist/smoke-data dist/shell-smoke-data
-      # Full parity remains mandatory for consumer releases. Preview notes and
-      # the attached failed/passed receipt expose this independent result.
+      # Studio previews require their advertised native workflows.
+      # Consumer releases additionally require the manual parity/streaming gates.
       - name: Record full Blink and extension acceptance
         id: blink
         continue-on-error: true
@@ -141,7 +146,25 @@ jobs:
         run: |
           if [[ -f dist/installed-smoke.json ]]; then cp dist/installed-smoke.json dist/blink-acceptance.json; fi
           if [[ -f dist/smoke-app.log ]]; then cp dist/smoke-app.log dist/blink-acceptance.log; fi
+          if [[ -f dist/research-acceptance.json ]]; then cp dist/research-acceptance.json dist/research-blink.json; fi
           if [[ -f dist/shell-acceptance.json ]]; then cp dist/shell-acceptance.json dist/installed-smoke.json; fi
+      - name: Require Blink and both research workflows before publication
+        env:
+          BLINK_ACCEPTANCE: ${{ steps.blink.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          if os.environ['BLINK_ACCEPTANCE'] != 'success':
+              raise SystemExit('Full Blink/extension acceptance failed; retain diagnostics and refuse publication')
+          required = ('quoteWithSource', 'editedNoteBody', 'twoDistinctSources', 'sourceTabIdentity', 'movedSourceRecovery', 'movedSourceNoteVisibility', 'quoteSearch', 'noteContentSearch', 'distinctQuoteExcerpts', 'databaseReload', 'retainedPageThroughSplit', 'namedSetupReload', 'largeNoteProjection')
+          for engine, key in (('webkit', 'webkit'), ('blink', 'chromium')):
+              receipt = json.loads(Path('dist/research-' + engine + '.json').read_text())
+              if any(receipt.get(key, {}).get(check) is not True for check in required):
+                  raise SystemExit(engine + ' research acceptance failed')
+              if key == 'chromium' and any(receipt.get(key, {}).get(check) is not True for check in ('innerPageSourceIdentity', 'innerPageSourceRestore')):
+                  raise SystemExit('Blink inner-page source recovery acceptance failed')
+          PY
       - name: Assemble update catalog and preview notes
         env:
           BLINK_ACCEPTANCE: ${{ steps.blink.outcome }}
@@ -156,18 +179,26 @@ jobs:
           (root / 'catalog.json').write_text(json.dumps({'format': 1, 'releases': entries}, indent=2) + '\n')
           (root / 'RELEASE_TITLE').write_text(Path('PREVIEW_NAME').read_text().strip()+'\n')
           package = json.loads(next(root.glob('*-package.json')).read_text())
+          sparkle = json.loads((root / 'sparkle-status.json').read_text())
           signing = ('Developer ID signed and notarized. ' if package['notarized'] else 'Ad-hoc signed and unnotarized because Apple signing credentials are not configured. macOS may require Open Anyway in Privacy & Security. ')
           (root / 'RELEASE.md').write_text(
               'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
-              '**Violet** brings a restrained charcoal/violet interface, inline address and new-tab search, visible module management with real provider controls, draggable Spaces/folders/tabs, sidebar gestures, anchored menus, and animated guided setup. The supplied icon is unchanged.\n\n'
+              '### What changed\n\n'
+              '- Open destinations with **⌘T**, switch tabs with **⌘K**, and edit the address with **⌘L**. No new-tab page.\n'
+              '- Capture quotations beside live sources, search note bodies and quotes, and recover the original source across Spaces and Chromium page groups.\n'
+              '- Start with six familiar browser layouts. Drag tabs and components, choose SVG icons, and save, rename, replace, or delete appearance setups.\n'
+              '- Use modules directly in the workspace. Reader, CPU and memory workers now run in Rust alongside the Rust interface and portable services.\n'
+              '- Remove the app, browser data, settings and credentials with the explicit uninstall control; downloads and exports stay.\n\n'
               'Automatic updates download the complete app, including its pinned Chromium engine, from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
               'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
+              + ('Sparkle uses the signed GitHub feed for this build.\n\n' if sparkle.get('enabled') else
+                 'The verified GitHub updater is active. A Sparkle publisher key is still required to publish signed Sparkle feeds.\n\n') +
               '**Preview:** ' + signing + 
               'This release does not certify the finished core or full browser parity. Native tests, real updater replacement, and installed shell acceptance passed. '
               'Full Blink/extension acceptance: **' + os.environ['BLINK_ACCEPTANCE'] + '**; see the attached receipt/log. '
-              'The current Chrome extension popup integration and protected streaming remain incomplete.\n')
+              'Full compatibility and protected streaming remain unverified; use the receipts for the actual outcome.\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -179,11 +210,14 @@ jobs:
             dist/catalog.json
             dist/SHA256SUMS
             dist/signing-status.json
+            dist/sparkle-status.json
+            dist/preview.xml
             dist/RELEASE.md
             dist/RELEASE_TITLE
             dist/installed-smoke.json
             dist/blink-acceptance.json
             dist/blink-acceptance.log
+            dist/research-*.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -201,6 +235,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: Neutrino-AppleSilicon-preview
@@ -211,6 +246,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           release_version="$(python3 -c 'import json; print(json.load(open("release/catalog.json"))["releases"][0]["release"]["version"])')"
+          echo "NEUTRINO_RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
           if gh release view "v$release_version" --json isDraft > "$RUNNER_TEMP/neutrino-existing-release.json"; then
             python3 - <<'PY'
           import json,os
@@ -221,5 +257,14 @@ jobs:
           else
             gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
           fi
-          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json --clobber
+          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json --clobber
           gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
+      - name: Publish signed Sparkle feed after release assets are public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ -f release/preview.xml ]]; then
+            gh release upload "$NEUTRINO_RELEASE_TAG" release/preview.xml --clobber
+            python3 scripts/publish-appcast.py preview
+          fi

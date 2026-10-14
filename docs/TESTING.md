@@ -2,44 +2,21 @@
 
 Run `./scripts/test.sh` with Rust 1.88+, Swift 6 and SQLite development headers. macOS additionally builds and tests the native app targets. Linux runs the Rust workspace and portable Swift core/reader tests.
 
-## Verified in this workspace
+## Current verification
 
-On Linux with Swift 6.2.1:
-- 71 Swift Testing cases and 12 portable XCTest cases passed.
-- Six installed-acceptance, six core-publication, and four disk-image retry Python regressions passed.
-- All 18 bundled module packages validated.
+The current Linux suite passes 46 Rust workflow tests, three executable worker-protocol tests, 72 Swift Testing cases, 12 XCTest cases, all 18 bundled packages, and the packaging/update regression suites. These cover database recovery and revision ordering, cancelled autosaves, module transactions, worker bounds and process exit, imports, Profiles/Spaces, live-tab ownership, distribution trust and AI endpoint restrictions.
 
-The portable suite covers database round trips/recovery, modules and transactional rollback, distribution trust policy, reader bounds, Profiles/Spaces, live-tab ownership, archiving, blocker host boundaries, AI endpoint restrictions, and foreign/duplicate organization proposals.
+Source `42afdff` passes [complete installed Blink acceptance](https://github.com/starharbor2491/neutrino-browser/actions/runs/38646385546) and [macOS/portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38646385368), including 169 native debug tests, 97 release tests, both research workflows, full MV3/Web Store coverage, ordinary quit, extension persistence/removal after a second process launch, and preserved external data. GitHub's tested merge checkout `be72c14` has the exact head tree `6ae899b`. The final menu deduplication passes all 46 Rust workflows and direct rendered checks with the module disabled/enabled/repeated; a fresh final packaged-binary native run remains mandatory before publication. Historical failures and source-specific independent findings remain in [GAUNTLET.md](GAUNTLET.md).
 
-Swift syntax parsing checks grammar, not macOS type checking or execution. Native verification runs separately on GitHub's Apple Silicon macOS runners.
+The research receipt exercises quote provenance, different same-source excerpts, phrase matching beyond the list excerpt, note-content matching, original live-tab identity, moved-source recovery with the note still visible, durable database reload, split retention, and named setups. Unselected note bodies remain outside passive interface snapshots. The cancellation test proves that a discarded revision 99 cannot suppress a valid revision 2 or poison a reopened database.
 
-## Rust rebuild checks
+Fixture interactions independently cover command cancellation, tab/folder/Space dragging, gestures and Undo, six presets, four SVG packs, component docking/resizing, narrow editor containment, keyboard selection, named setup acknowledgement, module controls, source search/recovery, and reduced motion. These are interface checks, not native-engine compatibility evidence. Native screenshots use the OS compositor to include Blink child windows.
 
-`8863146` passes 21 Rust workflow/core tests and 71 portable Swift tests, including existing bookmark import/export and SQLite persistence/recovery cases after their Rust migration. Browser-harness checks independently cover search destinations, narrow Library, folders, editor save/discard, docking, note scroll, live identity/error updates, and text Undo/Redo. Follow-up checks cover slider-focused Undo, live account-option availability, and replacement of editable nodes on Profile changes.
+The installed research check uses local sample articles with distinct titles and quotations, plus live forms and file inputs. It edits a source-linked note through the actual textarea input handler and checks its body after SQLite reload. Screenshot presentation uses a wider dark vertical layout, then restores the previous frame and configuration. These sample articles are test content, not third-party pages or a claim of website compatibility.
 
-The native `RustShellNativeTests` suite uses an actual WKWebView to exercise a large library, immediate note dismissal, live security/error updates during note editing, native text Undo, auxiliary Downloads isolation, canonical AI endpoints and view ownership. Installed smoke also checks editor draft isolation and live-document identity/geometry. These checks must pass on the final compiled revision.
+Swift syntax parsing checks grammar; it cannot establish macOS compilation or execution. Apple Silicon CI separately runs real WKWebView/CEF ownership, worker sampling/reaping, private/Profile isolation, downloads and native distribution tests. The updater helper replaces a sealed application while verifying byte-identical external library, Profile, module and preference data; rejection and rollback are also tested.
 
-`0ccc58d` [macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38230973377) built and installed the Rust shell, but its black setup captures are invalid visual evidence. Subsequent native compilation failures were fixed, not reported as passes. [c4aa34b native CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38237647239) passed portable, debug/release native, package and installed-shell checks. Its seven setup images are distinct WKWebView snapshots. The new live-page editor is being verified on its own subsequent revision.
-
-[336b1f1 macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38243160959) and [d19a1f0 macOS CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38244385471) passed 165 debug tests, 94 release native tests, packaging, installed shell launch and normal quit. These revisions include the live editor and native input isolation. The portable suite has 22 Rust tests in addition to the 71 Swift Testing and 12 XCTest cases.
-
-Native screenshots now use the OS window compositor, which includes Blink child windows. The full Blink run independently exercises page keyboard controls before editing, rejection during editing, and restored input afterward; editor resize/expand/cancel preserves document identity. Parent-directed mouse events plus the child-window input flag establish a narrower mouse boundary than independent WindowServer targeting. Single shell scroll containers are recorded alongside screenshots.
-
-`7720c97` [macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38247169537) passes 22 Rust tests, the portable Swift suites, 165 macOS debug tests and 94 release native tests. The actual packaged application passes Command-W while its address palette is open, tab/window preservation, editor checks, read-only DMG copy, installed launch, normal quit and removal. This is the verified application source for the final documentation/CI-path cleanup.
-
-The same-source [full Blink run](https://github.com/starharbor2491/neutrino-browser/actions/runs/38247169538) passed native compilation/tests, packaging, custom keyboard and File-menu tab commands, address focus, retained documents, navigation Retry, Reader/capture, download ownership, native hosting, Web Store installation and regular/private cookie-lifetime checks. It fails only the collected MV3 action-popup gate: **Browser window has no toolbar**. Full Blink shutdown/restart acceptance is therefore still incomplete; this result is not a passing core receipt.
-
-## Historical release CI evidence
-
-Pre-Rust released executable source: `92582400110bec4b6025c33532464ea53298ab40`.
-
-[macOS and portable CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38138834489) passed. The debug suite runs 161 tests; release native integration runs 90. The development WebKit app ZIP/DMG passed sealed copy, detached installed launch, ordinary quit and removal. Native captures cover the shell, settings, editor and all eight setup screens. Visual review previously caught and corrected an overflowing editor inspector; its header, exit and Save controls remain visible. Screenshot capture does not verify interactive setup completion or all editor/accessibility workflows.
-
-[Preview publication](https://github.com/starharbor2491/neutrino-browser/actions/runs/38138835891) passed native build/tests and the real updater helper tests with the complete Blink bundle. A fresh macOS runner expanded the actual ZIP, compared its sealed code against the DMG, and verified installed shell launch, saved SQLite data, normal application-delegate quit, helper exit, and removal without changing the external library. GitHub's uploaded ZIP/DMG digests match their verified package receipt. The release includes `installed-smoke.json` and the independent failed `blink-acceptance.json`/log.
-
-The real helper test uses the packager's independent Apple `codesign` CDHash, rejects missing/wrong hashes, waits for a live parent to exit, replaces the app, checks version/security-floor changes, and verifies that external library, Profile, module and preference files remain byte-identical. Normal quit does not relaunch the replacement. Preview trust is the pinned GitHub repository plus download/code-seal checks; consumer trust additionally requires the same Developer ID publisher and notarization.
-
-[Blink integration CI](https://github.com/starharbor2491/neutrino-browser/actions/runs/38129249568) builds the complete Apple Silicon app and DMG. Rendering, custom tab/address commands, retained documents, popup POST/opener behavior, Profile/private isolation, Reader/capture and genuine Web Store installation pass. The full MV3 fixture fails with **Browser window has no toolbar** when exercising `chrome.action.openPopup`. Full Blink installed shutdown/restart acceptance therefore remains unverified. This failure remains a core release gate; the checks have not been disabled or treated as passing.
+Earlier source-specific failures and responses remain recorded in the [Gauntlet log](GAUNTLET.md). Each release publishes its own installed receipts; historical receipts do not certify a later executable.
 
 ## Native and installed gates
 
@@ -73,11 +50,3 @@ The installed driver verifies receipt bytes, sealed code, read-only mounting, pa
 - Verify a complete offline signed/notarized DMG on a clean Mac with normal Gatekeeper behavior, engine/helper payloads, first-run setup, trusted update/restart, and rollback.
 
 Record tested source/binary and actual outcomes. A skipped gate, parser pass, or historical receipt cannot certify the core release. See [PARITY.md](PARITY.md).
-
-## Violet native acceptance
-
-Source `2d97d23` / PR merge checkout `04bd0e65` passed [macOS and portable CI 38274338963](https://github.com/starharbor2491/neutrino-browser/actions/runs/38274338963): 27 Rust shell workflows, portable tests, native debug/release integration, all 18 module packages, upstream archive-integrity regressions, real updater replacement and installed WebKit-shell acceptance. New native checks prove module settings reach Notes behavior and Focus restores navigation. OS-composited captures replace the previous README images.
-
-[Embedded runtime CI 38274338953](https://github.com/starharbor2491/neutrino-browser/actions/runs/38274338953) compiled/sealed the complete Blink bundle, passed native tests and reached the independent full-browser gate. Actual Chromium checks passed inline Command-L, Command-K, Escape recovery from Focus while the site owned keyboard focus, retained live document identity, Reader/Capture, live Chrome Web Store installation and regular/private cookie lifetime handling. Full MV3 acceptance still fails at `action.openPopup`: “Browser window has no toolbar.” This is a failed parity gate, not a passing core receipt.
-
-Rendered-fixture acceptance separately covers direct Space/folder/tab dragging, horizontal sidebar gestures, Undo, setup choice retention, module search/settings, inventory entry, keyboard focus, movable quick navigation, 1024px containment and OS reduced motion. No JavaScript errors were observed. Fixture interactions do not establish native engine behavior.

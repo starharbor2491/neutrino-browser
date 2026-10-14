@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Build Neutrino's Chrome-style Views adapter from the pinned upstream CEF SDK.
+"""Build Neutrino's Chrome-style native adapter from the pinned upstream CEF SDK.
 
 This is a development package. Ad-hoc signatures verify local integrity; they do
 not provide Developer ID publisher trust or notarized consumer distribution.
@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import mmap
 import platform
 import plistlib
 import shutil
@@ -40,6 +41,12 @@ def build(work, arch):
                 shutil.rmtree(source)
             extracted.rename(source)
     output = work / ("adapter-build-" + arch)
+    # Do not silently enable a nonexistent flag on an older upstream SDK.
+    # This temporary opt-in uses upstream loading priority for cold popup loads.
+    engine_binary = source / "Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"
+    with engine_binary.open('rb') as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as engine:
+        if engine.find(b'PMLoadingPageVoter') < 0:
+            raise RuntimeError('The pinned Chromium SDK lacks loading-page priority voting (crbug.com/549552319)')
     proof.checked(["cmake", "-S", ROOT / "ChromiumRuntime", "-B", output, "-G", "Xcode",
                    "-DCEF_ROOT=" + str(source), "-DPROJECT_ARCH=" + arch, "-DUSE_SANDBOX=ON"])
     proof.checked(["cmake", "--build", output, "--config", "Release", "--target", "NeutrinoChromiumBridge", "--", "-quiet"])
@@ -85,7 +92,7 @@ def build(work, arch):
         proof.checked(["codesign", "--verify", "--strict", helper])
     proof.checked(["codesign", "--force", "--sign", "-", packaged_framework])
     proof.checked(["lipo", binaries / "NeutrinoChromiumBridge.dylib", "-verify_arch", arch])
-    manifest = {"format": 2, "abi": 7, "runtimeStyle": "chromeViews", "architecture": arch, "cefVersion": proof.VERSION}
+    manifest = {"format": 2, "abi": 8, "runtimeStyle": "chromeViews", "hostPresentation": "clippedNative", "architecture": arch, "cefVersion": proof.VERSION}
     (package / "Contents/Resources/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     proof.checked(["codesign", "--force", "--sign", "-", package])
     proof.checked(["codesign", "--verify", "--deep", "--strict", package])
@@ -115,7 +122,7 @@ def embed(package, app):
     if manifest_path.stat().st_size > 4096 or not manifest_path.is_file():
         raise ValueError("Invalid Chromium package manifest")
     manifest = json.loads(manifest_path.read_text())
-    if (manifest.get("format") != 2 or manifest.get("abi") != 7 or manifest.get("runtimeStyle") != "chromeViews" or
+    if (manifest.get("format") != 2 or manifest.get("abi") != 8 or manifest.get("runtimeStyle") != "chromeViews" or manifest.get("hostPresentation") != "clippedNative" or
             manifest.get("cefVersion") != proof.VERSION or manifest.get("architecture") not in proof.ARCHIVES):
         raise ValueError("Incompatible Chromium development package")
     for path in package.rglob("*"):

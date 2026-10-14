@@ -5,6 +5,17 @@ import Testing
 @testable import NeutrinoApp
 
 extension NativeIntegrationTests.BrowserIntegrationTests {
+    @Test func aVetoedUninstallDoesNotArmAnOrdinaryLaterQuit() {
+        _ = NSApplication.shared
+        let previousState = AppDelegate.state
+        let app = AppState(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        defer { AppDelegate.state = previousState }
+        AppDelegate.state = app
+        app.uninstallRequested = true
+        app.stoppingModuleWorkers = true
+        #expect(AppDelegate().applicationShouldTerminate(NSApp) == .terminateCancel)
+        #expect(!app.uninstallRequested)
+    }
     @Test func nativeTabMenuTargetsTheCurrentOwnedWindowAndRejectsFrozenOrClosedModels() async throws {
         _ = NSApplication.shared
         let previousPolicy = NSApp.activationPolicy()
@@ -30,6 +41,17 @@ extension NativeIntegrationTests.BrowserIntegrationTests {
             try? FileManager.default.removeItem(at: directory)
         }
         let commands = NativeTabCommands()
+        var firstShellRequests = [[String: Any]](), secondShellRequests = [[String: Any]]()
+        first.shellAction = { request in
+            firstShellRequests.append(request)
+            switch request["op"] as? String {
+            case "selectTab": if let value=request["id"] as? String,let id=UUID(uuidString:value) { first.selectTab(id) }
+            case "closeCurrent": first.closeTab(first.session.selectedTabID)
+            case "reopenTab": first.reopenClosedTab()
+            default: break
+            }
+        }
+        second.shellAction = { secondShellRequests.append($0) }
         let menu = commandMenu()
         commands.install(in: menu)
         let file = try #require(menu.items[0].submenu)
@@ -57,7 +79,10 @@ extension NativeIntegrationTests.BrowserIntegrationTests {
         performLocation()
         #expect(requests.withLock { $0 } == [first.session.id])
         try perform("new")
-        #expect(first.session.tabs.count == 2 && second.session.tabs.count == 1)
+        #expect(first.session.tabs.count == 1 && second.session.tabs.count == 1)
+        #expect(firstShellRequests.last?["op"] as? String == "newTab" && secondShellRequests.isEmpty)
+        // Only accepting a destination creates a tab; the menu opens commands.
+        first.newTab(url: URL(string: "https://menu-fixture.invalid/accepted")!)
         let added = first.session.selectedTabID
         try perform("previous"); #expect(first.session.selectedTabID == original)
         try perform("next"); #expect(first.session.selectedTabID == added)
@@ -77,7 +102,8 @@ extension NativeIntegrationTests.BrowserIntegrationTests {
         performLocation()
         #expect(requests.withLock { $0 } == [second.session.id])
         try perform("new")
-        #expect(second.session.tabs.count == 2 && first.session.tabs.count == 2)
+        #expect(second.session.tabs.count == 1 && first.session.tabs.count == 2)
+        #expect(secondShellRequests.last?["op"] as? String == "newTab")
         let firstSnapshot = first.session, secondSnapshot = second.session
         let acceptedRequests = requests.withLock { $0 }
         app.freezeQuitData()

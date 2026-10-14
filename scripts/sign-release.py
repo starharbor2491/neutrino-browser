@@ -23,6 +23,8 @@ mach_magic = {bytes.fromhex(x) for x in ('feedface', 'cefaedfe', 'feedfacf', 'cf
 
 def sign(path, *, identifier=None, entitlements=None):
     command = ['codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', identity]
+    if 'Sparkle.framework' in str(path):
+        command += ['--preserve-metadata=identifier,entitlements']
     if identifier:
         command += ['--identifier', identifier]
     if entitlements:
@@ -48,7 +50,7 @@ for path in sorted(app.rglob('*'), key=lambda x: len(x.parts), reverse=True):
 for path in sorted(app.rglob('*'), key=lambda x: len(x.parts), reverse=True):
     if path.is_symlink() or not path.is_dir():
         continue
-    if path.suffix in ('.app', '.framework', '.neutrinoengine'):
+    if path.suffix in ('.app', '.framework', '.neutrinoengine', '.xpc'):
         sign(path, entitlements=('ChromiumBrowser' if path.name == 'NeutrinoChromium Helper.app' else 'Chromium') if path.name.startswith('NeutrinoChromium Helper') else None)
 sign(app, identifier='org.neutrino.browser', entitlements='ChromiumBrowser' if (app / 'Contents/Frameworks/Chromium.neutrinoengine').exists() else 'Browser')
 subprocess.run(['codesign', '--verify', '--deep', '--strict', '--all-architectures', str(app)], check=True)

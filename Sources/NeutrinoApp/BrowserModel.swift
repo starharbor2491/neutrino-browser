@@ -11,6 +11,7 @@ final class BrowserModel: ObservableObject {
         return ids.map { ($0, webTab($0)) }
     }
     var shellAction: (([String: Any]) -> Void)?
+    var stopInterface: (() async -> Void)?
     @Published var session: WindowSession {
         didSet {
             guard !restoringFrozenSession else { return }
@@ -32,14 +33,6 @@ final class BrowserModel: ObservableObject {
     @Published var focusMode = false { didSet { if !focusMode { focusHiddenComponents = []; focusProviderID = nil } } }
     @Published var focusHiddenComponents = Set<String>()
     var focusProviderID: String?
-    func closeSecondarySidebar() {
-        if var preview = app.previewConfiguration {
-            preview.layout.secondaryPanel = nil; app.previewConfiguration = preview
-        } else {
-            var configuration = self.configuration
-            configuration.layout.secondaryPanel = nil; app.applyConfiguration(configuration, to: session.spaceID)
-        }
-    }
     func enterFocus() {
         app.perform {
             let requested = try app.requestedFocusPresentation()
@@ -70,6 +63,10 @@ final class BrowserModel: ObservableObject {
     }
     private var webTabs: [UUID: BrowserEngineTab] = [:]
     private var tabProfiles: [UUID: UUID] = [:]
+    func cachedEngineTab(_ id: UUID, profileID: UUID) -> BrowserEngineTab? {
+        guard !isPrivate, tabProfiles[id] == profileID else { return nil }
+        return webTabs[id]
+    }
     private var movedTabPlaceholders: [UUID: BrowserEngineTab] = [:]
     private var spacePresentations: [UUID: WindowSession] = [:]
     var space: BrowserSpace? { app.library.spaces?.first { $0.id == session.spaceID } }
@@ -79,6 +76,23 @@ final class BrowserModel: ObservableObject {
     var profile: Profile { app.library.profiles.first(where: { $0.id == session.profileID }) ?? app.library.profiles[0] }
     var activeWebTab: BrowserEngineTab { webTab(session.selectedTabID) }
     var hasPage: Bool { selectedTab.url != nil }
+    var chromePageSnapshots: [String:[[String:Any]]] {
+        guard let engine = webTabs[session.selectedTabID] as? ChromiumTab, engine.interfacePages.count > 1 else { return [:] }
+        // Only the current group's subrows are expanded. Labels are display
+        // metadata; native membership/selection always use the original IDs.
+        let pages = engine.interfacePages.prefix(200).map { item in
+            ["id":item["id"] as? Int ?? 0,"selected":item["selected"] as? Bool ?? false,
+             "title":String((item["title"] as? String ?? "").prefix(128)),
+             "url":String((item["url"] as? String ?? "").prefix(1024))] as [String:Any]
+        }
+        return [session.selectedTabID.uuidString:pages]
+    }
+    var chromePageCounts: [String:Int] {
+        Dictionary(uniqueKeysWithValues:session.tabs.compactMap { tab in
+            guard let engine = webTabs[tab.id] as? ChromiumTab else { return nil }
+            return (tab.id.uuidString,engine.interfacePages.count)
+        })
+    }
     var hasNativeTabs: Bool { webTabs[session.selectedTabID]?.hasNativeNavigationChrome == true }
     var bookmarks: [Bookmark] { app.library.bookmarks.filter { $0.profileID == session.profileID } }
     init(app: AppState, isPrivate: Bool) {
@@ -195,7 +209,7 @@ final class BrowserModel: ObservableObject {
             case "quickNavigation": self.shellAction?(["op":"palette"])
             case "focusAddress": NotificationCenter.default.post(name: .neutrinoFocusAddress, object: self.session.id)
             case "closeTab":
-                if let action = self.shellAction { action(["op":"closeTab","id":id.uuidString]) }
+                if let action = self.shellAction { action(["op":"closeCurrent"]) }
                 else { self.closeTab(id) }
             case "closeWindow": tab.nativeView.window?.performClose(nil)
             case "newWindow": NotificationCenter.default.post(name: .neutrinoOpenBrowserWindow, object: self.session.id, userInfo: ["private": false])
@@ -239,9 +253,10 @@ final class BrowserModel: ObservableObject {
         if activeWebTab.performNativeTabCommand(command) { return }
         switch command {
         case .new:
-            newTab()
-            NotificationCenter.default.post(name: .neutrinoFocusAddress, object: session.id)
-        case .close: closeTab(session.selectedTabID)
+            shellAction?(["op": "newTab"])
+        case .close:
+            if let action = shellAction { action(["op":"closeCurrent"]) }
+            else { closeTab(session.selectedTabID) }
         case .reopen: reopenClosedTab()
         case .previous: selectRelativeTab(-1)
         case .next: selectRelativeTab(1)

@@ -1,11 +1,11 @@
 {
   "formatVersion": 1,
-  "icons": {
-    "back": "arrow.left.circle.fill",
-    "forward": "arrow.right.circle.fill",
-    "reload": "arrow.clockwise.circle.fill",
-    "bookmarks": "bookmark.fill",
-    "history": "clock.fill",
-    "modules": "shippingbox.fill"
+  "svgIcons": {
+    "back": "M16 3 5 12l11 9z",
+    "forward": "M8 3 19 12 8 21z",
+    "reload": "M20 4v6h-6M20 10a8 8 0 1 0-2 8",
+    "bookmarks": "M6 3h12v18l-6-4-6 4V3z",
+    "history": "M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0M12 6v6h5",
+    "modules": "m12 3 9 5v9l-9 4-9-4V8zM3 8l9 5 9-5M12 13v8"
   }
 }

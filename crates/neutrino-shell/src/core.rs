@@ -26,6 +26,54 @@ pub const BLOCKED_DOMAINS: &[&str] = &[
 ];
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
+        "moduleNote" | "projectNotes" | "resolveNoteSource" | "prepareForChromiumRemoval" | "applyOrganization" | "liveTabOwnership" | "applySpaceConfiguration" | "manageNamedSetup" | "normalizeSession" | "sessionAncestors" | "visibleTreeTabs" | "setTabParent" | "selectSessionTab" | "enableSessionSplit" | "normalizeSpace" | "archiveIdleTabs" | "restoreArchivedTab" | "normalizeSpaces" | "normalizeLibrary" | "spaceConfiguration" | "removeProfile" | "restoreProfile" | "normalizeChromiumPages" => crate::workspace::request(&r)?,
+        "communityPayload" | "validateCommunityCatalog" => crate::module_repository::community_request(&r),
+        "githubCatalogURL" | "validateMinimumMacOS" | "validateRelease" | "validateDistributionAsset" | "validateDistributionCatalog" | "distributionUpdates" | "validateEngineManifest" | "validateIdentity" | "validateResourceFrame" | "normalizeSetupPack" | "boundedImport" => crate::policy::request(&r),
+        "moduleRepository" => crate::module_repository::request(&r),
+        "validateUpdatePolicy" => {
+            if r["build"].as_u64().unwrap_or(0) < r["currentBuild"].as_u64().unwrap_or(0) ||
+               r["epoch"].as_u64().is_none_or(|e|e<r["floor"].as_u64().unwrap_or(u64::MAX)) {
+                return Err("Neutrino will not install an older application or an engine below the accepted security version.");
+            }
+            json!(true)
+        },
+        "focusPresentation" => {
+            let active = r["output"]["active"].as_bool().ok_or("Focus Mode returned an invalid transition.")?;
+            let components = r["output"]["hiddenComponents"].as_array().ok_or("Focus Mode returned an invalid transition.")?;
+            if components.iter().any(|v|v.as_str().is_none()) {return Err("Focus Mode returned an invalid transition.");}
+            let names:std::collections::BTreeSet<_> = components.iter().filter_map(Value::as_str).collect();
+            if names.len()>5 || names.iter().any(|v|!["tabs","navigation","sidebar","bookmarks","status"].contains(v)) {return Err("Focus Mode requested unsupported interface components.");}
+            json!(if active{names.into_iter().collect::<Vec<_>>()}else{vec![]})
+        },
+        "captureSpecification" => {
+            let output=&r["output"];
+            let name=output["filename"].as_str().ok_or("This Page Capture package requested an unsupported format or capture area.")?;
+            if output["format"]!="png" || output["visibleOnly"]!=true {return Err("This Page Capture package requested an unsupported format or capture area.");}
+            let clean:String=name.chars().filter(|c|!['/','\\',':','\0','\r','\n'].contains(c)).take(100).collect();
+            json!({"filename":if clean.is_empty(){"Page Capture.png".into()}else{format!("{clean}.png")},"visibleOnly":true})
+        },
+        "moduleID"=>json!(crate::modules::id(text(&r,"value"))),
+        "moduleJSONBounds"=>{crate::modules::json_bounds(text(&r,"json"))?;json!(true)},
+        "validateDefinition"=>{crate::modules::definition(&r["definition"],text(&r,"capability"))?;json!(true)},
+        "validateManifest"=>{crate::modules::manifest(&r["manifest"])?;json!(true)},
+        "validateSetting"=>{crate::modules::setting(&r["setting"],&r["value"])?;json!(true)},
+        "installationPlan"=>crate::modules::plan(text(&r,"id"),&r["catalog"],&r["installed"],flag(&r,"includeInstalled"))?,
+        "uninstallPaths"=>crate::uninstall::paths(text(&r,"home"),text(&r,"dataDirectory"))?,
+        "uninstallKeychainService"=>json!(crate::uninstall::service(text(&r,"service"))),
+        "prepareNote" => {
+            let url=resolve_address(text(&r,"url"),"").ok_or("Open a website before saving a page note.")?;
+            let title=text(&r,"title").chars().take(100).collect::<String>();
+            let quote=text(&r,"quote").chars().take(16_000).collect::<String>();
+            json!({"title":title,"text":"","sourceTitle":title,"sourceURL":url,"quote":quote})
+        },
+        "moduleValue" => {crate::modules::value(&r["value"],r["depth"].as_u64().unwrap_or(0) as usize)?;json!(true)},
+        "moduleKey" => json!(crate::modules::key(text(&r,"value"))),
+        "validateProgram" => {crate::modules::validate(&r["program"],text(&r,"capability"))?;json!(true)},
+        "runProgram" => crate::modules::run(&r["program"],text(&r,"event"),&r["input"] )?,
+        "appearancePreset" => crate::appearance::preset(text(&r,"id")).ok_or("Unknown browser preset.")?,
+        "normalizeTheme" => crate::appearance::normalize_theme(r["value"].clone()),
+        "normalizeLayout" => crate::appearance::normalize_layout(r["value"].clone()),
+        "validateSVGIcons" => {crate::modules::svg_icons(&r["icons"])?;json!(true)},
         "parseBookmarks" => crate::bookmarks::parse(text(&r,"html"))?,
         "exportBookmarks" => crate::bookmarks::export(&r["bookmarks"]),
         "resolveAddress" => json!(resolve_address(text(&r,"input"), text(&r,"search"))),
@@ -57,7 +105,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         _ => return Err("Unknown portable browser operation."),
     })
 }
-fn reader(html: &str) -> Result<String, &'static str> {
+pub(crate) fn reader(html: &str) -> Result<String, &'static str> {
     if html.len() > 1024 * 1024 {
         return Err("Reader supports page snapshots up to 1 MB.");
     }

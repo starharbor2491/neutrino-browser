@@ -140,19 +140,6 @@ import Testing
     let onceNormalized = config; config.normalize(); #expect(config == onceNormalized)
 }
 
-@Test func customRGBColorsUseStandardContrastAndRejectMalformedInputs() throws {
-    let white = try #require(InterfaceColor(hex: "#FFFFFF")), black = try #require(InterfaceColor(hex: "000000"))
-    let gray = try #require(InterfaceColor(hex: "777777"))
-    #expect(abs(white.contrastRatio(against: black) - 21) < 0.000_001)
-    #expect(white.contrastRatio(against: white) == 1)
-    #expect(abs(gray.contrastRatio(against: white) - 4.478_089_453_577_214) < 0.000_001)
-    #expect(gray.contrastRatio(against: white) == white.contrastRatio(against: gray))
-    #expect(InterfaceColor(hex: "12abCD") == InterfaceColor(hex: "#12ABcd"))
-    for input in ["FFF", "FFFFFFFF", "#GGGGGG", "#１２３４５６", " 123456", "123456 ", "##123456"] {
-        #expect(InterfaceColor(hex: input) == nil)
-    }
-}
-
 @Test func importedAndPersistedCustomColorsStayPairedAcrossSystemAppearances() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("neutrino-color-pair-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -201,4 +188,16 @@ import Testing
     #expect(session.tabs[0].parentID == nil)
     #expect(session.selectedTabID == child.id && session.visibleTreeTabs.contains(where: { $0.id == child.id }))
     #expect(session.tabs.first(where: { $0.id == root.id })?.collapsed == false)
+}
+
+@Test func portableLibraryNormalizationPreservesExactDateValues() throws {
+    var library=LibraryState()
+    for seconds in [800_000_000.1234567,800_000_000.1234567.nextUp,800_000_000.1234567.nextDown] {
+        var note=Note(profileID:library.profiles[0].id)
+        note.modifiedAt=Date(timeIntervalSinceReferenceDate:seconds)
+        library.notes.append(note)
+    }
+    let original=library.notes
+    library.normalize();library.normalize()
+    #expect(library.notes==original)
 }

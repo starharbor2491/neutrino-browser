@@ -3,6 +3,9 @@
 //! Fixture data is not part of the application and this server is never bundled.
 use neutrino_shell::{Shell, CSS, JS};
 use serde_json::{json, Value};
+fn text<'a>(v: &'a Value, key: &str) -> &'a str {
+    v[key].as_str().unwrap_or("")
+}
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -23,7 +26,7 @@ fn fixture() -> Value {
      ]},
      "folders":[{"id":"folder1","name":"Projects","collapsed":false}],
      "spaces":[{"id":"space1","name":"Everyday","profileID":"profile1"},{"id":"space2","name":"Work","profileID":"profile1"}],
-     "profiles":[{"id":"profile1","name":"Personal"}],"bookmarks":[],"history":[],"downloads":[],"notes":[],
+     "profiles":[{"id":"profile1","name":"Personal"}],"savedConfigurations":[],"bookmarks":[],"history":[],"downloads":[],"notes":[],
      "updates":{"version":"Neutrino · interface development","automatic":true,"message":"Automatic updates preserve your browsing data."},"modules":fixture_modules(),"moduleCatalogs":[],"extensions":[]
     })
 }
@@ -64,6 +67,7 @@ fn contributions(shell: &mut Shell) {
         .unwrap_or_default();
     let mut widgets = vec![];
     shell.snapshot["icons"] = json!({});
+    shell.snapshot["svgIcons"] = json!({});
     shell.snapshot["menuItems"] = json!([]);
     for m in modules.iter().filter(|m| m["enabled"] == true) {
         if let Ok(bytes) = std::fs::read(
@@ -72,6 +76,9 @@ fn contributions(shell: &mut Shell) {
                 .join("definition.json"),
         ) {
             if let Ok(d) = serde_json::from_slice::<Value>(&bytes) {
+                if d["svgIcons"].is_object() {
+                    shell.snapshot["svgIcons"] = d["svgIcons"].clone();
+                }
                 if d["icons"].is_object() {
                     shell.snapshot["icons"] = d["icons"].clone();
                 }
@@ -99,7 +106,7 @@ fn effects(shell: &mut Shell, commands: &[Value]) {
                         .unwrap()
                         .as_nanos()
                 );
-                tabs.push(json!({"id":id,"title":"New tab","pinned":false}));
+                tabs.push(json!({"id":id,"title":c["url"],"url":c["url"],"parentID":c["parentID"],"pinned":false}));
                 snapshot["session"]["selectedTabID"] = json!(id);
             }
             "switchSpace" => {
@@ -167,6 +174,25 @@ fn effects(shell: &mut Shell, commands: &[Value]) {
             }
             "sidebarWidth" => snapshot["configuration"]["layout"]["tabsWidth"] = c["value"].clone(),
             "applyConfiguration" => snapshot["configuration"] = c["configuration"].clone(),
+            "saveNamedSetup" | "replaceNamedSetup" | "renameNamedSetup" | "deleteNamedSetup" => {
+                let action = match text(c, "op") {
+                    "saveNamedSetup" => "save",
+                    "replaceNamedSetup" => "replace",
+                    "renameNamedSetup" => "rename",
+                    _ => "delete",
+                };
+                let library = json!({"preferences":{"savedConfigurations":snapshot["savedConfigurations"]},"spaces":[]});
+                match neutrino_shell::core_request(
+                    json!({"op":"manageNamedSetup","action":action,"value":library,"id":c["id"],"name":c["name"],"configuration":c["configuration"],"requirements":c["requirements"]}),
+                ) {
+                    Ok(value) => {
+                        snapshot["savedConfigurations"] =
+                            value["preferences"]["savedConfigurations"].clone();
+                        snapshot["notice"] = json!("");
+                    }
+                    Err(error) => snapshot["notice"] = json!(error),
+                }
+            }
             "preference" => {
                 snapshot["preferences"][c["key"].as_str().unwrap_or("")] = c["value"].clone();
             }
@@ -204,6 +230,22 @@ fn effects(shell: &mut Shell, commands: &[Value]) {
                 }
             }
             _ => {}
+        }
+        if [
+            "applyConfiguration",
+            "saveNamedSetup",
+            "replaceNamedSetup",
+            "renameNamedSetup",
+            "deleteNamedSetup",
+        ]
+        .contains(&text(c, "op"))
+        {
+            let message = text(&shell.snapshot, "notice").to_owned();
+            let response=shell.dispatch(json!({"op":"editor-result","action":c["op"],"success":message.is_empty(),"message":message}));
+            effects(
+                shell,
+                &response["commands"].as_array().cloned().unwrap_or_default(),
+            );
         }
     }
 }

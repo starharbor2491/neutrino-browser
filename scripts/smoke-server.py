@@ -10,11 +10,24 @@ from threading import Event
 
 retry_enabled = Event()
 
-PAGE = b'''<!doctype html><html><head><title>Neutrino HTTP fixture</title></head>
-<body><main><h1>Local browser check</h1><p>This page is served from loopback, without internet access.</p>
-<a href="/next">Navigate</a><a href="/popup" target="_blank">Open a tab</a>
-<form action="/submitted" method="post" target="_blank"><input name="test" value="preserved"><button>Submit</button></form>
-<input type="file" multiple></main></body></html>'''
+PAGE = b'''<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Designing for attention</title><style>
+*{box-sizing:border-box}body{margin:0;color:#252731;background:#fff;font:15px/1.65 -apple-system,BlinkMacSystemFont,sans-serif}
+main{max-width:650px;margin:auto;padding:30px 24px}h1{margin:0 0 18px;font-size:30px;line-height:1.16;letter-spacing:-.8px}
+h2{margin:30px 0 10px;font-size:17px;line-height:1.3}p{margin:0 0 18px;color:#555966}.lead{font-size:17px;color:#343844}
+blockquote{margin:24px 0;padding:0;color:#41465a}a{color:#4659ad}
+.controls{margin-top:32px;padding-top:20px;border-top:1px solid #eceef2;font-size:13px}.controls nav{display:flex;gap:16px}
+form{display:grid;gap:8px;margin:18px 0}input,button{min-width:0;font:inherit;border:1px solid #d9dce4;border-radius:4px;padding:8px;background:#fff;color:inherit}
+button{justify-self:start;cursor:pointer;padding-inline:16px}input[type=file]{width:100%;font-size:12px}
+</style></head><body><main><h1>Designing for attention</h1>
+<p class="lead">A workspace should help you keep the thread of an idea.</p>
+<p>Reading is rarely a straight line. We compare a source, write a thought, follow a reference, then return to the original page.</p>
+<h2>Keep context in view</h2><p>Place the source beside the draft. Let the reader move between them without rebuilding the workspace each time.</p>
+<blockquote>A useful interface preserves the work already in progress.</blockquote>
+<h2>Make the return predictable</h2><p>Returning to a reference should recover the same document, including the details the reader left unfinished.</p>
+<section class="controls" aria-label="Interactive reference"><nav><a href="/next">Next page</a><a href="/popup" target="_blank">Open reference</a></nav>
+<form action="/submitted" method="post" target="_blank"><label for="draft">Working draft</label><input id="draft" name="test" value="preserved"><button>Send draft</button></form>
+<input type="file" multiple aria-label="Attach reference files"></section></main></body></html>'''
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -39,11 +52,20 @@ class Handler(BaseHTTPRequestHandler):
             # response. The same address becomes available for native Retry.
             self.close_connection = True
             return
+        page = PAGE.replace(b"Designing for attention", b"Calm workspaces").replace(
+            b"A workspace should help you keep the thread of an idea.",
+            b"Reduce the work of remembering where everything belongs.").replace(
+            b"Place the source beside the draft. Let the reader move between them without rebuilding the workspace each time.",
+            b"Group references around a project, keep notes beside them, and make each return feel familiar."
+        ).replace(
+            b"A useful interface preserves the work already in progress.",
+            b"A calm workspace makes the next step easy to find."
+        ) if self.path.startswith('/comparison') else PAGE
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(PAGE)))
+        self.send_header("Content-Length", str(len(page)))
         self.end_headers()
-        self.wfile.write(PAGE)
+        self.wfile.write(page)
 
     def do_POST(self):
         try:

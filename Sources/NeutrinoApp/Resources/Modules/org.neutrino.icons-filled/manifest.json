@@ -1,8 +1,8 @@
 {
   "id": "org.neutrino.icons-filled",
-  "name": "Filled Icons",
-  "version": 1,
-  "summary": "Solid icons for navigation, bookmarks, history, and modules.",
+  "name": "Bold SVG Icons",
+  "version": 2,
+  "summary": "Bold geometric SVG navigation and library icons.",
   "publisher": "Neutrino",
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "icons",

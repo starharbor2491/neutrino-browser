@@ -16,7 +16,7 @@ Local development builds have no update subscription. Published previews explici
 
 ## GitHub releases and automatic updates
 
-Dispatch **Publish Neutrino preview** with a version such as `1.0.1-preview.1`, push a matching `v*-preview.*` tag, or merge an intentional version bump in `PREVIEW_VERSION` to main. Only changes to that file trigger preview publication from main. It builds the complete app on Apple Silicon, requires native tests, real updater replacement/data-preservation tests, and installed shell launch/normal-quit acceptance. It also runs full Blink/extension acceptance independently and attaches the result, including a failed receipt/log if parity is incomplete. Only the consumer workflow can publish a core-accepted production release; its full Blink, streaming, signing and manual acceptance gates remain required.
+Dispatch **Publish Neutrino preview** with a version such as `1.0.1-preview.1`, push a matching `v*-preview.*` tag, or merge an intentional version bump in `PREVIEW_VERSION` to main. Only changes to that file trigger preview publication from main. It builds the complete app on Apple Silicon, requires native tests, real updater replacement/data-preservation tests, and installed shell launch/normal-quit acceptance. It also requires research acceptance in both engines and full Blink/extension acceptance against the packaged app; the receipts and log are attached. Only the consumer workflow can publish a core-accepted production release; its full Blink, streaming, signing and manual acceptance gates remain required.
 
 Both publishing workflows attach `.app.zip`, DMG, `SHA256SUMS`, package metadata, and `catalog.json`. The archive is generated from the final sealed/stapled bundle; installed acceptance expands the actual ZIP and verifies its sealed code and metadata against the app in the DMG. **Add compiled apps to release assets** backfills ZIPs from actual existing DMGs without rebuilding or changing old versions, skips historical Intel payloads, and runs on release publication or manual dispatch with `tag=all`.
 
@@ -30,7 +30,7 @@ The retained consumer service verifies bounded download bytes/digest, read-only 
 
 The verified helper waits for genuine process exit, verifies the copied candidate again, and uses a journaled sibling rename with rollback/recovery. Preview candidates must match the advertised CDHash throughout staging/copy/activation. Consumer candidates must retain the same Developer ID publisher and notarization. No update removes quarantine or disables Gatekeeper.
 
-The new host requires ABI 7 / `chromeViews`; predecessor runtime packages must fail compatibility checks.
+The new host requires ABI 8 / `chromeViews` with `hostPresentation=clippedNative`; predecessor runtime packages must fail compatibility checks.
 
 ## Production prerequisites
 
@@ -67,3 +67,13 @@ The updater downloads a digest-checked complete release and replaces the app aft
 `chromium-updates.yml` checks the trusted upstream stable CEF index daily, verifies both SDK archive sizes/digests, and emits a SHA-256 pin candidate. A macOS job must compile the integration, pass native tests and real updater checks, and pass installed launch/save/quit before a fast-forward-only source update and a new preview release are dispatched. Incompatible upstream builds or concurrent main changes stop publication. Full browser parity remains a separate consumer gate.
 
 Preview packaging checks the configured Developer ID and App Store Connect secret bindings. Complete credentials enable signing, notarization, stapling and Gatekeeper assessment even for previews. Missing credentials produce an explicit ad-hoc preview with a `signing-status.json` receipt; this does not remove macOS's first-launch warning. No quarantine or Gatekeeper bypass is embedded in the app.
+
+## Sparkle and full removal
+
+Sparkle 2.10.0 is checksum-pinned and bundled. Keyed builds seal `SUPublicEDKey`, `SUFeedURL`, `SURequireSignedFeed`, and `SUVerifyUpdateBeforeExtraction`. Publication verifies the persistent private seed against the sealed public key, signs/verifies the complete app ZIP and feed, and publishes immutable GitHub asset URLs. The `updates` branch provides separate stable/preview feeds. Native validation enforces the app-build and Chromium security-epoch floors. Feed publication rereads after conflicts and refuses older builds, epoch rollback, or changed bytes for an existing build.
+
+Enable keyed publication with repository variable `NEUTRINO_SPARKLE_PUBLIC_KEY` and matching secret `NEUTRINO_SPARKLE_PRIVATE_KEY` (32-byte seed, Base64). They are not configured in this workspace. Such previews retain the verified GitHub updater and publish an explicit `sparkle-status.json` instead of claiming Sparkle is active. Previously installed binaries gain Sparkle by updating to a keyed build through that bridge; their compiled update implementation cannot be changed retroactively.
+
+Settings → General → Uninstall Neutrino asks for permanent removal. Cancel remains the default. Removal joins pending update and interface work, freezes writes, stops/reaps workers and engines, releases WebKit stores, erases only Neutrino's allowlisted browser paths and Keychain services, then deletes its installed app. Downloads and exports remain. Pending installers block removal; canceled quits disarm the request. A failed cleanup reports what remains and keeps the app available for retry.
+
+The `chromeViews` manifest family label is retained for complete-application updates from existing previews. ABI 8 and `hostPresentation=clippedNative` identify the actual new hosting integration; the replacement host enforces both. This does not allow predecessor engine packages to load in Studio.

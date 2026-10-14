@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class DistributionManager: ObservableObject {
     static let shared = DistributionManager()
-    static let chromiumRemovalNotice = "Blink tabs reopen in WebKit at their saved HTTP(S) addresses. Internal pages become blank tabs. Cookies, sign-ins, and unsaved work do not transfer between engines. Neutrino bookmarks, history, notes, Profiles, Spaces, archived tabs, modules, and setups are kept. Blink's saved website data remains on disk."
+    static let chromiumRemovalNotice = "Blink pages reopen as WebKit tabs at their saved HTTP(S) addresses. Background Chrome pages also reopen as tabs where room remains; overflow references are kept as bookmarks. Internal pages become blank tabs. Cookies, sign-ins, and unsaved work do not transfer between engines. Neutrino bookmarks, history, notes, Profiles, Spaces, archived tabs, modules, and setups are kept. Blink's saved website data remains on disk."
     @Published private(set) var available: [DistributionAsset] = []
     @Published private(set) var busy = false
     @Published private(set) var progress: Double?
@@ -30,14 +30,26 @@ final class DistributionManager: ObservableObject {
     private var generation = UUID()
     private var installOnQuit = false
     private var restartRequested = false
+    private var sparkle: SparkleUpdates?
+    var usesSparkle: Bool {sparkle != nil}
+    var canUninstall: Bool { sparkle?.canUninstall ?? true }
+    func acceptSparkle(build: String, epoch: String?) throws {
+        guard let current, let build = Int(build), let epoch, let number = Int(epoch), let directory else {
+            throw ValidationError("The update is missing its engine security version.")
+        }
+        _ = try RustCore.request(["op":"validateUpdatePolicy", "build":build,"currentBuild":current.build,"epoch":number,"floor":try securityFloor()])
+        try JSONEncoder().encode(number).write(to:directory.appendingPathComponent("security-floor.json"),options:.atomic)
+    }
     var isRestartRequested: Bool { restartRequested }
     @Published var automaticUpdates = UserDefaults.standard.object(forKey: "automaticAppUpdates") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(automaticUpdates, forKey: "automaticAppUpdates")
+            sparkle?.setAutomatic(automaticUpdates)
             if !restartRequested { installOnQuit = automaticUpdates && pending != nil && pending?.chromium == current?.chromium }
             if !automaticUpdates && automaticDownload { operation?.cancel() }
         }
     }
+    private var initialization: Task<Void, Never>?
     private var automaticCheck: Task<Void, Never>?
     private var automaticDownload = false
     private var pendingCodeHash: String?
@@ -54,6 +66,9 @@ final class DistributionManager: ObservableObject {
     func cancel() { operation?.cancel() }
     func cancelAndWaitForOperation() async {
         terminationPending = true
+        initialization?.cancel()
+        await initialization?.value
+        initialization = nil
         automaticCheck?.cancel()
         await automaticCheck?.value
         automaticCheck = nil
@@ -78,12 +93,20 @@ final class DistributionManager: ObservableObject {
             }
         } catch { message = error.localizedDescription; directory = nil; return }
         let installed = Bundle.main.bundleURL
-        Task {
+        initialization = Task {
+            defer { self.initialization = nil }
             do {
                 let authority = try await Self.background { try ReleaseTrust.updateAuthority(of: installed) }
+                guard !Task.isCancelled, !self.terminationPending else { return }
                 self.authority = authority
+                if let updater = SparkleUpdates.make(automatic: self.automaticUpdates) {
+                    self.sparkle = updater; self.publisherAvailable = true
+                    self.message = "Sparkle checks GitHub for signed Neutrino updates, including Chromium. Your browsing data stays in place."
+                    return
+                }
                 do { try await self.restorePending(authority: authority) }
                 catch { self.message = error.localizedDescription; self.pendingRecordInvalid = true }
+                guard !Task.isCancelled, !self.terminationPending else { return }
                 self.publisherAvailable = true
                 self.scheduleAutomaticChecks()
             } catch { if self.message == nil { self.message = error.localizedDescription } }
@@ -106,6 +129,7 @@ final class DistributionManager: ObservableObject {
         }
     }
     func checkForUpdates(dataDirectory: URL, automatically: Bool = false) {
+        if let sparkle {sparkle.check(quiet:automatically);return}
         start(dataDirectory: dataDirectory) {
             guard let authority = self.authority else { throw ValidationError("Install a published Neutrino release to enable updates.") }
             self.message = "Checking GitHub releases…"
@@ -411,6 +435,7 @@ final class DistributionManager: ObservableObject {
             try Self.verify(saved.candidate, authority: authority, codeHash: saved.codeDirectoryHash, current: current, floor: floor)
             guard try ReleaseTrust.metadata(of: saved.candidate) == saved.release else { throw ValidationError("The staged installer version changed.") }
         }
+        guard !Task.isCancelled, !terminationPending else { return }
         candidate = saved.candidate; destination = saved.destination; pending = saved.release
         pendingCodeHash = saved.codeDirectoryHash; installOnQuit = automaticUpdates && saved.release.chromium == current.chromium
         rejectedStage = nil

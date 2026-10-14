@@ -45,7 +45,7 @@ enum AppSmokeTest {
                 let navigationStarted = ProcessInfo.processInfo.systemUptime
                 browser.navigate(address)
                 let pageDeadline = Date().addingTimeInterval(10)
-                while browser.activeWebTab.title != "Neutrino HTTP fixture" || browser.activeWebTab.loading {
+                while browser.activeWebTab.title != "Designing for attention" || browser.activeWebTab.loading {
                     if Date() > pageDeadline { throw ValidationError("The packaged app could not navigate to its HTTP test page.") }
                     try await Task.sleep(for: .milliseconds(100))
                 }
@@ -56,7 +56,8 @@ enum AppSmokeTest {
                 try await measureIdle("loaded-webkit-loopback")
                 trace("Extracting reader text")
                 let text = try await app.readerText(from: browser.activeWebTab)
-                guard text.contains("Local browser check") else { throw ValidationError("Reader could not read the HTTP fixture.") }
+                guard text.contains("Designing for attention") else { throw ValidationError("Reader could not read the HTTP fixture.") }
+                try await RustShellAcceptance.verifyResearchWorkspace(window: window, app: app, model: browser, output: output)
                 try await RustShellAcceptance.verifyPageGeometry(window: window, model: browser, output: output)
                 trace("Verifying split panes and tree tabs")
                 browser.panel = nil
@@ -66,7 +67,7 @@ enum AppSmokeTest {
                 guard let pair = browser.session.split else { throw ValidationError("Split panes did not open.") }
                 browser.selectTab(pair.second); browser.navigate(address)
                 let splitDeadline = Date().addingTimeInterval(10)
-                while browser.webTab(pair.second).title != "Neutrino HTTP fixture" || browser.webTab(pair.second).loading {
+                while browser.webTab(pair.second).title != "Designing for attention" || browser.webTab(pair.second).loading {
                     if Date() > splitDeadline { throw ValidationError("The second browsing pane could not navigate.") }
                     try await Task.sleep(for: .milliseconds(100))
                 }
@@ -83,7 +84,7 @@ enum AppSmokeTest {
                     trace("Reopening an embedded tab in Chromium")
                     browser.changeEngine(id, to: .chromium)
                     let chromiumDeadline = Date().addingTimeInterval(30)
-                    while browser.webTab(id).title != "Neutrino HTTP fixture" || browser.webTab(id).loading {
+                    while browser.webTab(id).title != "Designing for attention" || browser.webTab(id).loading {
                         if let error = browser.webTab(id).errorMessage { throw ValidationError(error) }
                         if Date() > chromiumDeadline { throw ValidationError("Embedded Chromium did not render the HTTP fixture.") }
                         try await Task.sleep(for: .milliseconds(100))
@@ -107,10 +108,11 @@ enum AppSmokeTest {
                         acceptanceFailures.append(message); trace(message)
                     }
                     do {
+                        try await RustShellAcceptance.verifyResearchWorkspace(window: window, app: app, model: browser, output: output)
                         try await measureIdle("loaded-chromium-with-webkit-pane")
                         trace("Verifying Reader captures in an isolated Chromium world")
                         _ = try await evaluate(chromium, "(() => { window.neutrinoOriginalSerializer = window.XMLSerializer; window.neutrinoSnapshotTouched = false; window.XMLSerializer = class { constructor() { window.neutrinoSnapshotTouched = true; } serializeToString() { return '<html><body>Wrong page-world snapshot</body></html>'; } }; return 'ready'; })()")
-                        guard try await app.readerText(from: chromium).contains("Local browser check"),
+                        guard try await app.readerText(from: chromium).contains("Designing for attention"),
                               try await evaluate(chromium, "String(window.neutrinoSnapshotTouched)") == "false" else { throw ValidationError("Chromium Reader invoked the page's overridden serializer.") }
                         _ = try await evaluate(chromium, "(() => { window.XMLSerializer = window.neutrinoOriginalSerializer; delete window.neutrinoOriginalSerializer; delete window.neutrinoSnapshotTouched; return 'restored'; })()")
                         trace("Cancelling a Chromium page before its new context is ready")
@@ -241,6 +243,13 @@ enum AppSmokeTest {
             }
         }
         CFRunLoopWakeUp(runLoop)
+        if ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_DEBUGGER"] == "attach",
+           ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil {
+            // Run the full WindowServer/input workload before attaching. A
+            // debugger-launched process cannot acquire native focus on CI.
+            trace("NEUTRINO_SMOKE_ATTACH_READY")
+            _ = raise(SIGSTOP)
+        }
     }
     private static func captureOnboarding(app: AppState, output: URL) async throws {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1100, height: 780), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -486,11 +495,19 @@ enum AppSmokeTest {
         window.orderFront(nil); model.navigate(address)
         do {
             let deadline = Date().addingTimeInterval(15)
-            while model.activeWebTab.title != "Neutrino HTTP fixture" || model.activeWebTab.loading {
+            while model.activeWebTab.title != "Designing for attention" || model.activeWebTab.loading {
                 if let error = model.activeWebTab.errorMessage { throw ValidationError(error) }
                 if Date() > deadline { throw ValidationError("A Chromium isolation page did not load.") }
                 try await Task.sleep(for: .milliseconds(100))
             }
+            _ = try await RustShellAcceptance.waitForShell(in: window)
+            guard let page = model.activeWebTab as? ChromiumTab else { throw ValidationError("The isolation probe did not retain Chromium.") }
+            let mountDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+            while page.nativeView.window !== window || page.chromeWindow?.parent !== window || page.chromeWindow?.isVisible != true {
+                guard ContinuousClock.now < mountDeadline else { throw ValidationError("The loaded isolation page did not mount in its Neutrino window.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await ChromiumAcceptance.verifyChromeGeometry(page, ownerWindow: window)
             return (model, window)
         } catch { model.closeWindow(); window.close(); throw error }
     }
@@ -505,6 +522,13 @@ enum AppSmokeTest {
     }
     private static func fail(_ message: String) {
         trace("Neutrino smoke test failed: \(message)")
+        if ["1", "attach"].contains(ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_DEBUGGER"] ?? ""),
+           ProcessInfo.processInfo.environment["NEUTRINO_SMOKE_TEST_DATA"] != nil,
+           AppDelegate.state?.ready == true {
+            trace("Diagnostic only: requesting normal quit after rejected acceptance")
+            requestNormalQuit()
+            return
+        }
         exit(1)
     }
 }

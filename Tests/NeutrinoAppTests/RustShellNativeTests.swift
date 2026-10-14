@@ -70,6 +70,7 @@ extension NativeIntegrationTests {
       try await RustShellAcceptance.action(["op":"native","action":"createNote"],web:web)
       #expect(app.library.notes.last?.title == "Scratchpad")
       try await RustShellAcceptance.action(["op":"screen","value":"modules"],web:web)
+      try await RustShellAcceptance.action(["op":"module-select","value":"org.neutrino.focus"],web:web)
       try await RustShellAcceptance.action(["op":"native","action":"toggleFocus"],web:web)
       #expect(model.focusMode)
       try await RustShellAcceptance.action(["op":"escape"],web:web)
@@ -77,14 +78,35 @@ extension NativeIntegrationTests {
       try await RustShellAcceptance.action(["op":"native","action":"toggleFocus"],web:web)
       try await RustShellAcceptance.action(["op":"focus-address"],web:web)
       #expect(!model.focusMode)
+      try await RustShellAcceptance.action(["op":"screen","value":"modules"],web:web)
+      try await RustShellAcceptance.action(["op":"module-select","value":"org.neutrino.notes"],web:web)
+      let previousCount = model.session.tabs.count
+      try await RustShellAcceptance.action(["op":"newTab"],web:web)
+      try await RustShellAcceptance.action(["op":"query","value":"https://example.com/module-command"],web:web)
+      try await RustShellAcceptance.action(["op":"activate-result"],web:web)
+      #expect(model.session.tabs.count == previousCount + 1)
+      try await RustShellAcceptance.action(["op":"focus-address"],web:web)
       _ = try await web.evaluateJavaScript("(()=>{const address=document.querySelector('#address-input');address.value='A pending search';address.setSelectionRange(4,4);return true;})()")
       try await RustShellAcceptance.action(["op":"focus-address"],web:web)
       #expect((try await web.evaluateJavaScript("(()=>{const address=document.querySelector('#address-input');return address.selectionStart===0 && address.selectionEnd===address.value.length && address.value.length>5;})()")) as? Bool == true)
       #expect((try await web.evaluateJavaScript("document.activeElement.id==='address-input' && document.querySelector('#address-input').getBoundingClientRect().width>100")) as? Bool == true)
+      let retainedIDs=model.session.tabs.map(\.id)
+      let retainedSelection=model.session.selectedTabID
+      let retainedURL=model.selectedTab.url
+      let retainedPage=model.activeWebTab
       try await RustShellAcceptance.action(["op":"newTab"],web:web)
-      _ = try await web.evaluateJavaScript("(()=>{const input=document.querySelector('#start-input');input.focus();input.value='Unfinished search';return true;})()")
+      #expect(model.session.tabs.map(\.id)==retainedIDs)
+      #expect(model.session.selectedTabID==retainedSelection)
+      #expect(model.activeWebTab === retainedPage)
+      _ = try await web.evaluateJavaScript("(()=>{const input=document.querySelector('#command-input');input.value='Unfinished search';return true;})()")
       try await RustShellAcceptance.action(["op":"newTab"],web:web)
-      #expect((try await web.evaluateJavaScript("document.querySelector('#start-input').value==='' && document.activeElement.id==='start-input'")) as? Bool == true)
+      #expect((try await web.evaluateJavaScript("document.querySelector('#command-input').value==='' && document.activeElement.id==='command-input'")) as? Bool == true)
+      try await RustShellAcceptance.action(["op":"escape"],web:web)
+      #expect(model.session.tabs.map(\.id)==retainedIDs)
+      #expect(model.session.selectedTabID==retainedSelection)
+      #expect(model.selectedTab.url==retainedURL)
+      #expect(model.activeWebTab === retainedPage)
+
     }
     @Test func auxiliaryDownloadsNeverProjectTheDefaultLibrary() async throws {
       _ = NSApplication.shared

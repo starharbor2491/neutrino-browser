@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 //! The application-owned interface. macOS supplies engine views and platform services;
 //! this crate owns presentation, interaction state, editing and workspace transforms.
+mod appearance;
 mod bookmarks;
 mod core;
+mod icons;
+mod module_repository;
+mod modules;
+mod policy;
 mod storage;
+mod uninstall;
+mod workspace;
+pub mod workers;
 pub use core::request as core_request;
 mod render;
 mod state;
@@ -97,4 +105,54 @@ pub unsafe extern "C" fn neutrino_core_request(input: *const c_char) -> *mut c_c
         Err(_) => serde_json::json!({"error":"The browser operation failed"}),
     };
     CString::new(response.to_string()).unwrap().into_raw()
+}
+
+/// Searches a borrowed note field without serializing its body into UI state.
+/// # Safety
+/// Each nonempty buffer must be readable for its supplied length during the call.
+#[no_mangle]
+pub unsafe extern "C" fn neutrino_text_contains(
+    text: *const c_char,
+    text_length: usize,
+    query: *const c_char,
+    query_length: usize,
+) -> bool {
+    if text_length > 1_048_576 || query_length > 1_024 || text.is_null() || query.is_null() {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(std::slice::from_raw_parts(text.cast(), text_length)) else {
+        return false;
+    };
+    let Ok(query) = std::str::from_utf8(std::slice::from_raw_parts(query.cast(), query_length)) else {
+        return false;
+    };
+    let fold = |value: &str| {
+        value.split_whitespace().fold(String::with_capacity(value.len()), |mut result, word| {
+            if !result.is_empty() { result.push(' '); }
+            result.push_str(word);
+            result
+        }).to_lowercase()
+    };
+    let query = fold(query);
+    query.is_empty() || fold(text).contains(&query)
+}
+
+/// Hashes caller-owned bytes without JSON copies or a platform-specific digest.
+/// # Safety
+/// For nonzero length, data must point to length readable bytes for this call.
+/// Release the returned string with neutrino_string_free.
+#[no_mangle]
+pub unsafe extern "C" fn neutrino_sha256(data: *const u8, length: usize) -> *mut c_char {
+    use sha2::{Digest, Sha256};
+    if length > isize::MAX as usize || data.is_null() && length > 0 {
+        return std::ptr::null_mut();
+    }
+    let bytes = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(data, length)
+    };
+    CString::new(format!("{:x}", Sha256::digest(bytes)))
+        .unwrap()
+        .into_raw()
 }

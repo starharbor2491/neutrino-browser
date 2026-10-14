@@ -23,13 +23,15 @@ final class AppState: ObservableObject {
     @Published var onboardingSaving = false
     @Published var startupError: String?
     @Published var notice: String?
-    @Published var installedModules: [InstalledModule] = [] { didSet { resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
+    @Published var installedModules: [InstalledModule] = [] { didSet { modulePresentationCache = nil; resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
+    var modulePresentationCache: ModulePresentation?
     @Published private(set) var resourceWorkerGeneration = UUID()
     @Published var previewConfiguration: Configuration? { didSet { if previewConfiguration == nil { previewOwnerID = nil } } }
     @Published private(set) var previewOwnerID: UUID?
     @Published var deletingProfileIDs = Set<UUID>()
     @Published var profilesAwaitingWebsiteDataRemoval = Set<UUID>()
     let dataDirectory: URL
+    var uninstallRequested = false
     @Published var catalog: [ModuleManifest] = []
     @Published var communityCatalogNames: [String] = []
     var bundledModuleIDs = Set<String>()
@@ -146,13 +148,13 @@ final class AppState: ObservableObject {
                     guard size.isSymbolicLink != true, (size.fileSize ?? 0) > 0, (size.fileSize ?? 0) <= 128 * 1024 else { throw ValidationError("Invalid bundled module payload.") }
                     let bytes = try Data(contentsOf: url)
                     if manifest.runtime == .behaviorProgram { try ModuleProgram.decode(bytes).validate(capability: manifest.capability) }
-                    else { try validateDefinitionForPlatform(ModuleDefinition.decode(bytes, capability: manifest.capability)) }
+                    else { _ = try ModuleDefinition.decode(bytes, capability: manifest.capability) }
                     modulePayloads[manifest.id] = bytes
                     continue
                 }
                 guard let product = workers[manifest.id] else { throw ValidationError("An unrecognized native worker is bundled with Neutrino.") }
                 let packaged = directory.appendingPathComponent(manifest.id).appendingPathComponent("worker")
-                // SwiftPM development builds put executable products beside their resource bundle.
+                // Development builds stage Rust workers beside the SwiftPM resource bundle.
                 let executable = developmentWorkerDirectory?.appendingPathComponent(product) ?? packaged
                 let size = try executable.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
                 guard size.isSymbolicLink != true, (size.fileSize ?? 0) > 0, (size.fileSize ?? 0) <= 8 * 1024 * 1024 else { throw ValidationError("Invalid bundled worker payload.") }
@@ -232,7 +234,7 @@ final class AppState: ObservableObject {
         ReaderWorker.stopAll(moduleID: moduleID)
     }
     func resumeResourceWorkerAfterCancelledQuit() { resourceWorkerGeneration = UUID() }
-    func invalidateModuleExecution() { resourceWorkerGeneration = UUID() }
+    func invalidateModuleExecution() { modulePresentationCache = nil; resourceWorkerGeneration = UUID() }
     func install(_ id: String) {
         perform {
             guard let repository else { throw ValidationError("Open Recovery to repair module storage first.") }
@@ -535,9 +537,11 @@ final class AppState: ObservableObject {
         guard let database else { return false }
         libraryChangedDuringTermination = false
         revision += 1
-        var snapshot = saveWithoutChromiumOnQuit ? libraryPreparedForChromiumRemoval() : library
-        snapshot.normalize()
-        do { try await database.save(snapshot, revision: revision) }
+        do {
+            var snapshot = saveWithoutChromiumOnQuit ? try libraryPreparedForChromiumRemoval() : library
+            snapshot.normalize()
+            try await database.save(snapshot, revision: revision)
+        }
         catch { notice = "Could not save Neutrino data: \(error.localizedDescription)"; return false }
         // COMMIT is durable with SQLite synchronous=FULL. A maintenance failure
         // must not report an uncommitted deletion and roll back only memory.
@@ -578,13 +582,13 @@ final class AppState: ObservableObject {
     private func scheduleSave() {
         guard !terminating else { libraryChangedDuringTermination = true; return }
         libraryChangedDuringTermination = false
-        revision += 1; let currentRevision = revision; var snapshot = library; snapshot.normalize()
+        revision += 1; let currentRevision = revision; let snapshot = library
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(250))
                 guard let self, let database = self.database, !Task.isCancelled else { return }
-                try await database.save(snapshot, revision: currentRevision)
+                try await database.saveNormalized(snapshot, revision: currentRevision)
             } catch is CancellationError { }
             catch { self?.notice = "Could not save your changes: \(error.localizedDescription). Retry saving in Recovery." }
         }
@@ -605,6 +609,9 @@ import UniformTypeIdentifiers
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var state: AppState?
     private let nativeTabCommands = NativeTabCommands()
+    func applicationWillTerminate(_ notification: Notification) {
+        smokeTrace("applicationWillTerminate entered")
+    }
     func applicationDidUpdate(_ notification: Notification) {
         nativeTabCommands.install(in: NSApp.mainMenu)
     }
@@ -622,6 +629,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let state = Self.state else {
             smokeTrace("No application state; returning terminateNow")
             return .terminateNow
+        }
+        // Consent belongs to this quit attempt. A veto must never arm a later quit.
+        defer { if !state.terminating { state.uninstallRequested = false } }
+        if state.uninstallRequested && !DistributionManager.shared.canUninstall {
+            state.notice = "Finish the pending update before uninstalling Neutrino."
+            return .terminateCancel
         }
         guard !state.stoppingModuleWorkers, !state.suspendingModuleContributions else {
             state.notice = "Wait for the current module operation to finish before quitting."
@@ -663,6 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { try await downloads.cancelAllAndWait() }
             catch {
                 state.notice = error.localizedDescription; state.terminating = false
+                state.uninstallRequested = false
                 downloads.resume()
                 DistributionManager.shared.cancelledQuit()
                 sender.reply(toApplicationShouldTerminate: false); return
@@ -673,6 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !state.stoppingModuleWorkers, !state.suspendingModuleContributions else {
                 state.notice = "Wait for the current module operation to finish before quitting."
                 state.terminating = false; downloads.resume()
+                state.uninstallRequested = false
                 DistributionManager.shared.cancelledQuit()
                 sender.reply(toApplicationShouldTerminate: false); return
             }
@@ -684,7 +699,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !saved {
                 quit = self.offerQuitWithoutSaving(state)
             }
-            if quit && saved {
+            if quit && saved && !state.uninstallRequested {
                 // The updater waits for this process to exit. Start and validate
                 // it before irreversible CefShutdown; a cancelled quit stops it.
                 do { try await DistributionManager.shared.launchPendingInstaller() }
@@ -715,10 +730,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     quit = await ChromiumRuntime.shared.shutdown()
                     if !quit { state.notice = ChromiumRuntime.shared.status }
                     if quit { await state.finishPendingProfileDeletions() }
+                    if quit && state.uninstallRequested {
+                        for browser in state.windows.values.compactMap(\.model) { await browser.stopInterface?() }
+                        let failures=await AppUninstaller.remove(state)
+                        if !failures.isEmpty {
+                            let alert=NSAlert();alert.messageText="Uninstall could not remove every file"
+                            alert.informativeText=failures.joined(separator:"\n")
+                            alert.addButton(withTitle:"Close Neutrino");alert.runModal()
+                        }
+                    }
                 }
             }
             self.smokeTrace("Sending termination reply: \(quit)")
             if !quit {
+                state.uninstallRequested = false
                 state.unfreezeQuitData()
                 for browser in state.windows.values.compactMap(\.model) { browser.resynchronizeCachedPages() }
             }
