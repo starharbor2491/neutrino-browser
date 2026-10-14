@@ -102,11 +102,20 @@ import json, pathlib, sys, time
 pathlib.Path(sys.argv[1]).write_text(json.dumps({'monotonic': time.monotonic()}))
 PY
 fi
+smoke_command=("$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test)
+if [[ "${NEUTRINO_SMOKE_DEBUGGER:-}" == 1 ]]; then
+  # Diagnostic-only launch: capture the actual stopped crash, not a sample
+  # taken minutes earlier. Debugger runs never certify installed acceptance.
+  smoke_command=(/usr/bin/lldb --batch
+    -o 'settings set target.disable-aslr false' -o run
+    -k 'thread backtrace all' -k 'register read' -k 'image list -o -f'
+    -- "${smoke_command[@]}")
+fi
 NEUTRINO_SMOKE_TEST_DATA="$PWD/dist/smoke-data" \
 NEUTRINO_SMOKE_TEST_OUTPUT="$PWD/dist/screenshots" \
 NEUTRINO_SMOKE_TEST_URL="$smoke_url" \
 NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE="$PWD/Tests/Fixtures/ChromiumExtension" \
-  "$smoke_app_path/Contents/MacOS/Neutrino" --smoke-test >dist/smoke-app.log 2>&1 &
+  "${smoke_command[@]}" >dist/smoke-app.log 2>&1 &
 smoke_app_pid=$!
 if [[ -n "${NEUTRINO_SMOKE_PID_RECORD:-}" ]]; then
   printf '%s\n' "$smoke_app_pid" >"$NEUTRINO_SMOKE_PID_RECORD" || echo 'Optional process measurement record unavailable.' >&2
@@ -175,6 +184,10 @@ kill "$smoke_watchdog_pid" 2>/dev/null || true
 wait "$smoke_watchdog_pid" 2>/dev/null || true
 smoke_watchdog_pid=""
 if [[ -f "$smoke_timeout_marker" ]]; then smoke_status=124; fi
+if [[ "${NEUTRINO_SMOKE_DEBUGGER:-}" == 1 ]]; then
+  echo 'Debugger launch is diagnostic only; installed acceptance remains unverified.' >&2
+  smoke_status=125
+fi
 if [[ "$smoke_status" -eq 0 ]]; then
   # Native acceptance records this path only after a real incomplete Chromium
   # download survives its inner-tab close and the owning pane reaches CLOSED.

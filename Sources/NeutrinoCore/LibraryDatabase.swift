@@ -38,5 +38,13 @@ public actor LibraryDatabase {
         }
         try RustDatabaseConnection.check(error)
     }
+    /// Debounced UI saves normalize on this serial actor, never concurrently on
+    /// the interactive actor. Superseded queued snapshots do no transform work.
+    public func saveNormalized(_ state: LibraryState, revision: UInt64) throws {
+        try Task.checkCancellation()
+        var snapshot = state; snapshot.normalize()
+        try Task.checkCancellation()
+        try save(snapshot, revision: revision)
+    }
     public func checkpoint() throws { try RustDatabaseConnection.check(neutrino_database_checkpoint(connection.handle)) }
 }

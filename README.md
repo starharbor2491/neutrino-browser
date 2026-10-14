@@ -21,7 +21,7 @@ Neutrino keeps pages, reference tabs, and local notes together in a workspace. S
 ## A workspace for actual work
 
 - **Command-first browsing.** Open a destination with ⌘T, switch pages with ⌘K, and edit the current address with ⌘L. Cancelling a new destination leaves your live page alone.
-- **Research beside the page.** Keep Notes or bookmarks alongside a website, save a source-linked quote, search notes by title/source/Space, and compare live pages in split view. Open source returns to the original tab, including after a Space move.
+- **Research beside the page.** Save source-linked quotes, search note bodies and quotations, and compare live pages beside your notes. Distinct excerpts identify each capture. Open source returns to the original tab after a Space move without hiding the note or discarding its draft.
 - **Spaces and Profiles.** Organize tabs and folders into Spaces; keep website accounts and browsing data in separate Profiles. Move and reorder tabs directly.
 - **Familiar starting layouts.** Neutrino, Arc, Chrome, Safari, Brave, and Opera GX inspired presets configure arrangement, density, color, and tool placement. These are Neutrino layouts, not replicas or affiliated products.
 - **A working appearance editor.** Dock components, resize panels, choose SVG icons, adjust type and corners, and save, rename, replace, or delete reusable setups. Preview changes, undo them, or cancel without applying them.

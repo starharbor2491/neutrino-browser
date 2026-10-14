@@ -582,13 +582,13 @@ final class AppState: ObservableObject {
     private func scheduleSave() {
         guard !terminating else { libraryChangedDuringTermination = true; return }
         libraryChangedDuringTermination = false
-        revision += 1; let currentRevision = revision; var snapshot = library; snapshot.normalize()
+        revision += 1; let currentRevision = revision; let snapshot = library
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(250))
                 guard let self, let database = self.database, !Task.isCancelled else { return }
-                try await database.save(snapshot, revision: currentRevision)
+                try await database.saveNormalized(snapshot, revision: currentRevision)
             } catch is CancellationError { }
             catch { self?.notice = "Could not save your changes: \(error.localizedDescription). Retry saving in Recovery." }
         }

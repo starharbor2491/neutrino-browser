@@ -91,6 +91,7 @@ jobs:
         timeout-minutes: 10
         env:
           NEUTRINO_CHROMIUM_WEBSTORE_TEST: "1"
+          NEUTRINO_SMOKE_DEBUGGER: "1"
           NEUTRINO_CHROMIUM_PACKAGE: ${{ runner.temp }}/neutrino-cef-runtime/Chromium-${{ matrix.arch }}.neutrinoengine
           NATIVE_TESTS_PASSED: ${{ steps.native-tests.outcome == 'success' }}
           INSTALLER_PACKAGE_PASSED: ${{ steps.installer-package.outcome == 'success' }}

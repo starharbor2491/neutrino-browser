@@ -113,6 +113,29 @@ import CSQLite
     let reopened = try LibraryDatabase(url: directory.appendingPathComponent("library.sqlite"))
     #expect(try await reopened.load() == state)
 }
+@Test func cancelledNormalizedSaveDoesNotAdvanceTheDurableRevision() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let database = try LibraryDatabase(url: directory.appendingPathComponent("library.sqlite"))
+    var state = try await database.load()
+    try await database.saveNormalized(state, revision: 1)
+    var rejected = state
+    rejected.notes = [Note(profileID:state.profiles[0].id, title:"Superseded", text:"Must not persist")]
+    let cancelledSnapshot = rejected
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        try await database.saveNormalized(cancelledSnapshot, revision: 99)
+    }
+    do { try await cancelled.value; Issue.record("A cancelled snapshot reached its database write.") }
+    catch is CancellationError { }
+    state.notes = [Note(profileID:state.profiles[0].id, title:"Current", text:"Final edit")]
+    try await database.saveNormalized(state, revision: 2)
+    try await database.saveNormalized(rejected, revision: 1)
+    #expect(try await database.load() == state)
+    try await database.checkpoint()
+    let reopened = try LibraryDatabase(url: directory.appendingPathComponent("library.sqlite"))
+    #expect(try await reopened.load() == state)
+}
 @Test func bookmarkHTMLRoundTripIsSafeAndDeduplicated() throws {
     let profileID = UUID()
     let original = [Bookmark(profileID: profileID, title: "<Docs> & \"Help\"", url: URL(string: "https://example.com/?a=1&b=2")!)]
