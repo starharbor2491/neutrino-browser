@@ -515,12 +515,16 @@ fn webkit_library(mut s: Value) -> Value {
         }
     }
     let mut bookmarks = array(&s["bookmarks"]).to_vec();
+    let key = |v: &Value| {
+        (
+            text(v, "profileID").to_owned(),
+            text(v, "url").to_owned(),
+            text(v, "title").to_owned(),
+        )
+    };
+    let mut known: HashSet<_> = bookmarks.iter().map(key).collect();
     for reference in references {
-        if !bookmarks.iter().any(|b| {
-            b["profileID"] == reference["profileID"]
-                && b["url"] == reference["url"]
-                && b["title"] == reference["title"]
-        }) {
+        if known.insert(key(&reference)) {
             bookmarks.push(reference);
         }
     }
@@ -531,6 +535,56 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
     let s = r["value"].clone();
     let id = text(r, "id");
     Ok(match text(r, "op") {
+        "moduleNote" => {
+            let mut notes = array(&s).to_vec();
+            let profile = &r["profileID"];
+            let output = &r["output"];
+            let mut created = Value::Null;
+            match text(r, "action") {
+                "create" => {
+                    if !array(&r["profiles"]).contains(profile) {
+                        return Err("This profile no longer exists.");
+                    }
+                    let title = output["title"]
+                        .as_str()
+                        .ok_or("The Notes package returned invalid note fields.")?;
+                    let body = output["text"]
+                        .as_str()
+                        .ok_or("The Notes package returned invalid note fields.")?;
+                    if title.chars().count() > 100 || body.chars().count() > 200_000 {
+                        return Err("The Notes package returned invalid note fields.");
+                    }
+                    created = json!(self::id());
+                    notes.push(json!({"id":created,"profileID":profile,"title":title,"text":body,"modifiedAt":now()}));
+                }
+                "update" => {
+                    let field = text(r, "field");
+                    if !["title", "text"].contains(&field) {
+                        return Err("This note no longer exists in this profile.");
+                    }
+                    let note = notes
+                        .iter_mut()
+                        .find(|v| v["id"] == r["id"] && v["profileID"] == *profile)
+                        .ok_or("This note no longer exists in this profile.")?;
+                    let value = output["value"]
+                        .as_str()
+                        .ok_or("The Notes package returned an oversized field.")?;
+                    if value.chars().count() > if field == "title" { 100 } else { 200_000 } {
+                        return Err("The Notes package returned an oversized field.");
+                    }
+                    note[field] = json!(value);
+                    note["modifiedAt"] = json!(now());
+                }
+                "delete" => {
+                    if output["delete"] != true {
+                        return Err("The Notes package did not approve this operation.");
+                    }
+                    notes.retain(|v| !(v["id"] == r["id"] && v["profileID"] == *profile));
+                }
+                _ => return Err("Unknown note operation."),
+            }
+            json!({"notes":notes,"id":created})
+        }
         "projectNotes" => {
             let query = text(r, "query").trim().to_lowercase();
             let mut notes: Vec<_> = array(&s)

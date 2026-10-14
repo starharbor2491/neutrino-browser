@@ -753,3 +753,74 @@ fn removing_chromium_preserves_background_addresses_and_bounded_overflow() {
     assert_eq!(result["bookmarks"][0]["url"], "https://example.com/b");
     assert_eq!(result["bookmarks"][0]["profileID"], "p");
 }
+
+#[test]
+fn removing_chromium_preserves_large_overflow_once_in_original_order() {
+    let tabs: Vec<_> = (0..200).map(|t|json!({"id":format!("tab-{t}"),"title":"Source","engineID":"chromium","pinned":false,"chromiumPages":(0..200).map(|p|json!({"id":format!("{t}-{p}"),"url":format!("https://example.com/{t}/{p}"),"title":format!("{t}/{p}"),"active":p==0})).collect::<Vec<_>>() })).collect();
+    let existing = json!({"id":"existing","profileID":"p","url":"https://example.com/0/1","title":"0/1","createdAt":1});
+    let result=neutrino_shell::core_request(json!({"op":"prepareForChromiumRemoval","value":{"profiles":[{"id":"p","engineID":"chromium"}],"spaces":[{"id":"s","profileID":"p","tabs":tabs,"archivedTabs":[]}],"sessions":[],"bookmarks":[existing]}})).unwrap();
+    let bookmarks = result["bookmarks"].as_array().unwrap();
+    assert_eq!(bookmarks.len(), 39_800);
+    assert_eq!(bookmarks[0], existing);
+    assert_eq!(bookmarks[1]["url"], "https://example.com/0/2");
+    assert_eq!(
+        bookmarks.last().unwrap()["url"],
+        "https://example.com/199/199"
+    );
+}
+#[test]
+fn module_presentation_is_validated_in_one_projection_and_corruption_is_local() {
+    use base64::Engine;
+    let directory =
+        std::env::temp_dir().join(format!("neutrino-projection-{}", uuid::Uuid::new_v4()));
+    let root = directory.join("Modules");
+    let call = |action: &str, fields: Value| {
+        let mut r = json!({"op":"moduleRepository","root":root,"action":action});
+        for (k, v) in fields.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        let response = neutrino_shell::core_request(r).unwrap();
+        assert!(response["error"].is_null(), "{response}");
+        response["result"].clone()
+    };
+    call("initialize", json!({}));
+    for id in ["org.test.first", "org.test.second"] {
+        let m = json!({"id":id,"name":id,"version":1,"summary":"Widget","publisher":"Fixture","source":"https://example.com","capability":"startWidget","dependencies":[],"defaultInstalled":true,"runtime":"declarative","settings":[{"id":"label","title":"Label","kind":"text","defaultValue":"Sources"}]});
+        call(
+            "install",
+            json!({"manifest":m,"payload":base64::engine::general_purpose::STANDARD.encode(br#"{"formatVersion":1,"widgetTitle":"Research","widgetBody":"Sources"}"#)}),
+        );
+    }
+    std::fs::write(root.join("org.test.first/definition.json"), b"tampered").unwrap();
+    let projection = call("presentation", json!({}));
+    assert_eq!(
+        projection["settings"]["org.test.second"]["label"],
+        "Sources"
+    );
+    assert_eq!(
+        projection["definitions"]["org.test.second"]["widgetTitle"],
+        "Research"
+    );
+    assert!(projection["definitions"]["org.test.first"].is_null());
+    assert!(projection["errors"]["org.test.first"]
+        .as_str()
+        .unwrap()
+        .contains("receipt"));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
+fn portable_note_mutations_keep_sources_and_profile_boundaries() {
+    let note = json!({"id":"n","profileID":"p","title":"Note","text":"draft","modifiedAt":1,"sourceURL":"https://example.com","sourceTabID":"t","quotedText":"immutable"});
+    let update = |profile: &str, field: &str, output: Value| {
+        neutrino_shell::core_request(
+            json!({"op":"moduleNote","action":"update","id":"n","profileID":profile,"field":field,"output":output,"value":[note]}),
+        )
+    };
+    assert!(update("other", "text", json!({"value":"changed"})).is_err());
+    assert!(update("p", "sourceURL", json!({"value":"changed"})).is_err());
+    let result = update("p", "text", json!({"value":"annotation"})).unwrap();
+    assert_eq!(result["notes"][0]["quotedText"], "immutable");
+    assert_eq!(result["notes"][0]["sourceTabID"], "t");
+    assert_eq!(result["notes"][0]["text"], "annotation");
+    assert!(neutrino_shell::core_request(json!({"op":"moduleNote","action":"delete","id":"n","profileID":"p","output":{"delete":false},"value":[note]})).is_err());
+}

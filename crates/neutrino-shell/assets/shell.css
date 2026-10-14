@@ -2393,6 +2393,7 @@ svg {
   position: absolute;
   inset: 0;
   transform-origin: top left;
+  container-type: inline-size;
 }
 .preview-webpage {
   height: 100%;
@@ -3150,4 +3151,10 @@ svg {
 .browser-shell.with-panel:not(.editing-preview):is(.placement-leading,.placement-trailing)>.workspace-rail {visibility:hidden;grid-column:1;grid-row:1}
 .browser-shell.with-panel:not(.editing-preview):is(.placement-leading,.placement-trailing)>.browser-main {grid-column:2}
 .browser-shell.with-panel:not(.editing-preview)>.rail-resizer {display:none}
+}
+@container(max-width:920px){
+.editing-preview.with-panel:is(.placement-leading,.placement-trailing) {grid-template-columns:0 minmax(0,1fr)}
+.editing-preview.with-panel:is(.placement-leading,.placement-trailing)>.workspace-rail {visibility:hidden;grid-column:1;grid-row:1}
+.editing-preview.with-panel:is(.placement-leading,.placement-trailing)>.browser-main {grid-column:2}
+.editing-preview.with-panel>.rail-resizer {display:none}
 }

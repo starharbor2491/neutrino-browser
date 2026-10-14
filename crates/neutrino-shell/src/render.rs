@@ -700,6 +700,7 @@ fn module_details(s: &Shell, m: &Value) -> Markup {
     let id = text(m, "id");
     html! {div class="module-details"{
         button class="button quiet" data-op="module-select" data-value=""{(icon("back"))"All modules"}
+        @if !text(m,"error").is_empty(){p class="field-error" role="alert"{(text(m,"error"))}}
         header class="module-detail-heading"{span class="module-icon"{(icon(module_glyph(id)))}div{h2{(text(m,"name"))}p{(module_description(m))}}}
         div class="module-detail-actions"{button class=(if flag(m,"enabled"){"button"}else{"button primary"}) data-op="native" data-action=(if flag(m,"installed"){"toggleModule"}else{"installModule"}) data-id=(id){(if !flag(m,"installed"){"Install"}else if flag(m,"enabled"){"Disable"}else if flag(m,"replacesProvider"){"Replace provider"}else{"Enable"})}
             @if flag(m,"updateAvailable"){button class="button" data-op="native" data-action="installModule" data-id=(id){"Update to v"(m["availableVersion"].as_u64().unwrap_or(1))}}

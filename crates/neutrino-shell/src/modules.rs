@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Terminating module programs. No filesystem, network, native handles or JS.
-use crate::state::text;
+use crate::state::{array, flag, text};
 use serde_json::{json, Value};
 
 pub fn json_bounds(data: &str) -> Result<(), &'static str> {
@@ -602,4 +602,106 @@ pub fn run(program: &Value, event: &str, input: &Value) -> Result<Value, &'stati
         return Err("Module output exceeds 1 MB.");
     }
     Ok(output)
+}
+
+/// Whole-setup dependency/replacement policy, shared by every platform host.
+pub fn requirements(r: &Value, installed: &Value) -> Result<Value, String> {
+    let ids = r["ids"].as_array().ok_or("Invalid module requirements.")?;
+    if ids.len() > 64 {
+        return Err("Too many module requirements.".into());
+    }
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut roles = std::collections::HashMap::new();
+    let existing = array(installed);
+    for id in ids {
+        let id = id.as_str().ok_or("Invalid module requirement.")?;
+        let planned = plan(id, &r["catalog"], installed, true).map_err(String::from)?;
+        for m in array(&planned) {
+            if !seen.insert(text(m, "id").to_owned()) {
+                continue;
+            }
+            let role = text(m, "capability");
+            if [
+                "resourceMonitor",
+                "notes",
+                "screenshot",
+                "focusMode",
+                "tabSystem",
+                "theme",
+                "layout",
+                "icons",
+                "menu",
+            ]
+            .contains(&role)
+            {
+                if roles
+                    .insert(role.to_owned(), text(m, "id").to_owned())
+                    .is_some_and(|v| v != text(m, "id"))
+                {
+                    return Err(format!("These requirements choose multiple providers for {role}. Choose one before applying the setup."));
+                }
+            }
+            if let Some(old) = existing.iter().find(|v| v["manifest"]["id"] == m["id"]) {
+                if old["manifest"]["capability"] != m["capability"]
+                    || (!old["manifest"]["runtime"].is_null()
+                        && old["manifest"]["runtime"] != m["runtime"])
+                {
+                    return Err("A package update cannot change its module role or runtime. Import it with a new module ID instead.".into());
+                }
+            }
+            result.push(m.clone());
+        }
+    }
+    if !flag(r, "preparingActivation") {
+        for m in result.iter().filter(|m| {
+            existing
+                .iter()
+                .any(|v| flag(v, "enabled") && v["manifest"]["id"] == m["id"])
+        }) {
+            if !array(&m["dependencies"]).iter().all(|d| {
+                existing
+                    .iter()
+                    .any(|v| flag(v, "enabled") && v["manifest"]["id"] == *d)
+                    && result
+                        .iter()
+                        .find(|v| v["id"] == *d)
+                        .and_then(|v| v["version"].as_u64())
+                        .unwrap_or(0)
+                        >= m["dependencyVersions"][d.as_str().unwrap_or("")]
+                            .as_u64()
+                            .unwrap_or(1)
+            }) {
+                return Err(format!("Update {} separately first. Updating this disabled module must not disable or replace an active dependency.",text(m,"name")));
+            }
+        }
+    }
+    for active in existing.iter().filter(|v| flag(v, "enabled")) {
+        let Some(next) = roles.get(text(&active["manifest"], "capability")) else {
+            continue;
+        };
+        if *next == text(&active["manifest"], "id")
+            || !flag(r, "preparingActivation")
+            || (!flag(r, "replacingRootProviders") && ids.iter().any(|id| id == next))
+        {
+            continue;
+        }
+        for dependent in existing.iter().filter(|v| {
+            flag(v, "enabled")
+                && array(&v["manifest"]["dependencies"]).contains(&active["manifest"]["id"])
+        }) {
+            if result
+                .iter()
+                .find(|v| v["id"] == dependent["manifest"]["id"])
+                .is_none_or(|v| array(&v["dependencies"]).contains(&active["manifest"]["id"]))
+            {
+                return Err(format!(
+                    "Disable {} before replacing {}.",
+                    text(&dependent["manifest"], "name"),
+                    text(&active["manifest"], "name")
+                ));
+            }
+        }
+    }
+    Ok(json!(result))
 }

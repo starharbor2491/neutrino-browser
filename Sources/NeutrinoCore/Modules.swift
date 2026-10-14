@@ -64,6 +64,14 @@ public struct InstalledModule: Identifiable, Codable, Equatable, Sendable {
 /// Every modern package stores its native code, behavior program, or declarative definition.
 /// Execution trust is checked by the application against its bundled first-party worker bytes.
 /// A typed macOS interoperability adapter. Rust owns storage and module policy.
+public struct ModulePresentation: Codable, Sendable {
+    public var settings: [String:[String:ModuleValue]]
+    public var definitions: [String:ModuleDefinition]
+    public var errors: [String:String]
+    public init(settings: [String:[String:ModuleValue]] = [:], definitions: [String:ModuleDefinition] = [:], errors: [String:String] = [:]) {
+        self.settings = settings; self.definitions = definitions; self.errors = errors
+    }
+}
 public struct ModuleRepository: Sendable {
     public let root: URL
     public init(root: URL) throws { self.root = root; _ = try request("initialize") }
@@ -77,8 +85,12 @@ public struct ModuleRepository: Sendable {
         try JSONDecoder().decode(type,from:JSONSerialization.data(withJSONObject:value,options:.fragmentsAllowed))
     }
     public func installed() throws -> [InstalledModule] { try decode([InstalledModule].self,request("installed")) }
+    public func presentation() throws -> ModulePresentation { try decode(ModulePresentation.self,request("presentation")) }
     public func installationPlan(for id: String, catalog: [ModuleManifest], includeInstalled: Bool = false) throws -> [ModuleManifest] {
         try decode([ModuleManifest].self,request("plan",["id":id,"catalog":RustCore.encoded(catalog),"includeInstalled":includeInstalled]))
+    }
+    public func requirementsPlan(for ids: [String], catalog: [ModuleManifest], replacingRootProviders: Bool, preparingActivation: Bool) throws -> [ModuleManifest] {
+        try decode([ModuleManifest].self, request("requirements",["ids":ids,"catalog":RustCore.encoded(catalog),"replacingRootProviders":replacingRootProviders,"preparingActivation":preparingActivation]))
     }
     public func withAtomicChanges<T>(for ids: [String], _ operation: () throws -> T) throws -> T {
         guard !ids.isEmpty else { return try operation() }

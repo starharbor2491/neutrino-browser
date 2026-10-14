@@ -146,8 +146,8 @@ extension AppState {
         notice = "Quit and reopen Neutrino to clear WebKit website data and reset this Chromium profile. Chromium bookmarks, history, extensions, and settings are removed; Neutrino bookmarks, history, notes, tab addresses, and setup are kept."
     }
 
-    func libraryPreparedForChromiumRemoval() -> LibraryState {
-        (try? RustCore.transform(library,operation:"prepareForChromiumRemoval")) ?? library
+    func libraryPreparedForChromiumRemoval() throws -> LibraryState {
+        try RustCore.transform(library,operation:"prepareForChromiumRemoval")
     }
 
 }

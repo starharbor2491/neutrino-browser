@@ -110,6 +110,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var allNotes = false
     private var notesQuery = ""
     private var librarySection = "bookmarks"
+    private var selectedSettingsID = ""
     private var libraryPage = 0
     private var engineObservations = Set<AnyCancellable>()
     private var observedEngines = Set<ObjectIdentifier>()
@@ -377,6 +378,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             snapshot["downloads"] = center.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
         }
         var result = handle.dispatch(["op": "sync", "snapshot": snapshot])
+        if let id = result["moduleSettingsID"] as? String, id != selectedSettingsID {
+            selectedSettingsID = id; return synchronize()
+        }
         if let section=result["librarySection"] as? String,["bookmarks","history","downloads","notes","archive"].contains(section),section != librarySection {
             librarySection=section;libraryPage=0;return synchronize()
         }
@@ -423,13 +427,17 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func moduleSnapshot() -> [[String:Any]] {
         let catalogIDs = Set(app.catalog.map(\.id))
+        let projection = app.modulePresentation
+        let installedByID = Dictionary(uniqueKeysWithValues:app.installedModules.map {($0.id,$0)})
+        let catalogNames = Dictionary(uniqueKeysWithValues:app.catalog.map {($0.id,$0.name)})
+        let providers = Dictionary(app.installedModules.filter { $0.enabled }.map {($0.manifest.capability,$0)}, uniquingKeysWith:{first,_ in first})
         let manifests = app.catalog + app.installedModules.filter { !catalogIDs.contains($0.id) }.map(\.manifest)
         return manifests.map { manifest in
-            let installed = app.installedModules.first { $0.id == manifest.id }
+            let installed = installedByID[manifest.id]
             let current = installed?.manifest ?? manifest
-            let provider = app.installedModules.first { $0.enabled && $0.manifest.capability == current.capability && $0.id != current.id }
-            let values: [String:ModuleValue] = (try? app.repository?.settings(for: current.id)) ?? [:]
-            let settings: [[String:Any]] = (current.settings ?? []).map { setting in
+            let provider = providers[current.capability].flatMap { $0.id == current.id ? nil : $0 }
+            let values = projection.settings[current.id] ?? [:]
+            let settings: [[String:Any]] = (current.id == selectedSettingsID ? current.settings ?? [] : []).map { setting in
                 ["id":setting.id,"title":setting.title,"kind":setting.kind.rawValue,
                  "choices":setting.choices ?? [],"value":encoded(values[setting.id] ?? setting.defaultValue)]
             }
@@ -441,7 +449,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                     "updateAvailable":installed != nil && manifest.version > current.version,
                     "replacesProvider":current.capability.isExclusive && provider != nil,
                     "providerName":current.capability.isExclusive ? provider?.manifest.name ?? "" : "",
-                    "dependencies":current.dependencies.map { id in app.catalog.first { $0.id == id }?.name ?? id },
+                    "dependencies":current.dependencies.map { catalogNames[$0] ?? $0 },
+                    "error":projection.errors[current.id] ?? projection.errors["*"] ?? "",
                     "settings":settings] as [String:Any]
         }
     }
@@ -458,6 +467,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func dispatchAction(_ request: [String:Any]) -> [String:Any] {
         let result=handle.dispatch(request)
+        if let id = result["moduleSettingsID"] as? String, id != selectedSettingsID { selectedSettingsID = id; return synchronize() }
         if let commands=result["commands"] as? [[String:Any]],!commands.isEmpty {
             for command in commands {perform(command)}
             return synchronize()

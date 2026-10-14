@@ -26,7 +26,7 @@ pub const BLOCKED_DOMAINS: &[&str] = &[
 ];
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
-        "projectNotes" | "prepareForChromiumRemoval" | "applyOrganization" | "liveTabOwnership" | "applySpaceConfiguration" | "manageNamedSetup" | "normalizeSession" | "sessionAncestors" | "visibleTreeTabs" | "setTabParent" | "selectSessionTab" | "enableSessionSplit" | "normalizeSpace" | "archiveIdleTabs" | "restoreArchivedTab" | "normalizeSpaces" | "normalizeLibrary" | "spaceConfiguration" | "removeProfile" | "restoreProfile" | "normalizeChromiumPages" => crate::workspace::request(&r)?,
+        "moduleNote" | "projectNotes" | "prepareForChromiumRemoval" | "applyOrganization" | "liveTabOwnership" | "applySpaceConfiguration" | "manageNamedSetup" | "normalizeSession" | "sessionAncestors" | "visibleTreeTabs" | "setTabParent" | "selectSessionTab" | "enableSessionSplit" | "normalizeSpace" | "archiveIdleTabs" | "restoreArchivedTab" | "normalizeSpaces" | "normalizeLibrary" | "spaceConfiguration" | "removeProfile" | "restoreProfile" | "normalizeChromiumPages" => crate::workspace::request(&r)?,
         "communityPayload" | "validateCommunityCatalog" => crate::module_repository::community_request(&r),
         "githubCatalogURL" | "validateMinimumMacOS" | "validateRelease" | "validateDistributionAsset" | "validateDistributionCatalog" | "distributionUpdates" | "validateEngineManifest" | "validateIdentity" | "validateResourceFrame" | "normalizeSetupPack" | "boundedImport" => crate::policy::request(&r),
         "moduleRepository" => crate::module_repository::request(&r),
@@ -36,6 +36,21 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
                 return Err("Neutrino will not install an older application or an engine below the accepted security version.");
             }
             json!(true)
+        },
+        "focusPresentation" => {
+            let active = r["output"]["active"].as_bool().ok_or("Focus Mode returned an invalid transition.")?;
+            let components = r["output"]["hiddenComponents"].as_array().ok_or("Focus Mode returned an invalid transition.")?;
+            if components.iter().any(|v|v.as_str().is_none()) {return Err("Focus Mode returned an invalid transition.");}
+            let names:std::collections::BTreeSet<_> = components.iter().filter_map(Value::as_str).collect();
+            if names.len()>5 || names.iter().any(|v|!["tabs","navigation","sidebar","bookmarks","status"].contains(v)) {return Err("Focus Mode requested unsupported interface components.");}
+            json!(if active{names.into_iter().collect::<Vec<_>>()}else{vec![]})
+        },
+        "captureSpecification" => {
+            let output=&r["output"];
+            let name=output["filename"].as_str().ok_or("This Page Capture package requested an unsupported format or capture area.")?;
+            if output["format"]!="png" || output["visibleOnly"]!=true {return Err("This Page Capture package requested an unsupported format or capture area.");}
+            let clean:String=name.chars().filter(|c|!['/','\\',':','\0','\r','\n'].contains(c)).take(100).collect();
+            json!({"filename":if clean.is_empty(){"Page Capture.png".into()}else{format!("{clean}.png")},"visibleOnly":true})
         },
         "moduleID"=>json!(crate::modules::id(text(&r,"value"))),
         "moduleJSONBounds"=>{crate::modules::json_bounds(text(&r,"json"))?;json!(true)},

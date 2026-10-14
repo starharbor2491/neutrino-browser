@@ -296,6 +296,10 @@ fn payload(root: &Path, id: &str, runtime: &str, enabled: bool) -> Result<Vec<u8
         .iter()
         .find(|m| m["manifest"]["id"] == id)
         .ok_or("This module is not installed.")?;
+    payload_for(root, m, runtime, enabled)
+}
+fn payload_for(root: &Path, m: &Value, runtime: &str, enabled: bool) -> Result<Vec<u8>> {
+    let id = text(&m["manifest"], "id");
     if text(&m["manifest"], "runtime") != runtime || enabled && !flag(m, "enabled") {
         return fail("This module package is not enabled.");
     }
@@ -554,6 +558,10 @@ fn settings(root: &Path, id: &str) -> Result<Value> {
         .iter()
         .find(|m| m["manifest"]["id"] == id)
         .ok_or("This module is not installed.")?;
+    settings_for(root, m)
+}
+fn settings_for(root: &Path, m: &Value) -> Result<Value> {
+    let id = text(&m["manifest"], "id");
     let mut values = serde_json::Map::new();
     let path = settings_path(root, id)?;
     let saved = if path.exists() {
@@ -710,6 +718,41 @@ fn dispatch(r: &Value) -> Result<Value> {
             }
         }
         "installed" => return Ok(json!(inventory(root)?)),
+        "presentation" => {
+            // Read the inventory once. This projection is presentation data,
+            // never an execution permit; execution still checks fresh receipts.
+            let mut values = serde_json::Map::new();
+            let mut definitions = serde_json::Map::new();
+            let mut errors = serde_json::Map::new();
+            for m in inventory(root)? {
+                let id = text(&m["manifest"], "id");
+                match settings_for(root, &m) {
+                    Ok(v) => {
+                        values.insert(id.into(), v);
+                    }
+                    Err(e) => {
+                        errors.insert(id.into(), json!(e));
+                    }
+                }
+                if flag(&m, "enabled") && m["manifest"]["runtime"] == "declarative" {
+                    let result = (|| -> Result<Value> {
+                        let bytes = payload_for(root, &m, "declarative", true)?;
+                        validate_payload(&m["manifest"], Some(&bytes))?;
+                        serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+                    })();
+                    match result {
+                        Ok(v) => {
+                            definitions.insert(id.into(), v);
+                        }
+                        Err(e) => {
+                            errors.insert(id.into(), json!(e));
+                        }
+                    }
+                }
+            }
+            return Ok(json!({"settings":values,"definitions":definitions,"errors":errors}));
+        }
+        "requirements" => return modules::requirements(r, &json!(inventory(root)?)),
         "plan" => {
             return modules::plan(
                 id,

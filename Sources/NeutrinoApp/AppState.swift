@@ -23,7 +23,8 @@ final class AppState: ObservableObject {
     @Published var onboardingSaving = false
     @Published var startupError: String?
     @Published var notice: String?
-    @Published var installedModules: [InstalledModule] = [] { didSet { resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
+    @Published var installedModules: [InstalledModule] = [] { didSet { modulePresentationCache = nil; resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
+    var modulePresentationCache: ModulePresentation?
     @Published private(set) var resourceWorkerGeneration = UUID()
     @Published var previewConfiguration: Configuration? { didSet { if previewConfiguration == nil { previewOwnerID = nil } } }
     @Published private(set) var previewOwnerID: UUID?
@@ -233,7 +234,7 @@ final class AppState: ObservableObject {
         ReaderWorker.stopAll(moduleID: moduleID)
     }
     func resumeResourceWorkerAfterCancelledQuit() { resourceWorkerGeneration = UUID() }
-    func invalidateModuleExecution() { resourceWorkerGeneration = UUID() }
+    func invalidateModuleExecution() { modulePresentationCache = nil; resourceWorkerGeneration = UUID() }
     func install(_ id: String) {
         perform {
             guard let repository else { throw ValidationError("Open Recovery to repair module storage first.") }
@@ -536,9 +537,11 @@ final class AppState: ObservableObject {
         guard let database else { return false }
         libraryChangedDuringTermination = false
         revision += 1
-        var snapshot = saveWithoutChromiumOnQuit ? libraryPreparedForChromiumRemoval() : library
-        snapshot.normalize()
-        do { try await database.save(snapshot, revision: revision) }
+        do {
+            var snapshot = saveWithoutChromiumOnQuit ? try libraryPreparedForChromiumRemoval() : library
+            snapshot.normalize()
+            try await database.save(snapshot, revision: revision)
+        }
         catch { notice = "Could not save Neutrino data: \(error.localizedDescription)"; return false }
         // COMMIT is durable with SQLite synchronous=FULL. A maintenance failure
         // must not report an uncommitted deletion and roll back only memory.

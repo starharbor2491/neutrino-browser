@@ -26,17 +26,27 @@
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/wrapper/cef_library_loader.h"
-#include "include/views/cef_browser_view.h"
-#include "include/views/cef_browser_view_delegate.h"
-#include "include/views/cef_fill_layout.h"
-#include "include/views/cef_window.h"
-#include "include/views/cef_window_delegate.h"
 
-// Chrome-style Views keeps upstream services behind Neutrino-owned visible chrome.
-// A frameless CEF window is attached to this AppKit layout anchor. Do not set
-// parent_view: that switches macOS embedding to Alloy and loses extension APIs.
+// Keep a normal upstream Chrome browser (extension action APIs reject the
+// popup type forced by CEF Views). Clip its native chrome above the page;
+// Neutrino owns the controls surrounding this viewport.
+@interface NeutrinoChromeClipView : NSClipView
+@end
+@implementation NeutrinoChromeClipView
+- (BOOL)isFlipped { return self.documentView.isFlipped; }
+@end
+static NSView* PageContentView(NSView* view) {
+  NSString* name=NSStringFromClass(view.class);
+  if (([name containsString:@"WebContentsView"] || [name containsString:@"RenderWidgetHostView"]) &&
+      !view.hidden && NSWidth(view.bounds)>40 && NSHeight(view.bounds)>40) return view;
+  for (NSView* child in view.subviews) if (NSView* page=PageContentView(child)) return page;
+  return nil;
+}
 @interface NeutrinoChromiumHostView : NSView
 @property(nonatomic, retain) NSWindow* browserWindow;
+@property(nonatomic, retain) NeutrinoChromeClipView* chromeClip;
+@property(nonatomic, assign) CGFloat chromeInset;
+@property(nonatomic, assign) BOOL arrangingChrome;
 @property(nonatomic, assign) BOOL contentHidden;
 @property(nonatomic, assign) BOOL auxiliary;
 @property(nonatomic, assign) BOOL chromeStyle;
@@ -47,6 +57,9 @@
 @end
 @implementation NeutrinoChromiumHostView
 @synthesize browserWindow;
+@synthesize chromeClip;
+@synthesize chromeInset;
+@synthesize arrangingChrome;
 @synthesize contentHidden;
 @synthesize auxiliary;
 @synthesize chromeStyle;
@@ -61,8 +74,21 @@
   if (self.auxiliary) return;
   NSWindow* child = self.browserWindow;
   if (!child) return;
-  // Neutrino owns this page's outer window. Keep the frameless Views child
-  // anchored inside the page and suppress any redundant window controls.
+  if (!self.chromeClip || child.contentView!=self.chromeClip) {
+    NSView* document=child.contentView;
+    if (!document) return;
+    [document retain];
+    child.styleMask=NSWindowStyleMaskBorderless;
+    NeutrinoChromeClipView* clip=[[NeutrinoChromeClipView alloc] initWithFrame:document.bounds];
+    clip.drawsBackground=NO;
+    clip.copiesOnScroll=NO;
+    child.contentView=clip;
+    clip.documentView=document;
+    [document release];
+    document.autoresizingMask=NSViewNotSizable;
+    self.chromeClip=clip;[clip release];
+    self.chromeInset=100;
+  }
   child.hasShadow=NO;
   child.excludedFromWindowsMenu=YES;
   child.movable=NO;
@@ -94,6 +120,20 @@
   }
   NSRect bounds = [parent convertRectToScreen:[self convertRect:visible toView:nil]];
   if (!NSEqualRects(child.frame,bounds)) [child setFrame:bounds display:YES];
+  if (!self.arrangingChrome) {
+    self.arrangingChrome=YES;
+    NSView* document=self.chromeClip.documentView;
+    if (NSView* page=PageContentView(document)) {
+      const NSRect pageRect=[page convertRect:page.bounds toView:document];
+      const CGFloat inset=document.isFlipped ? NSMinY(pageRect)-NSMinY(document.bounds) : NSMaxY(document.bounds)-NSMaxY(pageRect);
+      if (inset>=0 && inset<=220) self.chromeInset=inset;
+    }
+    const NSSize viewport=self.chromeClip.bounds.size;
+    const NSRect frame=NSMakeRect(0,0,viewport.width,viewport.height+self.chromeInset);
+    if (!NSEqualRects(document.frame,frame)) document.frame=frame;
+    [self.chromeClip scrollToPoint:NSMakePoint(0,document.isFlipped ? self.chromeInset : 0)];
+    self.arrangingChrome=NO;
+  }
   if (!child.visible) [child orderFront:nil];
   // Chrome's size-constraint/layout work can re-enable the zoom button.
   // Apply pane-owned controls after native attachment, layout and ordering.
@@ -114,6 +154,7 @@
 }
 - (void)dealloc {
   if (self.browserWindow.parentWindow) [self.browserWindow.parentWindow removeChildWindow:self.browserWindow];
+  [chromeClip release];
   [browserWindow release];
   [super dealloc];
 }
@@ -210,8 +251,6 @@ std::map<int,CefRefPtr<CefBrowser>> unowned_browsers;
 struct Page {
   NeutrinoChromiumHostView* view = [[NeutrinoChromiumHostView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
   CefRefPtr<CefBrowser> browser;
-  CefRefPtr<CefBrowserView> browser_view;
-  CefRefPtr<CefWindow> native_window;
   CefRefPtr<Client> client;
   CefRefPtr<CefRegistration> observer;
   int browser_id = 0;
@@ -832,8 +871,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   std::map<int,Download> downloads_;
   IMPLEMENT_REFCOUNTING(Client);
 };
-// Extension APIs that depend on Chrome's toolbar require a separate upstream
-// integration patch and native acceptance. Views alone does not prove parity.
+// Upstream extension APIs remain active behind the clipped native chrome.
 Page::Page() { [view setWantsLayer:YES]; generation=++next_page_generation; group=this; }
 Page::~Page() { [view release]; }
 void SetActive(Page* page) {
@@ -983,9 +1021,6 @@ void Destroy(Page* page) {
   NSWindow* child = page->view.browserWindow;
   if (child.parentWindow) [child.parentWindow removeChildWindow:child];
   page->view.browserWindow = nil;
-  // Views windows have their own lifetime. Releasing the Page's reference must
-  // not leave an unowned native window after its WebContents has closed.
-  if (page->native_window && !page->native_window->IsClosed()) page->native_window->Close();
   browser_pages.erase(page->browser_id);
   auto context = contexts.find(page->context_key);
   if (context != contexts.end() && --context->second.pages == 0 && !context->second.retained) contexts.erase(context);
@@ -1118,99 +1153,14 @@ void ReconcileWindows() {
   }
 }
 
-class PaneWindowDelegate final : public CefWindowDelegate {
- public:
-  PaneWindowDelegate(Page* page,CefRefPtr<CefBrowserView> view)
-      : page_(page),generation_(page->generation),view_(view) {}
-  void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->SetBounds(CefRect(0,0,800,600));
-    window->AddChildView(view_);
-    LayoutContents(window);
-    if (pages.count(page_) && page_->generation==generation_) {
-      NSView* handle=(NSView*)window->GetWindowHandle();
-      page_->view.browserWindow=[handle window];
-      [page_->view synchronizeBrowserWindow];
-    }
-  }
-  void OnLayoutChanged(CefRefPtr<CefView> view,const CefRect&) override {
-    if (auto window=view->GetWindow()) LayoutContents(window);
-  }
-  bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }
-  bool WithStandardWindowButtons(CefRefPtr<CefWindow>) override { return false; }
-  bool CanClose(CefRefPtr<CefWindow>) override {
-    auto browser=view_->GetBrowser();
-    return !browser || browser->GetHost()->TryCloseBrowser();
-  }
- private:
-  void LayoutContents(CefRefPtr<CefWindow> window) {
-    if (arranging_) return;
-    arranging_=true;
-    const auto size=window->GetSize();
-    int toolbar_height=0;
-    if (auto toolbar=view_->GetChromeToolbar()) {
-      toolbar->SetVisible(true);
-      toolbar->SetFocusable(false);
-      toolbar_height=std::clamp(toolbar->GetPreferredSize().height,0,160);
-    }
-    // MV3 openPopup checks logical toolbar visibility. Keep upstream services
-    // enabled while placing that toolbar above the native window's clipped
-    // client area; only WebContents occupies Neutrino's website rectangle.
-    view_->SetBounds(CefRect(0,-toolbar_height,size.width,size.height+toolbar_height));
-    arranging_=false;
-  }
-  bool arranging_=false;
-  Page* page_; uint64_t generation_; CefRefPtr<CefBrowserView> view_;
-  IMPLEMENT_REFCOUNTING(PaneWindowDelegate);
-};
-
-class PaneBrowserDelegate final : public CefBrowserViewDelegate {
- public:
-  cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
-  // Chromium's MV3 action APIs require a toolbar provider even when the embedder
-  // owns every visible control. Its view is kept outside the clipped client
-  // area by PaneWindowDelegate, so Chrome's action API remains functional.
-  ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NORMAL; }
-  void OnBrowserCreated(CefRefPtr<CefBrowserView> view,CefRefPtr<CefBrowser>) override {
-    if (auto toolbar=view->GetChromeToolbar()) {
-      toolbar->SetVisible(true);
-      toolbar->SetFocusable(false);
-    }
-  }
-  CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(
-      CefRefPtr<CefBrowserView>, const CefBrowserSettings&, CefRefPtr<CefClient>, bool) override {
-    return new PaneBrowserDelegate();
-  }
-  bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> parent,
-      CefRefPtr<CefBrowserView> popup,bool is_devtools) override {
-    if (is_devtools) return false;
-    auto found=browser_pages.find(popup->GetBrowser()->GetIdentifier());
-    if (found==browser_pages.end()) return false;
-    Page* child=found->second; Page* owner=Group(child);
-    if (!owner->popup || owner->closing || owner->admission_closed) { popup->GetBrowser()->GetHost()->CloseBrowser(true); return true; }
-    // Transfer the original popup WebContents, including POST and opener state.
-    // It becomes a Neutrino tab rather than an invisible Chrome inner tab.
-    if (child==owner) return false;
-    if (owner->active==child) owner->active=nullptr;
-    child->group=nullptr; child->active=child; child->awaiting_window=false;
-    child->view.auxiliary=NO; child->view.navigationChrome=NO;
-    child->browser_view=popup;
-    child->native_window=CefWindow::CreateTopLevelWindow(new PaneWindowDelegate(child,popup));
-    const std::string url=popup->GetBrowser()->GetMainFrame()->GetURL().ToString();
-    if (!owner->popup(owner->callback_context,child,url.c_str())) popup->GetBrowser()->GetHost()->CloseBrowser(true);
-    RefreshActive(owner); return true;
-  }
- private:
-  IMPLEMENT_REFCOUNTING(PaneBrowserDelegate);
-};
-
 void CreateReadyPage(Page* page) {
   page->awaiting_context = false;
   page->creating=true;
   CefBrowserSettings settings;
-  page->browser_view=CefBrowserView::CreateBrowserView(page->client,"about:blank",settings,nullptr,
-      contexts.at(page->context_key).value,new PaneBrowserDelegate());
-  page->native_window=CefWindow::CreateTopLevelWindow(new PaneWindowDelegate(page,page->browser_view));
-  auto browser=page->browser_view->GetBrowser();
+  CefWindowInfo info;
+  info.runtime_style=CEF_RUNTIME_STYLE_CHROME;
+  auto browser=CefBrowserHost::CreateBrowserSync(info,page->client,"about:blank",settings,nullptr,
+      contexts.at(page->context_key).value);
   page->creating=false;
   if (browser) {
     NSView* handle=(NSView*)browser->GetHost()->GetWindowHandle();
@@ -1546,20 +1496,15 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
   if (diagnostics && std::string(method)=="Neutrino.chromeHostState") {
     auto result=CefDictionaryValue::Create();
     NSWindow* window=owner->view.browserWindow;
-    CefRefPtr<CefView> toolbar;
-    if (page && page->browser_view) toolbar=page->browser_view->GetChromeToolbar();
-    result->SetBool("customHost",page && page->browser_view);
-    result->SetBool("toolbarPresent",toolbar!=nullptr);
-    result->SetBool("toolbarVisible",toolbar && toolbar->IsVisible());
-    result->SetBool("toolbarDrawn",toolbar && toolbar->IsDrawn());
-    bool clipped=false;
-    if (toolbar && page && page->native_window) {
-      const auto bounds=toolbar->GetBoundsInScreen();
-      const auto client=page->native_window->GetClientAreaBoundsInScreen();
-      clipped=bounds.width<=0 || bounds.height<=0 || bounds.x+bounds.width<=client.x ||
-          bounds.y+bounds.height<=client.y || bounds.x>=client.x+client.width || bounds.y>=client.y+client.height;
-    }
-    result->SetBool("toolbarClipped",clipped);
+    NSView* document=owner->view.chromeClip.documentView;
+    NSView* content=document ? PageContentView(document) : nil;
+    NSRect pageRect=content ? [content convertRect:content.bounds toView:owner->view.chromeClip] : NSZeroRect;
+    const NSRect viewport=owner->view.chromeClip.bounds;
+    const bool clipped=content && std::abs(NSMinY(pageRect)-NSMinY(viewport))<2 &&
+        std::abs(NSWidth(pageRect)-NSWidth(viewport))<2 && std::abs(NSHeight(pageRect)-NSHeight(viewport))<2;
+    result->SetBool("customHost",owner->view.chromeClip && window.contentView==owner->view.chromeClip);
+    result->SetBool("chromeClipped",clipped);
+    result->SetDouble("chromeInset",owner->view.chromeInset);
     result->SetBool("windowVisible",window.visible);
     result->SetBool("windowActive",window.keyWindow);
     result->SetInt("activeBrowser",page ? page->browser_id : 0);
