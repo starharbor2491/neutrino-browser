@@ -207,6 +207,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: Neutrino-AppleSilicon-preview
@@ -217,6 +218,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           release_version="$(python3 -c 'import json; print(json.load(open("release/catalog.json"))["releases"][0]["release"]["version"])')"
+          echo "NEUTRINO_RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
           if gh release view "v$release_version" --json isDraft > "$RUNNER_TEMP/neutrino-existing-release.json"; then
             python3 - <<'PY'
           import json,os
@@ -235,23 +237,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           if [[ -f release/preview.xml ]]; then
-            python3 - <<'PYFEED'
-          import base64,json,subprocess
-          from pathlib import Path
-          def api(method,path,body=None):
-              result=subprocess.run(['gh','api','--method',method,path,'--input','-'],input=json.dumps(body or {}),text=True,capture_output=True)
-              if result.returncode: raise RuntimeError('GitHub feed publication failed')
-              return json.loads(result.stdout) if result.stdout else None
-          repo='repos/starharbor2491/neutrino-browser'
-          # Create the update branch at the reviewed release source if absent.
-          existing=subprocess.run(['gh','api',repo+'/git/ref/heads/updates'],capture_output=True,text=True)
-          if existing.returncode:
-              release=json.loads(Path('release/catalog.json').read_text())['releases'][0]['release']
-              tag=api('GET',repo+'/git/ref/tags/v'+release['version'])
-              api('POST',repo+'/git/refs',{'ref':'refs/heads/updates','sha':tag['object']['sha']})
-          current=subprocess.run(['gh','api',repo+'/contents/preview.xml?ref=updates'],capture_output=True,text=True)
-          body={'message':'Publish signed Neutrino preview appcast','branch':'updates','content':base64.b64encode(Path('release/preview.xml').read_bytes()).decode()}
-          if current.returncode==0: body['sha']=json.loads(current.stdout)['sha']
-          api('PUT',repo+'/contents/preview.xml',body)
-          PYFEED
+            gh release upload "$NEUTRINO_RELEASE_TAG" release/preview.xml --clobber
+            python3 scripts/publish-appcast.py preview
           fi

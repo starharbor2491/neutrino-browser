@@ -164,4 +164,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "v$RELEASE_VERSION" release/*.dmg release/*.app.zip release/SHA256SUMS release/*-package.json release/catalog.json release/installed-smoke.json release/core-acceptance.json --target "$GITHUB_SHA" --title "Neutrino $RELEASE_VERSION" --notes 'Neutrino for Apple Silicon. Download the app ZIP or drag Neutrino.app from the offline DMG to Applications. Both include Blink, WebKit support, helpers, and built-in modules. Updates download from GitHub and install after quitting while preserving browser data. Native, installed, and publisher-recorded core acceptance are attached.'
+        run: gh release create "v$RELEASE_VERSION" release/*.dmg release/*.app.zip release/SHA256SUMS release/*-package.json release/catalog.json release/installed-smoke.json release/core-acceptance.json release/sparkle-status.json release/stable.xml --target "$GITHUB_SHA" --title "Neutrino $RELEASE_VERSION" --notes 'Neutrino for Apple Silicon. Download the app ZIP or drag Neutrino.app from the offline DMG to Applications. Both include Blink, WebKit support, helpers, and built-in modules. Updates download from GitHub and install after quitting while preserving browser data. Native, installed, and publisher-recorded core acceptance are attached.'
+      - name: Publish signed stable Sparkle feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/publish-appcast.py stable

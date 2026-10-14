@@ -153,7 +153,8 @@
           (preserveEditing &&
             current.matches(textInputSelector + ",select") &&
             (current === document.activeElement ||
-              current.closest("form[data-form]")));
+              current.closest("form[data-form]")) &&
+            (current.id !== "address-input" || current.dataset.addressContext === fresh.dataset.addressContext));
         for (const attr of [...current.attributes]) {
           if (
             !fresh.hasAttribute(attr.name) &&
@@ -239,7 +240,7 @@
       active && typeof active.selectionStart === "number"
         ? [active.selectionStart, active.selectionEnd]
         : null;
-    const preserved =
+    let preserved =
       sameContext && key && active.matches(textInputSelector)
         ? active.value
         : null;
@@ -254,6 +255,8 @@
     const hadDialog = !!topDialog();
     const template = document.createElement("template");
     template.innerHTML = result.html;
+    if (active?.id === "address-input" && active.dataset.addressContext !== template.content.querySelector("#address-input")?.dataset.addressContext)
+      preserved = null;
     const commandValue =
       template.content.querySelector("#command-input")?.getAttribute("value") ||
       "";
@@ -313,7 +316,7 @@
       root.querySelector(returnFocus)?.focus({ preventScroll: true });
       returnFocus = null;
     }
-    if (adjustment) {
+    if (adjustment?.element.dataset.editor === "tabsWidth") {
       root
         .querySelector(".editing-preview")
         ?.style.setProperty("--rail-width", adjustment.value + "px");

@@ -66,6 +66,8 @@ def signed_appcast(app, archive, output):
         item = ET.SubElement(feed, 'item')
         ET.SubElement(item, 'title').text = 'Neutrino ' + version
         ET.SubElement(item, 'link').text = 'https://github.com/' + REPOSITORY + '/releases/tag/' + tag
+        release = json.loads((app / 'Contents/Resources/Distribution.json').read_text())
+        ET.SubElement(item, 'neutrinoSecurityEpoch').text = str(release['securityEpoch'])
         for name, value in [('version', info['CFBundleVersion']), ('shortVersionString', version), ('minimumSystemVersion', info['LSMinimumSystemVersion']), ('hardwareRequirements', 'arm64')]:
             ET.SubElement(item, '{' + NAMESPACE + '}' + name).text = value
         ET.SubElement(item, 'enclosure', {'url': 'https://github.com/' + REPOSITORY + '/releases/download/' + tag + '/' + archive.name, 'length': str(archive.stat().st_size), 'type': 'application/octet-stream', '{' + NAMESPACE + '}edSignature': signature})

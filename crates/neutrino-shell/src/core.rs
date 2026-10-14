@@ -26,6 +26,13 @@ pub const BLOCKED_DOMAINS: &[&str] = &[
 ];
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
+        "validateUpdatePolicy" => {
+            if r["build"].as_u64().unwrap_or(0) < r["currentBuild"].as_u64().unwrap_or(0) ||
+               r["epoch"].as_u64().is_none_or(|e|e<r["floor"].as_u64().unwrap_or(u64::MAX)) {
+                return Err("Neutrino will not install an older application or an engine below the accepted security version.");
+            }
+            json!(true)
+        },
         "moduleID"=>json!(crate::modules::id(text(&r,"value"))),
         "validateManifest"=>{crate::modules::manifest(&r["manifest"])?;json!(true)},
         "validateSetting"=>{crate::modules::setting(&r["setting"],&r["value"])?;json!(true)},

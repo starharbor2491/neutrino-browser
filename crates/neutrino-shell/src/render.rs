@@ -14,9 +14,9 @@ fn icon_definitions(s: &Shell) -> Markup {
         "external", "grip", "key", "book", "activity", "camera", "plug",
     ];
     html! {svg class="icon-definitions" aria-hidden="true"{defs{@for name in names{
-        @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules",v=>v};
+        @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules","plus"=>"newTab","download"=>"downloads","edit"=>"notes","book"=>"reader","activity"=>"resources","camera"=>"screenshot","moon"=>"focus",v=>v};
         @let pack = text(&s.config()["theme"],"iconPack");
-        @let custom = text(&s.snapshot["svgIcons"],key);
+        @let custom = if text(&s.snapshot["svgIcons"],key).is_empty(){text(&s.snapshot["svgIcons"],name)}else{text(&s.snapshot["svgIcons"],key)};
         @let path = if (pack=="module" || pack.is_empty()) && crate::icons::valid_path(custom){custom}else{crate::icons::path(name,pack)};
         @let filled = pack=="solid";
         symbol id=(format!("glyph-{name}")) viewBox="0 0 24 24"{
@@ -181,7 +181,7 @@ fn rail_navigation(s: &Shell) -> Markup {
     }}
 }
 fn location(s: &Shell) -> Markup {
-    html! {form class="location" data-form="address" aria-label="Address bar" {(icon(if s.private(){"shield"}else if text(s.active(),"url").starts_with("https:"){"lock"}else{"search"}))input id="address-input" name="address" value=(text(s.active(),"url")) placeholder="Search or enter URL" autocomplete="off" spellcheck="false" aria-label="Search or enter URL";}}
+    html! {form class="location" data-form="address" aria-label="Address bar" {(icon(if s.private(){"shield"}else if text(s.active(),"url").starts_with("https:"){"lock"}else{"search"}))input id="address-input" name="address" data-address-context=(format!("{}:{}",text(s.active(),"id"),text(s.active(),"url"))) value=(text(s.active(),"url")) placeholder="Search or enter URL" autocomplete="off" spellcheck="false" aria-label="Search or enter URL";}}
 }
 fn rail(s: &Shell, preview: bool) -> Markup {
     let horizontal = ["top", "bottom"].contains(&text(&s.config()["layout"], "tabs"));

@@ -265,6 +265,13 @@ impl Shell {
                 }
                 "section" => {
                     self.section = bound(text(&request, "value"), 40);
+                    if self.screen == "browse"
+                        && ["bookmarks", "history", "downloads", "notes", "archive"]
+                            .contains(&self.section.as_str())
+                    {
+                        self.panel = self.section.clone();
+                        commands.push(json!({"op":"projectLibrary","section":self.section}));
+                    }
                     if self.screen == "library" {
                         commands.push(json!({"op":"projectLibrary","section":self.section}));
                     }
@@ -581,7 +588,7 @@ impl Shell {
                 "editor-save-named" => {
                     if let Some(config) = &self.draft {
                         if !self.name.is_empty() {
-                            commands.push(json!({"op":"saveNamedSetup","name":self.name,"configuration":config}));
+                            commands.push(json!({"op":"saveNamedSetup","name":self.name,"configuration":config,"requirements":config["requiredModuleIDs"]}));
                             self.name.clear();
                             self.notice = "Setup saved. Choose it from Saved setups.".into();
                         }
@@ -592,7 +599,8 @@ impl Shell {
                         .iter()
                         .find(|c| c["id"] == request["id"])
                     {
-                        let config = c["configuration"].clone();
+                        let mut config = c["configuration"].clone();
+                        config["requiredModuleIDs"] = c["requiredModuleIDs"].clone();
                         self.push_undo();
                         self.draft = Some(config);
                     }
@@ -628,7 +636,7 @@ impl Shell {
                 "editor-save" => {
                     if let Some(config) = self.draft.take() {
                         let pending = self.pending_exit.take();
-                        commands.push(json!({"op":"applyConfiguration","configuration":config,"space":self.apply_space}));
+                        commands.push(json!({"op":"applyConfiguration","requirements":config["requiredModuleIDs"],"configuration":config,"space":self.apply_space}));
                         self.panel.clear();
                         self.close_screen();
                         if let Some(pending) = pending {

@@ -624,6 +624,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             smokeTrace("No application state; returning terminateNow")
             return .terminateNow
         }
+        // Consent belongs to this quit attempt. A veto must never arm a later quit.
+        defer { if !state.terminating { state.uninstallRequested = false } }
+        if state.uninstallRequested && !DistributionManager.shared.canUninstall {
+            state.notice = "Finish the pending update before uninstalling Neutrino."
+            return .terminateCancel
+        }
         guard !state.stoppingModuleWorkers, !state.suspendingModuleContributions else {
             state.notice = "Wait for the current module operation to finish before quitting."
             DistributionManager.shared.cancelledQuit()
@@ -664,6 +670,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { try await downloads.cancelAllAndWait() }
             catch {
                 state.notice = error.localizedDescription; state.terminating = false
+                state.uninstallRequested = false
                 downloads.resume()
                 DistributionManager.shared.cancelledQuit()
                 sender.reply(toApplicationShouldTerminate: false); return
@@ -674,6 +681,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !state.stoppingModuleWorkers, !state.suspendingModuleContributions else {
                 state.notice = "Wait for the current module operation to finish before quitting."
                 state.terminating = false; downloads.resume()
+                state.uninstallRequested = false
                 DistributionManager.shared.cancelledQuit()
                 sender.reply(toApplicationShouldTerminate: false); return
             }
@@ -728,6 +736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.smokeTrace("Sending termination reply: \(quit)")
             if !quit {
+                state.uninstallRequested = false
                 state.unfreezeQuitData()
                 for browser in state.windows.values.compactMap(\.model) { browser.resynchronizeCachedPages() }
             }

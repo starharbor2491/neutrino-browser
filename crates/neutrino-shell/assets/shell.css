@@ -1054,13 +1054,15 @@ svg {
 .app-shell[data-density="compact"] .tab-row {
   min-height: 32px;
 }
-.app-shell[data-focus="true"] .workspace-rail,
-.app-shell[data-focus="true"] .rail-resizer,
-.app-shell[data-focus="true"] .workspace-panel,
-.app-shell[data-focus="true"] .bookmarks-bar {
+.app-shell[data-focus="true"][data-focus-hidden~="sidebar"] .workspace-rail,
+.app-shell[data-focus="true"][data-focus-hidden~="sidebar"] .rail-resizer,
+.app-shell[data-focus="true"][data-focus-hidden~="tabs"] .tabs-scroll,
+.app-shell[data-focus="true"][data-focus-hidden~="tabs"] .horizontal-tabs,
+.app-shell[data-focus="true"][data-focus-hidden~="bookmarks"] .bookmarks-bar,
+.app-shell[data-focus="true"][data-focus-hidden~="status"] .rail-feedback {
   display: none;
 }
-.app-shell[data-focus="true"] .browser-shell {
+.app-shell[data-focus="true"][data-focus-hidden~="sidebar"] .browser-shell {
   grid-template-columns: 0 1fr;
 }
 .app-shell[data-focus="true"] .page-toolbar {

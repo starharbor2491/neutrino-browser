@@ -305,7 +305,6 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                         "message": update.message ?? "Updates are downloaded from GitHub. Your browsing data is kept.", "busy": update.busy, "pending": update.pending != nil],
             "modules": moduleSnapshot(), "moduleCatalogs": app.communityCatalogNames,
             "menuItems": encoded(app.declarativeDefinition(.menu)?.menu ?? []),
-            "icons": app.declarativeDefinition(.icons)?.icons ?? [:],
             "svgIcons": app.declarativeDefinition(.icons)?.svgIcons ?? [:],
             "startWidgets": encoded(app.startWidgets),
             "resources": ["frame": encoded(resourceWorker.frame), "failure": resourceWorker.failure ?? ""],
@@ -447,11 +446,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 }
                 if Task.isCancelled{break}
             }
-            guard !stopped,!Task.isCancelled,!model.isClosed,model.session.profileID==profile,model.session.selectedTabID==selected else{completion([:]);return}
+            guard !stopped,!Task.isCancelled,!model.isClosed,model.session.profileID==profile,model.session.selectedTabID==selected else{return}
             pageBackdrops=images;backdropRevisions=revisions
-            _ = synchronize()
-            completion(dispatchAction(request))
+            push(synchronize())
         }
+        // Opening chrome cannot wait on a renderer. The captured background is
+        // decorative and may arrive after the command field already has focus.
+        completion(dispatchAction(request))
     }
     private func sendAction(_ request: [String:Any]) {
         prepareAction(request){[weak self] result in self?.push(result,interactive:true)}
@@ -633,12 +634,17 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                   var c=try? JSONDecoder().decode(Configuration.self,from:data) else {app.notice="Save up to 50 named setups.";return}
             c.normalize()
             var setup=NamedConfiguration(name:String(name.prefix(80)),configuration:c)
-            setup.requiredModuleIDs=app.configurationModuleRequirements
+            setup.requiredModuleIDs=command["requirements"] as? [String] ?? app.configurationModuleRequirements
             app.library.preferences.savedConfigurations.append(setup)
         case "applyConfiguration":
             guard let object = command["configuration"], let data = try? JSONSerialization.data(withJSONObject: object),
                   var configuration = try? JSONDecoder().decode(Configuration.self, from: data) else { app.notice = "That appearance could not be saved."; return }
             configuration.normalize()
+            if let requirements = command["requirements"] as? [String], !requirements.isEmpty {
+                do { _ = try app.applySetup(configuration, requirements: requirements, approvalTitle: "Restore this setup’s tools?", spaceID: command["space"] as? Bool == true ? model?.session.spaceID : nil) }
+                catch { app.notice = error.localizedDescription }
+                return
+            }
             app.applyConfiguration(configuration, to: command["space"] as? Bool == true ? model?.session.spaceID : nil)
         case "sidebarWidth":
             if let model, let width = command["value"] as? Double, width.isFinite {

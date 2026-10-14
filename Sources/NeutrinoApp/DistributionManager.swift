@@ -32,6 +32,14 @@ final class DistributionManager: ObservableObject {
     private var restartRequested = false
     private var sparkle: SparkleUpdates?
     var usesSparkle: Bool {sparkle != nil}
+    var canUninstall: Bool { sparkle?.canUninstall ?? true }
+    func acceptSparkle(build: String, epoch: String?) throws {
+        guard let current, let build = Int(build), let epoch, let number = Int(epoch), let directory else {
+            throw ValidationError("The update is missing its engine security version.")
+        }
+        _ = try RustCore.request(["op":"validateUpdatePolicy", "build":build,"currentBuild":current.build,"epoch":number,"floor":try securityFloor()])
+        try JSONEncoder().encode(number).write(to:directory.appendingPathComponent("security-floor.json"),options:.atomic)
+    }
     var isRestartRequested: Bool { restartRequested }
     @Published var automaticUpdates = UserDefaults.standard.object(forKey: "automaticAppUpdates") as? Bool ?? true {
         didSet {
@@ -69,11 +77,6 @@ final class DistributionManager: ObservableObject {
         guard directory == nil else { return }
         directory = dataDirectory.resolvingSymlinksInPath().appendingPathComponent("Updates", isDirectory: true)
         current = try? ReleaseTrust.metadata(of: Bundle.main.bundleURL, requireCompatibleArchitecture: false)
-        if let updater=SparkleUpdates.make(automatic:automaticUpdates) {
-            sparkle=updater; publisherAvailable=true
-            message="Sparkle checks GitHub for signed Neutrino updates, including Chromium. Your browsing data stays in place."
-            return
-        }
         do {
             try FileManager.default.createDirectory(at: directory!, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
@@ -90,6 +93,11 @@ final class DistributionManager: ObservableObject {
             do {
                 let authority = try await Self.background { try ReleaseTrust.updateAuthority(of: installed) }
                 self.authority = authority
+                if let updater = SparkleUpdates.make(automatic: self.automaticUpdates) {
+                    self.sparkle = updater; self.publisherAvailable = true
+                    self.message = "Sparkle checks GitHub for signed Neutrino updates, including Chromium. Your browsing data stays in place."
+                    return
+                }
                 do { try await self.restorePending(authority: authority) }
                 catch { self.message = error.localizedDescription; self.pendingRecordInvalid = true }
                 self.publisherAvailable = true

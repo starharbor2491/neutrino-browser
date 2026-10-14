@@ -10,6 +10,42 @@ fn commands(result: &Value) -> &[Value] {
     result["commands"].as_array().unwrap()
 }
 #[test]
+fn panel_navigation_and_saved_setup_requirements_survive_dispatch() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"panel","value":"notes"}));
+    let r = s.dispatch(json!({"op":"section","value":"history"}));
+    assert_eq!(s.panel, "history");
+    assert!(commands(&r)
+        .iter()
+        .any(|c| c["op"] == "projectLibrary" && c["section"] == "history"));
+    s.snapshot["savedConfigurations"] = json!([{"id":"saved","name":"Research","configuration":s.snapshot["configuration"],"requiredModuleIDs":["org.neutrino.notes"]}]);
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-load-named","id":"saved"}));
+    let r = s.dispatch(json!({"op":"editor-save"}));
+    assert_eq!(
+        commands(&r)[0]["requirements"],
+        json!(["org.neutrino.notes"])
+    );
+}
+#[test]
+fn svg_semantic_keys_reach_the_rendered_glyphs_and_updates_reject_epoch_rollback() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["iconPack"] = json!("module");
+    s.snapshot["svgIcons"] = json!({"newTab":"M1 2h3","downloads":"M4 5h6"});
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("d=\"M1 2h3\""));
+    assert!(html.contains("d=\"M4 5h6\""));
+    assert!(neutrino_shell::core_request(
+        json!({"op":"validateUpdatePolicy","build":11,"currentBuild":10,"epoch":153,"floor":154})
+    )
+    .is_err());
+    assert!(neutrino_shell::core_request(
+        json!({"op":"validateUpdatePolicy","build":11,"currentBuild":10,"epoch":155,"floor":154})
+    )
+    .is_ok());
+}
+#[test]
 fn tab_move_keeps_document_fields_and_undo_is_context_bound() {
     let mut s = shell();
     let old = s.snapshot["session"]["tabs"].clone();
