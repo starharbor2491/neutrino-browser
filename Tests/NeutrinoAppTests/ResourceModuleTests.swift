@@ -48,7 +48,7 @@ struct ResourceModuleTests {
             // A preflight can service the run loop before worker reaping starts.
             // Keep a real source pending until the guarded critical section, then
             // invalidate it before the probe itself can reenter the run loop.
-            let runLoop = CFRunLoopGetCurrent()
+            let runLoop = workerReapingRunLoop()
             let timer = try #require(CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent(), 0.001, 0, 0) { timer in
                 MainActor.assumeIsolated {
                     guard probe.app.stoppingModuleWorkers, !probe.fired else { return }
@@ -217,6 +217,9 @@ struct ResourceModuleTests {
         #expect(await app.flush())
     }
 
+    // The SDK disallows querying a run loop directly in an async function.
+    // No suspension occurs between this synchronous lookup and worker reaping.
+    private func workerReapingRunLoop() -> CFRunLoop {CFRunLoopGetCurrent()}
     private func waitForStoppedProcess(_ process: Process) async throws {
         for _ in 0..<50 {
             var info = kinfo_proc()

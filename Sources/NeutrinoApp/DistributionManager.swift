@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class DistributionManager: ObservableObject {
     static let shared = DistributionManager()
-    static let chromiumRemovalNotice = "Blink tabs reopen in WebKit at their saved HTTP(S) addresses. Internal pages become blank tabs. Cookies, sign-ins, and unsaved work do not transfer between engines. Neutrino bookmarks, history, notes, Profiles, Spaces, archived tabs, modules, and setups are kept. Blink's saved website data remains on disk."
+    static let chromiumRemovalNotice = "Blink pages reopen as WebKit tabs at their saved HTTP(S) addresses. Background Chrome pages also reopen as tabs where room remains; overflow references are kept as bookmarks. Internal pages become blank tabs. Cookies, sign-ins, and unsaved work do not transfer between engines. Neutrino bookmarks, history, notes, Profiles, Spaces, archived tabs, modules, and setups are kept. Blink's saved website data remains on disk."
     @Published private(set) var available: [DistributionAsset] = []
     @Published private(set) var busy = false
     @Published private(set) var progress: Double?

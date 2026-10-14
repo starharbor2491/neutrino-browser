@@ -57,3 +57,16 @@ The first revised code critique found Focus Escape/address recovery, incomplete 
 Mac compilation, native tests, installed acceptance, signing availability and independent full Blink results remain separate evidence. A visually improved fixture does not establish full Arc parity or a notarized distribution.
 
 The final Violet screenshot review found no P0/P1 visual defect. A duplicated Modules/Extensions glyph was replaced with a separate Extensions symbol. Final rendered interaction checks passed inline Command-L, explicit Command-K, palette dragging/Escape, hover options, inventory entry, setup switch semantics, 1024px containment and reduced motion without JavaScript errors. REA capture `ev_06d9871cbe34da67a047915427e44364412de45cdd86a746089dc750baf5040b` records the fixture at 1240×820; it is not native release evidence.
+
+## Studio review loop
+
+Root performed all coding. Every iteration used a fresh GPT-6.1 Sol xhigh product/UI/code critic and a separate fresh code/bloat auditor, with pinned source and explicit fixture/native evidence boundaries.
+
+| Iteration | Findings and response |
+| --- | --- |
+| 1–2 | Command/new-tab semantics, slider width regression, stale address input, wrong panel preview, no concrete customer advantage. Removed blank-tab creation and built source-backed local research notes beside retained pages. |
+| 3 (`bf58855`) | Cross-Space/duplicate-URL source recovery, absent context, append-only saved setups; orphan package stages, duplicated catalog policy and shutdown continuations. Added source identity, layout lifecycle, Rust repository policy and coordinated cancellation. Native WebKit CI passed; Blink quote acceptance failed. |
+| 4 (`5e06881`) | Moved-source recovery, premature save success, note search/narrow containment; full note bodies bloated snapshots, setup budget bypass and write scratch leaks. Added global same-Profile identity recovery, save acknowledgments, metadata-only indexing/search, narrow rail recovery, shared Rust setup budget and cleanup. macOS compiler failure was fixed; subsequent native tests exposed Date precision and reentry-fixture instability. |
+| 5 (`a3b46a4`) | Fresh review and native validation in progress. Portable 71 Swift tests, 36 Rust workflows, and five appcast regressions passed. No customer-choice or core-release acceptance is inferred from compilation alone. |
+
+The concrete customer hypothesis is local research: quotations retain provenance, notes remain beside live source pages, a moved source can be recovered without losing its document/draft, and saved layouts retain the comparison context. This must work through native engines and storage before recommending Neutrino for that workflow. General parity, protected streaming, clean-Mac signing, keyed Sparkle and accessibility remain separate gates.

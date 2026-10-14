@@ -32,7 +32,7 @@
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
 
-// Chrome-style Views preserves the upstream runtime without Chrome's toolbar.
+// Chrome-style Views keeps upstream services behind Neutrino-owned visible chrome.
 // A frameless CEF window is attached to this AppKit layout anchor. Do not set
 // parent_view: that switches macOS embedding to Alloy and loses extension APIs.
 @interface NeutrinoChromiumHostView : NSView
@@ -1123,14 +1123,17 @@ class PaneWindowDelegate final : public CefWindowDelegate {
   PaneWindowDelegate(Page* page,CefRefPtr<CefBrowserView> view)
       : page_(page),generation_(page->generation),view_(view) {}
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->SetToFillLayout();
-    window->AddChildView(view_);
     window->SetBounds(CefRect(0,0,800,600));
+    window->AddChildView(view_);
+    LayoutContents(window);
     if (pages.count(page_) && page_->generation==generation_) {
       NSView* handle=(NSView*)window->GetWindowHandle();
       page_->view.browserWindow=[handle window];
       [page_->view synchronizeBrowserWindow];
     }
+  }
+  void OnLayoutChanged(CefRefPtr<CefView> view,const CefRect&) override {
+    if (auto window=view->GetWindow()) LayoutContents(window);
   }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }
   bool WithStandardWindowButtons(CefRefPtr<CefWindow>) override { return false; }
@@ -1139,6 +1142,23 @@ class PaneWindowDelegate final : public CefWindowDelegate {
     return !browser || browser->GetHost()->TryCloseBrowser();
   }
  private:
+  void LayoutContents(CefRefPtr<CefWindow> window) {
+    if (arranging_) return;
+    arranging_=true;
+    const auto size=window->GetSize();
+    int toolbar_height=0;
+    if (auto toolbar=view_->GetChromeToolbar()) {
+      toolbar->SetVisible(true);
+      toolbar->SetFocusable(false);
+      toolbar_height=std::clamp(toolbar->GetPreferredSize().height,0,160);
+    }
+    // MV3 openPopup checks logical toolbar visibility. Keep upstream services
+    // enabled while placing that toolbar above the native window's clipped
+    // client area; only WebContents occupies Neutrino's website rectangle.
+    view_->SetBounds(CefRect(0,-toolbar_height,size.width,size.height+toolbar_height));
+    arranging_=false;
+  }
+  bool arranging_=false;
   Page* page_; uint64_t generation_; CefRefPtr<CefBrowserView> view_;
   IMPLEMENT_REFCOUNTING(PaneWindowDelegate);
 };
@@ -1147,14 +1167,13 @@ class PaneBrowserDelegate final : public CefBrowserViewDelegate {
  public:
   cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
   // Chromium's MV3 action APIs require a toolbar provider even when the embedder
-  // owns every visible control. Retain that upstream provider, hide its view,
-  // and let Neutrino supply navigation and extension launch surfaces.
+  // owns every visible control. Its view is kept outside the clipped client
+  // area by PaneWindowDelegate, so Chrome's action API remains functional.
   ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NORMAL; }
   void OnBrowserCreated(CefRefPtr<CefBrowserView> view,CefRefPtr<CefBrowser>) override {
     if (auto toolbar=view->GetChromeToolbar()) {
-      toolbar->SetVisible(false);
-      toolbar->SetSize(CefSize(0,0));
-      view->InvalidateLayout();
+      toolbar->SetVisible(true);
+      toolbar->SetFocusable(false);
     }
   }
   CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(
@@ -1533,6 +1552,14 @@ void DevTools(void* opaque,int id,const char* method,const char* parameters) {
     result->SetBool("toolbarPresent",toolbar!=nullptr);
     result->SetBool("toolbarVisible",toolbar && toolbar->IsVisible());
     result->SetBool("toolbarDrawn",toolbar && toolbar->IsDrawn());
+    bool clipped=false;
+    if (toolbar && page && page->native_window) {
+      const auto bounds=toolbar->GetBoundsInScreen();
+      const auto client=page->native_window->GetClientAreaBoundsInScreen();
+      clipped=bounds.width<=0 || bounds.height<=0 || bounds.x+bounds.width<=client.x ||
+          bounds.y+bounds.height<=client.y || bounds.x>=client.x+client.width || bounds.y>=client.y+client.height;
+    }
+    result->SetBool("toolbarClipped",clipped);
     result->SetBool("windowVisible",window.visible);
     result->SetBool("windowActive",window.keyWindow);
     result->SetInt("activeBrowser",page ? page->browser_id : 0);

@@ -268,7 +268,7 @@ fn horizontal_tabs(s: &Shell, preview: bool) -> Markup {
 fn browser(s: &Shell, preview: bool) -> Markup {
     let placement = text(&s.config()["layout"], "tabs");
     let horizontal = ["top", "bottom"].contains(&placement);
-    let panel_key = s.panel_key();
+    let panel_key = s.visible_panel_key();
     let panel = !panel_key.is_empty() || preview && s.edit_component == "panels";
     let width = s.config()["layout"]["tabsWidth"]
         .as_f64()

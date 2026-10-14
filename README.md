@@ -2,7 +2,7 @@
   <img src="neutrino.svg" width="84" alt="Neutrino logo">
 </p>
 <h1 align="center">Neutrino</h1>
-<p align="center">A browser workspace you can make your own.</p>
+<p align="center">Keep your sources, notes, and live pages together.</p>
 <p align="center">
   <a href="https://github.com/starharbor2491/neutrino-browser/releases">Download for Apple Silicon</a> ·
   <a href="docs/TESTING.md">Build & test</a> ·
@@ -19,10 +19,10 @@ Neutrino keeps pages, reference tabs, and local notes together in a workspace. S
 ## A workspace for actual work
 
 - **Command-first browsing.** Open a destination with ⌘T, switch pages with ⌘K, and edit the current address with ⌘L. Cancelling a new destination leaves your live page alone.
-- **Research beside the page.** Keep Notes or bookmarks alongside a website, save a page reference or a selected quote, and choose another live page for split view.
+- **Research beside the page.** Keep Notes or bookmarks alongside a website, save a source-linked quote, search notes by title/source/Space, and compare live pages in split view. Open source returns to the original tab, including after a Space move.
 - **Spaces and Profiles.** Organize tabs and folders into Spaces; keep website accounts and browsing data in separate Profiles. Move and reorder tabs directly.
 - **Familiar starting layouts.** Neutrino, Arc, Chrome, Safari, Brave, and Opera GX inspired presets configure arrangement, density, color, and tool placement. These are Neutrino layouts, not replicas or affiliated products.
-- **A working appearance editor.** Dock components, resize panels, choose SVG icons, adjust type and corners, and save reusable setups. Preview changes, undo them, or cancel without applying them.
+- **A working appearance editor.** Dock components, resize panels, choose SVG icons, adjust type and corners, and save, rename, replace, or delete reusable setups. Preview changes, undo them, or cancel without applying them.
 - **Tools that show up.** Enable a module to add its controls or presentation to the workspace. Local packages can supply constrained behavior, themes, layouts, SVG paths, menus, and widgets.
 
 <details>
@@ -70,11 +70,11 @@ The harness is for interaction testing; it does not certify native engine behavi
 | Layer | Implementation |
 | --- | --- |
 | Interface, reducer, presets, SVG icons, appearance policy | Rust / Maud |
-| SQLite storage, bookmark exchange, URL policy, constrained module programs and planning | Rust |
+| SQLite storage, sessions/Spaces/profiles, module repository/programs, imports, release and identity policy | Rust |
 | macOS windows, WKWebView/CEF ownership, Keychain, native framework adapters | Swift / Objective-C++ |
 | SDK builds, packaging, signing, release and acceptance automation | Python / shell |
 
-The Rust migration is ongoing. Swift still contains portable orchestration that needs to move; language percentages also count tests and native acceptance harnesses. Python is build tooling and is not a bundled browser runtime. See [architecture](docs/RUST_ARCHITECTURE.md) and [verified feature coverage](docs/PARITY.md).
+The former Swift percentage included native adapters, DTOs, tests, and acceptance harnesses as well as portable policy. The latter now runs in Rust: session/Space/profile transformations, module storage/recovery, setup management, note indexing, imports, and release/identity validation. Swift still supplies macOS framework calls and adapter orchestration; remaining portable adapter decisions are tracked in the architecture document. Python files build, package, sign, and test releases; **no Python runtime ships in the app**. See [architecture](docs/RUST_ARCHITECTURE.md) and [verified feature coverage](docs/PARITY.md).
 
 ## Contributing
 

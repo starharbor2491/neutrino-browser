@@ -199,11 +199,34 @@ import NeutrinoCore
         try await action(["op":"section","value":"notes"], web: web)
         try await Task.sleep(for: .milliseconds(200))
         await AppSmokeTest.captureWindow(window, to: output.appendingPathComponent("Neutrino-research-\(page.engineID.rawValue).png"))
+        try await verifyLargeNoteProjection(app:app,model:model,web:web)
         let receipt = output.deletingLastPathComponent().appendingPathComponent("research-acceptance.json")
         var evidence = (try? JSONSerialization.jsonObject(with: Data(contentsOf: receipt))) as? [String: Any] ?? [:]
-        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true,"movedSourceRecovery":true]
+        evidence[page.engineID.rawValue] = ["quoteWithSource":true,"twoDistinctSources":true,"spaceScope":true,"openSource":true,"databaseReload":true,"retainedPageThroughSplit":true,"savedPresetPreservesPage":true,"namedSetupReload":true,"splitRestoration":true,"sourceTabIdentity":true,"crossSpaceSourceRecovery":true,"movedSourceRecovery":true,"largeNoteProjection":true]
         try JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted,.sortedKeys]).write(to: receipt, options: .atomic)
         print("Neutrino research acceptance: \(page.engineID.rawValue) quote, source, durable note, retained split, and saved preset passed")
+    }
+    private static func verifyLargeNoteProjection(app:AppState,model:BrowserModel,web:WKWebView) async throws {
+        let original=app.library.notes,configuration=model.configuration
+        defer {app.library.notes=original;app.applyConfiguration(configuration,to:model.session.spaceID)}
+        var withNotes=configuration;withNotes.layout.secondaryPanel="notes"
+        app.applyConfiguration(withNotes,to:model.session.spaceID)
+        let text=String(repeating:"漢",count:200_000)
+        var latest=UUID()
+        for index in 0..<40 {
+            var note=Note(profileID:model.session.profileID,title:"Large note \(index)",text:text)
+            note.spaceID=model.session.spaceID;latest=note.id;app.library.notes.append(note)
+        }
+        try await action(["op":"screen","value":"library","section":"bookmarks"],web:web)
+        try await action(["op":"escape"],web:web)
+        try await action(["op":"native","action":"selectNote","id":latest.uuidString],web:web)
+        let next=(try await web.evaluateJavaScript("!!document.querySelector('.workspace-panel [data-action=libraryPage][data-value=\"1\"]:not(:disabled)')")) as? Bool == true
+        guard next else {throw ValidationError("A saved Notes panel lost its own pagination after visiting Bookmarks.")}
+        try await action(["op":"native","action":"libraryPage","value":"1"],web:web)
+        let length=(try await web.evaluateJavaScript("document.querySelector('.workspace-panel textarea')?.value.length")) as? Int
+        guard length==200_000,model.hasPage else {throw ValidationError("Large valid notes broke the shell projection.")}
+        app.library.notes=original
+        try await action(["op":"section","value":"notes"],web:web)
     }
     private static func unwrapSplit(_ model:BrowserModel) throws -> TabSplit {
         guard let pair=model.session.split else {throw ValidationError("The research split is missing.")};return pair

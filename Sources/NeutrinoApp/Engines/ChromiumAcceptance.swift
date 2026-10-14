@@ -81,17 +81,22 @@ enum ChromiumAcceptance {
         try await verifyChromeGeometry(page, ownerWindow: ownerWindow)
         _ = try await evaluate(page, "(window.neutrinoLiveMarker=73, 'ready')")
         let count = browser.session.tabs.count
+        let shell=try await RustShellAcceptance.waitForShell(in:ownerWindow)
         page.focus()
-        try key("t", code: 17, modifiers: .command, window: page.chromeWindow!)
-        try await wait("Command-T") { browser.session.tabs.count == count + 1 }
-        guard browser.session.selectedTabID != probe else { throw ValidationError("Command-T did not create a Neutrino tab.") }
-        try key("w", code: 13, modifiers: .command, window: ownerWindow)
-        try await wait("Command-W") { browser.session.tabs.count == count && ownerWindow.isVisible && !browser.isClosed }
+        try key("t",code:17,modifiers:.command,window:page.chromeWindow!)
+        try await wait("Command-T opens destinations") {
+            let open=(try await shell.evaluateJavaScript("!!document.querySelector('.command-palette') && document.activeElement.id==='command-input'")) as? Bool == true
+            return browser.session.tabs.count==count && browser.session.selectedTabID==probe && open
+        }
+        try key("w",code:13,modifiers:.command,window:ownerWindow)
+        try await wait("Command-W cancels destinations") {
+            let closed=(try await shell.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true
+            return browser.session.tabs.count==count && ownerWindow.isVisible && !browser.isClosed && closed
+        }
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("Creating and closing a tab replaced the existing document.") }
         page.focus()
         try key("l", code: 37, modifiers: .command, window: page.chromeWindow!)
-        let shell = try await RustShellAcceptance.waitForShell(in:ownerWindow)
         let addressDeadline = ContinuousClock.now.advanced(by:.seconds(15))
         while true {
             let responder = ownerWindow.firstResponder as? NSView
@@ -147,9 +152,23 @@ enum ChromiumAcceptance {
         page.focus()
         try await wait("page focus before File menu") { page.chromeWindow?.isKeyWindow == true }
         try await performWhenReady("New tab")
-        try await wait("New tab menu") { browser.session.tabs.count == count + 1 }
+        try await wait("New tab menu opens destinations") {
+            let open=(try await shell.evaluateJavaScript("!!document.querySelector('.command-palette')")) as? Bool == true
+            return browser.session.tabs.count==count && open
+        }
         try await performWhenReady("Close tab")
-        try await wait("Close tab menu") { browser.session.tabs.count == count }
+        try await wait("Close tab menu cancels destinations") {
+            let closed=(try await shell.evaluateJavaScript("!document.querySelector('.command-palette')")) as? Bool == true
+            return browser.session.tabs.count==count && closed
+        }
+        // Committing a destination creates the actual new tab; opening and
+        // canceling the command UI must never create an empty document.
+        try await performWhenReady("New tab")
+        _ = try await shell.callAsyncJavaScript("const input=document.getElementById('command-input');input.value=url;input.dispatchEvent(new Event('input',{bubbles:true}));",arguments:["url":address],in:nil,contentWorld:.page)
+        try key("\r",code:36,window:ownerWindow)
+        try await wait("Destination creates a live tab") {browser.session.tabs.count==count+1 && browser.session.selectedTabID != probe && browser.activeWebTab.url==url && !browser.activeWebTab.loading}
+        try await performWhenReady("Close tab")
+        try await wait("Close committed destination") {browser.session.tabs.count==count}
         browser.selectTab(probe)
         guard browser.activeWebTab === page, try await evaluate(page, "String(window.neutrinoLiveMarker)") == "73" else { throw ValidationError("File-menu tab actions replaced the existing document.") }
         try await verifyNavigationRetry(browser: browser, tab: page, fixtureURL: url)
@@ -390,8 +409,8 @@ enum ChromiumAcceptance {
             throw ValidationError("The Chrome window does not fit its native page anchor; see the recorded window frames.")
         }
         guard state["customHost"] as? Bool == true, !tab.hasNativeNavigationChrome,
-              state["toolbarPresent"] as? Bool == true, state["toolbarVisible"] as? Bool == false,
-              state["toolbarDrawn"] as? Bool == false else {
+              state["toolbarPresent"] as? Bool == true, state["toolbarVisible"] as? Bool == true,
+              state["toolbarClipped"] as? Bool == true else {
             throw ValidationError("Chrome’s native toolbar is visible inside Neutrino’s page surface.")
         }
     }

@@ -665,6 +665,24 @@ fn dispatch(r: &Value) -> Result<Value> {
     match text(r, "action") {
         "initialize" => {
             recover_install(root)?;
+            // A receipt update may crash before its atomic rename. Its scratch
+            // file is never committed state and must not block a later backup.
+            for package in entries(root)? {
+                let name = package.file_name().unwrap_or_default().to_string_lossy();
+                if modules::id(&name) {
+                    check(&package)?;
+                    if package.is_dir() {
+                        for p in entries(&package)? {
+                            if token(
+                                &p.file_name().unwrap_or_default().to_string_lossy(),
+                                ".write-",
+                            ) {
+                                remove(&p)?;
+                            }
+                        }
+                    }
+                }
+            }
             recover_batch(root)?;
             for p in entries(root)? {
                 let name = p.file_name().unwrap_or_default().to_string_lossy();

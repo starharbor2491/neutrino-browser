@@ -129,6 +129,7 @@ jobs:
         run: |
           python3 scripts/installed-smoke.py
           cp dist/installed-smoke.json dist/shell-acceptance.json
+          if [[ -f dist/research-acceptance.json ]]; then cp dist/research-acceptance.json dist/research-webkit.json; fi
           mv dist/smoke-data dist/shell-smoke-data
       # Full parity remains mandatory for consumer releases. Preview notes and
       # the attached failed/passed receipt expose this independent result.
@@ -145,6 +146,7 @@ jobs:
         run: |
           if [[ -f dist/installed-smoke.json ]]; then cp dist/installed-smoke.json dist/blink-acceptance.json; fi
           if [[ -f dist/smoke-app.log ]]; then cp dist/smoke-app.log dist/blink-acceptance.log; fi
+          if [[ -f dist/research-acceptance.json ]]; then cp dist/research-acceptance.json dist/research-blink.json; fi
           if [[ -f dist/shell-acceptance.json ]]; then cp dist/shell-acceptance.json dist/installed-smoke.json; fi
       - name: Assemble update catalog and preview notes
         env:
@@ -164,14 +166,14 @@ jobs:
           (root / 'RELEASE.md').write_text(
               'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
-              '**Violet** brings a restrained charcoal/violet interface, inline address and new-tab search, visible module management with real provider controls, draggable Spaces/folders/tabs, sidebar gestures, anchored menus, and animated guided setup. The supplied icon is unchanged.\n\n'
+              '**Studio** brings command-first destinations, source-linked research notes beside live pages, six familiar starting layouts, draggable components, SVG icon packs, and reusable setups with rename/replace/delete. The supplied icon is unchanged.\n\n'
               'Automatic updates download the complete app, including its pinned Chromium engine, from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
               'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
               '**Preview:** ' + signing + 
               'This release does not certify the finished core or full browser parity. Native tests, real updater replacement, and installed shell acceptance passed. '
               'Full Blink/extension acceptance: **' + os.environ['BLINK_ACCEPTANCE'] + '**; see the attached receipt/log. '
-              'The current Chrome extension popup integration and protected streaming remain incomplete.\n')
+              'Full compatibility and protected streaming remain unverified; use the receipts for the actual outcome.\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -190,6 +192,7 @@ jobs:
             dist/installed-smoke.json
             dist/blink-acceptance.json
             dist/blink-acceptance.log
+            dist/research-*.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -229,7 +232,7 @@ jobs:
           else
             gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
           fi
-          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json --clobber
+          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json --clobber
           gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
       - name: Publish signed Sparkle feed after release assets are public
         env:

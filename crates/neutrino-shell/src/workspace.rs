@@ -451,6 +451,82 @@ fn manage_setup(r: &Value, mut s: Value) -> Result<Value, &'static str> {
     }
     Ok(s)
 }
+fn webkit_library(mut s: Value) -> Value {
+    let mut references = vec![];
+    fn convert(list: &mut Value, profile: &Value, references: &mut Vec<Value>) {
+        let mut original = array(list).to_vec();
+        let mut extra = vec![];
+        for current in &mut original {
+            if current["engineID"] != "chromium" {
+                continue;
+            }
+            let saved = pages(array(&current["chromiumPages"]));
+            if let Some(active) = saved.first() {
+                current["url"] = active["url"].clone();
+                current["title"] = active["title"].clone();
+            }
+            for page in saved.iter().skip(1).filter(|p| web(text(p, "url"))) {
+                let mut restored = tab("webkit");
+                restored["url"] = page["url"].clone();
+                restored["title"] = page["title"].clone();
+                extra.push(restored);
+            }
+            current["engineID"] = json!("webkit");
+            current["chromiumPages"] = Value::Null;
+            if !current["url"].is_null() && !web(text(current, "url")) {
+                current["url"] = Value::Null;
+                current["title"] = json!("New tab");
+            }
+        }
+        let room = 200usize.saturating_sub(original.len());
+        original.extend(extra.iter().take(room).cloned());
+        for page in extra.into_iter().skip(room) {
+            references.push(json!({"id":id(),"profileID":profile,"title":page["title"],"url":page["url"],"createdAt":now()}));
+        }
+        *list = json!(original);
+    }
+    if let Some(profiles) = s["profiles"].as_array_mut() {
+        for p in profiles {
+            if p["engineID"] == "chromium" {
+                p["engineID"] = json!("webkit");
+            }
+        }
+    }
+    if let Some(spaces) = s["spaces"].as_array_mut() {
+        for space in spaces {
+            let profile = space["profileID"].clone();
+            convert(&mut space["tabs"], &profile, &mut references);
+            convert(&mut space["archivedTabs"], &profile, &mut references);
+        }
+    }
+    let spaces = array(&s["spaces"]).to_vec();
+    if let Some(sessions) = s["sessions"].as_array_mut() {
+        for current in sessions {
+            if let Some(space) = spaces
+                .iter()
+                .find(|v| v["id"] == current["spaceID"] && v["profileID"] == current["profileID"])
+            {
+                current["tabs"] = space["tabs"].clone();
+            } else {
+                let profile = current["profileID"].clone();
+                convert(&mut current["tabs"], &profile, &mut references);
+            }
+            *current = session(current.clone());
+        }
+    }
+    let mut bookmarks = array(&s["bookmarks"]).to_vec();
+    for reference in references {
+        if !bookmarks.iter().any(|b| {
+            b["profileID"] == reference["profileID"]
+                && b["url"] == reference["url"]
+                && b["title"] == reference["title"]
+        }) {
+            bookmarks.push(reference);
+        }
+    }
+    s["bookmarks"] = json!(bookmarks);
+    s
+}
 pub fn request(r: &Value) -> Result<Value, &'static str> {
     let s = r["value"].clone();
     let id = text(r, "id");
@@ -478,41 +554,7 @@ pub fn request(r: &Value) -> Result<Value, &'static str> {
             });
             json!(notes.iter().map(|v| v["id"].clone()).collect::<Vec<_>>())
         }
-        "prepareForChromiumRemoval" => {
-            let mut s = s;
-            if let Some(profiles) = s["profiles"].as_array_mut() {
-                for p in profiles {
-                    if p["engineID"] == "chromium" {
-                        p["engineID"] = json!("webkit");
-                    }
-                }
-            }
-            fn convert(tabs: &mut Value) {
-                if let Some(tabs) = tabs.as_array_mut() {
-                    for t in tabs {
-                        if t["engineID"] == "chromium" {
-                            t["engineID"] = json!("webkit");
-                            t["chromiumPages"] = Value::Null;
-                            if !t["url"].is_null() && !web(text(t, "url")) {
-                                t["url"] = Value::Null;
-                                t["title"] = json!("New tab");
-                            }
-                        }
-                    }
-                }
-            }
-            for key in ["sessions", "spaces"] {
-                if let Some(items) = s[key].as_array_mut() {
-                    for item in items {
-                        convert(&mut item["tabs"]);
-                        if key == "spaces" {
-                            convert(&mut item["archivedTabs"]);
-                        }
-                    }
-                }
-            }
-            s
-        }
+        "prepareForChromiumRemoval" => webkit_library(s),
         "applyOrganization" => {
             let proposal = &r["proposal"];
             crate::core::request(

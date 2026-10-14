@@ -288,6 +288,7 @@ impl Shell {
                 }
                 "reveal-workspace" => {
                     self.close_screen();
+                    self.panel = "closed".into();
                     self.sidebar_hidden = false;
                 }
                 "navigate" | "activate-result" => {
@@ -851,7 +852,14 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+    }
+    pub fn visible_panel_key(&self) -> &str {
+        if ["browse", "editor"].contains(&self.screen.as_str()) {
+            self.panel_key()
+        } else {
+            ""
+        }
     }
     pub fn panel_key(&self) -> &str {
         if self.screen == "editor" {

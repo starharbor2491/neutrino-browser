@@ -213,6 +213,7 @@ final class ChromiumTab: BrowserEngineTab {
     }
     private func evaluateIsolated(_ expression: String) async throws -> Any {
         let revision = navigationRevision
+        _ = try await request("Runtime.enable",parameters:[:])
         let tree = try await request("Page.getFrameTree", parameters: [:])
         guard let body = try JSONSerialization.jsonObject(with: tree) as? [String: Any], let frameTree = body["frameTree"] as? [String: Any], let frame = frameTree["frame"] as? [String: Any], let frameID = frame["id"] as? String else { throw ValidationError("The page is unavailable.") }
         let world = try await request("Page.createIsolatedWorld", parameters: ["frameId": frameID, "worldName": "org.neutrino.reader"])

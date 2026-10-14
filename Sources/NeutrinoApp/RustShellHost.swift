@@ -118,6 +118,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var renderGeneration = 0
     private var showingOverlay = true
     private var pendingPageFocus: UUID?
+    private var accountTask: Task<Void,Never>?
     private var backdropTask: Task<Void,Never>?
     private var pageBackdrops: [String:String] = [:]
     private var backdropRevisions: [UUID:UUID] = [:]
@@ -229,13 +230,15 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         chrome.load(URLRequest(url: URL(string: "neutrino-ui://shell/index.html")!))
     }
     private func stopAndWait() async {
-        let assistant=assistantTask, backdrop=backdropTask
+        let assistant=assistantTask, backdrop=backdropTask, account=accountTask
         stop()
         await assistant?.value
         await backdrop?.value
+        await account?.value
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        if accountTask != nil {accountTask?.cancel();ChatGPTAccount.shared.cancelSignIn()}
         backdropTask?.cancel();backdropTask=nil;pageBackdrops=[:];backdropRevisions=[:]
         resourceWorker.stop()
         editingEngines.forEach { $0.setInterfaceEditing(false, owner: editingOwner) }; editingEngines.removeAll()
@@ -374,6 +377,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             snapshot["downloads"] = center.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
         }
         var result = handle.dispatch(["op": "sync", "snapshot": snapshot])
+        if let section=result["librarySection"] as? String,["bookmarks","history","downloads","notes","archive"].contains(section),section != librarySection {
+            librarySection=section;libraryPage=0;return synchronize()
+        }
         if downloadCenter != nil && !downloadScreenOpened { downloadScreenOpened = true; result = handle.dispatch(["op": "screen", "value": "library", "section": "downloads"]) }
         if let step = previewStep { result = handle.dispatch(["op": "setup-step", "value": step]); previewStep = nil }
         if let sheet = model?.sheet, sheet != lastSheet {
@@ -825,10 +831,15 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 refreshCredentialMetadata(profileID: profileID)
             }
         case "saveAI": saveAI(command)
-        case "signIn": Task { @MainActor in await ChatGPTAccount.shared.signIn(); scheduleSync() }
-        case "disconnectAI": Task { @MainActor in await ChatGPTAccount.shared.disconnect(); scheduleSync() }
+        case "signIn", "disconnectAI":
+            guard accountTask==nil else{return}
+            accountTask=Task { @MainActor [weak self] in
+                guard let self,!self.stopped,!Task.isCancelled else{return}
+                defer {self.accountTask=nil;self.scheduleSync()}
+                if operation=="signIn" {await ChatGPTAccount.shared.signIn()} else {await ChatGPTAccount.shared.disconnect()}
+            }
         case "disableAI": app.library.preferences.ai = nil
-        case "cancelAI": ChatGPTAccount.shared.cancelSignIn(); assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
+        case "cancelAI": accountTask?.cancel(); ChatGPTAccount.shared.cancelSignIn(); assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
         case "restoreLayout": app.applyConfiguration(Configuration(), to: model?.session.spaceID); app.applyConfiguration(Configuration()); app.notice = "Default appearance restored."
         case "resetModules": app.resetModules()
         case "retrySave": Task { @MainActor in if await app.flush() { app.notice = "Browser data saved." } }

@@ -399,7 +399,9 @@ fn global_search_reveals_results_but_cancel_returns_to_settings() {
     assert_eq!(s.screen, "browse");
     s.dispatch(json!({"op":"screen","value":"library"}));
     s.sidebar_hidden = true;
+    s.snapshot["configuration"]["layout"]["secondaryPanel"] = json!("notes");
     s.dispatch(json!({"op":"reveal-workspace"}));
+    assert!(s.panel_key().is_empty());
     assert_eq!(s.screen, "browse");
     assert!(!s.sidebar_hidden);
 }
@@ -630,7 +632,9 @@ fn named_setups_have_a_complete_lifecycle_and_space_recovery() {
 #[test]
 fn module_recovery_reclaims_only_recognized_orphan_transaction_directories() {
     let root = std::env::temp_dir().join(format!("neutrino-orphan-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir(&root).unwrap();
+    let container = root;
+    let root = container.join("Modules");
+    std::fs::create_dir_all(&root).unwrap();
     let mut orphans = vec![];
     for prefix in [".stage-", ".backup-", ".restore-", ".batch-", ".write-"] {
         let p = root.join(format!("{prefix}{}", uuid::Uuid::new_v4()));
@@ -647,7 +651,7 @@ fn module_recovery_reclaims_only_recognized_orphan_transaction_directories() {
     assert!(result["error"].is_null(), "{result}");
     assert!(orphans.iter().all(|p| !p.exists()));
     assert!(unrelated.exists());
-    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(container).unwrap();
 }
 
 #[test]
@@ -683,4 +687,69 @@ fn note_search_is_profile_and_space_scoped_with_newest_first() {
     assert_eq!(project(false, ""), json!(["new", "old"]));
     assert_eq!(project(true, "RUST"), json!(["other", "old"]));
     assert_eq!(project(false, "docs.rs"), json!(["new"]));
+}
+
+#[test]
+fn crashed_receipt_writes_do_not_block_future_package_transactions() {
+    let root = std::env::temp_dir().join(format!("neutrino-receipt-{}", uuid::Uuid::new_v4()));
+    let container = root;
+    let root = container.join("Modules");
+    let call = |action: &str, extra: Value| {
+        let mut r = json!({"op":"moduleRepository","root":root,"action":action});
+        for (k, v) in extra.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        let response = neutrino_shell::core_request(r).unwrap();
+        assert!(response["error"].is_null(), "{response}");
+        response
+    };
+    call("initialize", json!({}));
+    let manifest = json!({"id":"org.test.widget","name":"Widget","version":1,"summary":"Research widget","publisher":"Fixture","source":"https://example.com","capability":"startWidget","dependencies":[],"defaultInstalled":true,"runtime":"declarative"});
+    use base64::Engine;
+    let payload = base64::engine::general_purpose::STANDARD
+        .encode(br#"{"formatVersion":1,"widgetTitle":"Reading","widgetBody":"Keep sources here"}"#);
+    call(
+        "install",
+        json!({"id":"org.test.widget","manifest":manifest,"payload":payload}),
+    );
+    let scratch = root
+        .join("org.test.widget")
+        .join(format!(".write-{}", uuid::Uuid::new_v4()));
+    std::fs::write(&scratch, "interrupted receipt").unwrap();
+    call("initialize", json!({}));
+    assert!(!scratch.exists());
+    call("begin", json!({"ids":["org.test.widget"]}));
+    call("rollback", json!({}));
+    std::fs::remove_dir_all(container).unwrap();
+}
+
+#[test]
+fn removing_chromium_preserves_background_addresses_and_bounded_overflow() {
+    let active = json!({"id":"a","engineID":"chromium","url":"https://example.com/a","title":"A","pinned":false,"chromiumPages":[{"url":"https://example.com/a","title":"A"},{"url":"https://example.com/b","title":"B"}]});
+    let convert = |tabs| {
+        neutrino_shell::core_request(json!({"op":"prepareForChromiumRemoval","value":{"profiles":[{"id":"p","engineID":"chromium"}],"spaces":[{"id":"s","profileID":"p","tabs":tabs,"archivedTabs":[]}],"sessions":[{"id":"w","profileID":"p","spaceID":"s","selectedTabID":"a","tabs":[]}],"bookmarks":[]}})).unwrap()
+    };
+    let result = convert(json!([active]));
+    assert_eq!(result["spaces"][0]["tabs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        result["spaces"][0]["tabs"][1]["url"],
+        "https://example.com/b"
+    );
+    assert_eq!(result["sessions"][0]["tabs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        result["sessions"][0]["tabs"][1]["id"],
+        result["spaces"][0]["tabs"][1]["id"]
+    );
+    assert_eq!(
+        result["sessions"][0]["tabs"][1]["url"],
+        "https://example.com/b"
+    );
+    let mut full = vec![active];
+    for i in 1..200 {
+        full.push(json!({"id":format!("t{i}"),"title":"Other","pinned":false,"engineID":"webkit"}));
+    }
+    let result = convert(json!(full));
+    assert_eq!(result["spaces"][0]["tabs"].as_array().unwrap().len(), 200);
+    assert_eq!(result["bookmarks"][0]["url"], "https://example.com/b");
+    assert_eq!(result["bookmarks"][0]["profileID"], "p");
 }

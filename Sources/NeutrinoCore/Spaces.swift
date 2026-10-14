@@ -48,7 +48,11 @@ public struct BrowserSpace: Identifiable, Codable, Equatable, Sendable {
 extension LibraryState {
   public mutating func normalizeSpaces() {if let value=try? RustCore.transform(self,operation:"normalizeSpaces") {self=value}}
   public func configuration(for spaceID: UUID?) -> Configuration {
-    (try? RustCore.decode(Configuration.self,from:RustCore.request(["op":"spaceConfiguration","value":RustCore.encoded(self),"id":spaceID?.uuidString as Any? ?? NSNull()]))) ?? preferences.configuration
+    do {
+      let projection:[String:Any]=["spaces":(spaces ?? []).map{["id":$0.id.uuidString,"setupID":$0.setupID?.uuidString as Any? ?? NSNull()]},
+        "preferences":["configuration":try RustCore.encoded(preferences.configuration),"savedConfigurations":try RustCore.encoded(preferences.savedConfigurations)]]
+      return try RustCore.decode(Configuration.self,from:RustCore.request(["op":"spaceConfiguration","value":projection,"id":spaceID?.uuidString as Any? ?? NSNull()]))
+    } catch {return preferences.configuration}
   }
 }
 
