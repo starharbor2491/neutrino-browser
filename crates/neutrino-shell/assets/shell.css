@@ -3201,8 +3201,8 @@ li.done .guide-check {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  min-height: 56px;
+  padding: 10px 12px;
+  min-height: 52px;
   width: 100%;
   border-radius: calc(8px * var(--sq));
   color: var(--muted);
@@ -3231,12 +3231,44 @@ li.done .guide-check {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.command-result .site-icon,
+.result-glyph {
+  width: 24px;
+  height: 24px;
+  border-radius: calc(6px * var(--sq));
+  font-size: 12px;
+}
+.result-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: var(--hover);
+  color: var(--muted);
+}
+.result-glyph .icon {
+  width: 15px;
+  height: 15px;
+}
 .result-kind {
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
   opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity var(--t-fast),
+    transform var(--t-fast) var(--ease-out);
+}
+.result-kind kbd {
+  padding: 1px 5px;
+  border-radius: calc(4px * var(--sq));
+  background: var(--hover);
 }
 .command-result.selected .result-kind {
   opacity: 1;
+  transform: none;
 }
 .command-footer {
   display: flex;

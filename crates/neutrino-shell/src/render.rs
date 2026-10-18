@@ -222,6 +222,15 @@ fn destination(s: &Shell, screen: &str, label: &str, glyph: &str) -> Markup {
     let selected = s.screen == screen;
     html! {button class=(if selected{"icon-button selected"}else{"icon-button"}) data-op="screen" data-value=(screen) data-section=[(screen=="library").then_some("bookmarks")] data-tip=(label) aria-label=(label) aria-current=[selected.then_some("page")]{(icon(glyph))}}
 }
+/// An address without its scheme or trailing slash, for secondary text.
+fn readable(url: &str) -> String {
+    let trimmed = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let trimmed = trimmed.strip_prefix("www.").unwrap_or(trimmed);
+    trimmed.strip_suffix('/').unwrap_or(trimmed).chars().take(160).collect()
+}
 fn host(url: &str) -> String {
     if url.is_empty() {
         "Search or enter URL".into()
@@ -534,8 +543,8 @@ fn appearance_controls(s: &Shell) -> Markup {
 fn palette(s: &Shell) -> Markup {
     let results = s.results();
     html! {div class="palette-scrim" data-dismiss="true"{section class="command-palette" role="dialog" aria-modal="true" aria-label="Search and switch tabs"{div class="palette-grip" data-drag-dialog="true" tabindex="0" role="button" aria-label="Move command palette with arrow keys"{(icon("grip"))span{(if s.palette_new{"Open a new tab"}else{"Quick navigation"})}span class="spacer"{}kbd{(if s.palette_new{"⌘T"}else{"⌘K"})}}div class="command-field"{(icon("search"))input id="command-input" type="text" autocomplete="off" spellcheck="false" placeholder="Search or enter a URL" value=(s.query.as_str()) aria-label="Search, enter a URL, or find a tab" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant=(format!("result-{}",s.selected_result));button class="icon-button" data-op="escape" aria-label="Close command bar"{(icon("close"))}}
-        div class="command-results" id="command-results" role="listbox"{@for (index,r) in results.iter().enumerate(){button id=(format!("result-{index}")) class=(if index==s.selected_result{"command-result selected"}else{"command-result"}) data-op="select-result" data-index=(index) role="option" aria-selected=((index==s.selected_result).to_string()){(icon(if text(r,"kind")=="tab"{"globe"}else{"search"}))span{strong{(text(r,"title"))}small{(text(r,"detail"))}}span class="result-kind"{(if text(r,"kind")=="tab"{"Switch to tab"}else{"Open"})}}}
-        @if results.is_empty(){div class="command-empty"{"Type a website, search, or tab title."}}}
+        div class="command-results" id="command-results" role="listbox"{@for (index,r) in results.iter().enumerate(){button id=(format!("result-{index}")) class=(if index==s.selected_result{"command-result selected"}else{"command-result"}) data-op="select-result" data-index=(index) role="option" aria-selected=((index==s.selected_result).to_string()){@match text(r,"kind"){"tab"=>{(site(r))},"command"=>{span class="result-glyph"{(icon(match text(r,"value"){"modules"=>"grid","settings"=>"settings","extensions"=>"plug","editor"=>"appearance","library"=>"bookmark",_=>"undo"}))}},_=>{span class="result-glyph"{(icon("search"))}}}span{strong{(text(r,"title"))}small{(if text(r,"kind")=="tab"{readable(text(r,"detail"))}else{text(r,"detail").into()})}}span class="result-kind"{(match text(r,"kind"){"tab"=>"Switch to tab","command"=>"Go to",_=>"Open"})kbd{"↵"}}}}
+        @if results.is_empty(){div class="command-empty"{"Type to search the web, open an address, or find a tab."}}}
         footer class="command-footer"{span{kbd{"↑"}kbd{"↓"}" to move"}span{kbd{"↵"}" to open"}}
     }}}
 }

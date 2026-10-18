@@ -1167,11 +1167,15 @@ impl Shell {
             }
         }
         for tab in self.tabs() {
+            // An untouched blank tab is not a useful destination.
+            if text(tab, "url").is_empty() && text(tab, "title") == "New tab" {
+                continue;
+            }
             if query.is_empty()
                 || text(tab, "title").to_lowercase().contains(&query)
                 || text(tab, "url").to_lowercase().contains(&query)
             {
-                out.push(json!({"kind":"tab","id":tab["id"],"title":tab["title"],"detail":text(tab,"url"),"value":""}));
+                out.push(json!({"kind":"tab","id":tab["id"],"title":tab["title"],"detail":text(tab,"url"),"url":text(tab,"url"),"faviconDataURL":tab["faviconDataURL"],"value":""}));
                 if out.iter().filter(|v| v["kind"] == "tab").count() == 5 {
                     break;
                 }
