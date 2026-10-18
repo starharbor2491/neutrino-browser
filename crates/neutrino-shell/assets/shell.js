@@ -458,7 +458,7 @@
     overlay.classList.add("leaving");
     layer.append(overlay);
     document.body.append(layer);
-    const panel = overlay.querySelector(".command-palette, .popover-menu");
+    const panel = overlay.querySelector(".palette-frame, .popover-menu");
     const fade = overlay.animate([{ opacity: 1 }, { opacity: 0 }], {
       duration: 140,
       easing: "ease-out",
@@ -507,7 +507,7 @@
       ) + "px";
   }
   function positionDialog() {
-    const dialog = root.querySelector(".command-palette");
+    const dialog = root.querySelector(".palette-frame");
     if (!dialog || !dialogPosition) return;
     dialogPosition.x = Math.max(
       12,
@@ -814,7 +814,7 @@
       ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
     ) {
       e.preventDefault();
-      const r = moving.closest(".command-palette").getBoundingClientRect();
+      const r = moving.closest(".palette-frame").getBoundingClientRect();
       dialogPosition = {
         x: dialogPosition?.x ?? r.x,
         y: dialogPosition?.y ?? r.y,
@@ -1107,7 +1107,7 @@
       send({ op: "escape" });
     const grip = e.target.closest("[data-drag-dialog]");
     if (grip) {
-      const r = grip.closest(".command-palette").getBoundingClientRect();
+      const r = grip.closest(".palette-frame").getBoundingClientRect();
       dialogDrag = {
         grip,
         x: e.clientX,

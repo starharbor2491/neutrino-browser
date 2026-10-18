@@ -3132,17 +3132,23 @@ li.done .guide-check {
 .leaving {
   pointer-events: none !important;
 }
-.command-palette {
+/* The frame carries position, shadow and entry motion; the panel inside can
+   then be clipped to a squircle without losing its shadow. */
+.palette-frame {
   width: 580px;
   max-width: 100%;
+  border-radius: calc(14px * var(--sq));
+  box-shadow: var(--shadow);
+  animation: command-in var(--t-med) var(--ease-out);
+}
+.command-palette {
+  width: 100%;
   max-height: 70vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border-radius: calc(14px * var(--sq));
   background: var(--elevated);
-  box-shadow: var(--shadow);
-  animation: command-in var(--t-med) var(--ease-out);
 }
 @keyframes command-in {
   from {
@@ -3211,7 +3217,7 @@ li.done .guide-check {
   background: var(--selected);
   color: var(--ink);
 }
-.command-result > span:first-of-type {
+.command-result > .result-text {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -3783,29 +3789,106 @@ li.done .guide-check {
     corner-shape: round;
   }
 }
-/* WebKit has no corner-shape yet. Large borderless surfaces get the same
-   superellipse from a nine-slice mask; surfaces that rely on an outer shadow or
-   an edge border keep circular corners there, since a mask would clip them. */
+/* WebKit has no corner-shape yet. The same superellipse comes from a
+   nine-slice mask there. Masks clip anything drawn outside the box, so focus
+   rings move inside and floating surfaces take their shadow from an unmasked
+   parent. Fully round elements (switches, swatches) stay circles. */
 @supports not (corner-shape: squircle) {
-  .app-shell :is(.page-frame, .module-card, .start-tile, .start-guide, .preset-thumbnail) {
+  .app-shell {
+    --squircle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cpath d='M70.00 0.00 L89.78 0.31 L97.79 1.24 L103.69 2.80 L108.33 5.03 L112.04 7.96 L114.97 11.67 L117.20 16.31 L118.76 22.21 L119.69 30.22 L120.00 50.00 L120.00 70.00 L119.69 89.78 L118.76 97.79 L117.20 103.69 L114.97 108.33 L112.04 112.04 L108.33 114.97 L103.69 117.20 L97.79 118.76 L89.78 119.69 L70.00 120.00 L50.00 120.00 L30.22 119.69 L22.21 118.76 L16.31 117.20 L11.67 114.97 L7.96 112.04 L5.03 108.33 L2.80 103.69 L1.24 97.79 L0.31 89.78 L0.00 70.00 L0.00 50.00 L0.31 30.22 L1.24 22.21 L2.80 16.31 L5.03 11.67 L7.96 7.96 L11.67 5.03 L16.31 2.80 L22.21 1.24 L30.22 0.31 L50.00 0.00Z'/%3E%3C/svg%3E");
+  }
+  .app-shell
+    :where(
+      .page-frame,
+      .module-card,
+      .start-tile,
+      .start-guide,
+      .start-search,
+      .preset-thumbnail,
+      .button,
+      .icon-button,
+      .tab-row,
+      .chrome-page-row,
+      .new-tab,
+      .folder-heading,
+      .segments,
+      .location,
+      .space-button,
+      .space-symbol,
+      .site-icon,
+      .avatar,
+      .rail-feedback,
+      .settings-nav button,
+      .library-tabs button,
+      .toggle-row,
+      .module-icon,
+      .import-card,
+      .default-browser,
+      .setup-module-row,
+      .command-palette,
+      .command-result,
+      .result-glyph,
+      .anchored-menu > .popover-menu,
+      .menu-item,
+      .workspace-widget,
+      .component
+    ) {
     border-radius: 0;
-    -webkit-mask-box-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cpath d='M70.00 0.00 L89.78 0.31 L97.79 1.24 L103.69 2.80 L108.33 5.03 L112.04 7.96 L114.97 11.67 L117.20 16.31 L118.76 22.21 L119.69 30.22 L120.00 50.00 L120.00 70.00 L119.69 89.78 L118.76 97.79 L117.20 103.69 L114.97 108.33 L112.04 112.04 L108.33 114.97 L103.69 117.20 L97.79 118.76 L89.78 119.69 L70.00 120.00 L50.00 120.00 L30.22 119.69 L22.21 118.76 L16.31 117.20 L11.67 114.97 L7.96 112.04 L5.03 108.33 L2.80 103.69 L1.24 97.79 L0.31 89.78 L0.00 70.00 L0.00 50.00 L0.31 30.22 L1.24 22.21 L2.80 16.31 L5.03 11.67 L7.96 7.96 L11.67 5.03 L16.31 2.80 L22.21 1.24 L30.22 0.31 L50.00 0.00Z'/%3E%3C/svg%3E")
-      50 / var(--mask-r) stretch;
+    -webkit-mask-box-image: var(--squircle) 50 / var(--mask-r, calc(var(--component-radius, 8px) * 1.4)) stretch;
   }
-  .app-shell .page-frame {
-    --mask-r: calc(var(--component-radius, 8px) * 1.4);
+  .app-shell :where(.site-icon, .space-symbol, .result-glyph, .menu-item, .settings-nav button, .library-tabs button) {
+    --mask-r: 8px;
   }
-  .app-shell .module-card {
+  .app-shell .segments[data-selected="true"]::before {
+    border-radius: 0;
+    -webkit-mask-box-image: var(--squircle) 50 / 8px stretch;
+  }
+  .app-shell :where(.tab-row) {
+    --mask-r: calc(var(--tabs-radius, var(--component-radius, 8px)) * 1.4);
+  }
+  .app-shell :where(.module-card) {
     --mask-r: calc(var(--component-radius, 8px) * 2.1);
   }
-  .app-shell .start-tile {
+  .app-shell :where(.start-tile) {
     --mask-r: 14px;
   }
-  .app-shell .start-guide {
+  .app-shell :where(.start-guide, .command-palette, .start-search, .anchored-menu > .popover-menu) {
     --mask-r: 17px;
   }
-  .app-shell .preset-thumbnail {
+  .app-shell :where(.preset-thumbnail) {
     --mask-r: 9px;
+  }
+  .app-shell :where(.module-card *, .start-guide *, .command-palette *, .popover-menu *) {
+    --mask-r: initial;
+  }
+  .app-shell
+    :is(
+      .button,
+      .icon-button,
+      .tab-row,
+      .new-tab,
+      .segments button,
+      .space-button,
+      .avatar,
+      .menu-item,
+      .command-result,
+      .settings-nav button,
+      .library-tabs button,
+      .toggle-row,
+      .import-card,
+      .start-tile,
+      .start-search
+    ):focus-visible {
+    outline-offset: -2px;
+  }
+  .app-shell .location:focus-within {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .app-shell .anchored-menu > .popover-menu {
+    box-shadow: none;
+  }
+  .app-shell .anchored-menu {
+    filter: drop-shadow(0 10px 18px #0000004d);
   }
 }
 .ghost-layer {
