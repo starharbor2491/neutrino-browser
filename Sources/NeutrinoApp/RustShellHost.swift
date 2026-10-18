@@ -376,7 +376,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             "selectedNote": selectedNote.map {noteContext($0,content:true)} as Any? ?? NSNull(),
             "libraryPage": libraryPage, "libraryCount": count,
             "account": ["connected": ChatGPTAccount.shared.connected, "busy": ChatGPTAccount.shared.busy, "status": ChatGPTAccount.shared.status ?? "", "models": ChatGPTAccount.shared.models],
-            "notice": app.notice ?? "", "defaultStatus": defaultStatus, "imported": imported,
+            "notice": app.notice ?? "", "defaultStatus": defaultStatus, "isDefaultBrowser": isDefaultBrowser, "imported": imported,
             "blinkAvailable": ChromiumRuntime.shared.isInstalled(in: app.dataDirectory),
             "engineVersion": ChromiumRuntime.cefVersion.components(separatedBy:"chromium-").last ?? "unavailable",
             "assistantResponse": assistantResponse, "assistantBusy": assistantTask != nil,
@@ -613,7 +613,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             view.mount(tab.nativeView); view.frame = rect; view.isHidden = false
             view.isPreviewing = body["editing"] as? Bool == true
             view.identifier = NSUserInterfaceItemIdentifier("neutrino.page")
-            view.wantsLayer = true; view.layer?.cornerRadius = min(24,max(0,(page["radius"] as? Double) ?? model.configuration.theme.cornerRadius)); view.layer?.masksToBounds = true
+            view.wantsLayer = true; view.layer?.cornerRadius = min(34,max(0,(page["radius"] as? Double) ?? model.configuration.theme.cornerRadius)); view.layer?.cornerCurve = .continuous; view.layer?.masksToBounds = true
             container.mounted[id] = view; visible.insert(id)
             if pendingPageFocus==id,model.session.selectedTabID==id,NSApp.modalWindow==nil,container.window?.attachedSheet==nil {
                 pendingPageFocus=nil;tab.focus()
@@ -773,6 +773,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             case "blockPopups": if let value = command["value"] as? Bool { app.library.preferences.blockPopups = value; for window in app.windows.values { window.model?.updatePopupPolicy() }; ChromiumRuntime.shared.updateProtection() }
             case "restoreSession": if let value = command["value"] as? Bool { app.library.preferences.restoreSession = value }
             case "automaticUpdates": if let value = command["value"] as? Bool { DistributionManager.shared.automaticUpdates = value }
+            case "startGuideHidden": if let value = command["value"] as? Bool { app.library.preferences.startGuideHidden = value }
             default: break
             }
         case "finishSetup": if let values = command["setup"] as? [String: Any] { finishSetup(values) }
@@ -1048,6 +1049,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             app.onboardingSaving = false
             scheduleSync()
         }
+    }
+    /// Whether macOS currently opens web links with this copy of Neutrino.
+    private var isDefaultBrowser: Bool {
+        guard let handler = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!) else { return false }
+        return Bundle(url: handler)?.bundleIdentifier == Bundle.main.bundleIdentifier
     }
     private func setDefaultBrowser() {
         NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: "https") { [weak self] error in

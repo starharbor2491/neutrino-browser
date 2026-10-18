@@ -2,7 +2,7 @@
   "id": "org.neutrino.icons-outline",
   "name": "Precision SVG Icons",
   "version": 2,
-  "summary": "Geometric SVG navigation icons. Import another icon module to supply your own paths.",
+  "summary": "Thin geometric icons for navigation and the Library.",
   "publisher": "Neutrino",
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "icons",

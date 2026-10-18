@@ -2,7 +2,7 @@
   "id": "org.neutrino.start-widget",
   "name": "Start Page Tips",
   "version": 2,
-  "summary": "Keyboard shortcuts for browsing and tabs on new-tab pages.",
+  "summary": "Show keyboard shortcuts on new tabs.",
   "publisher": "Neutrino",
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "startWidget",

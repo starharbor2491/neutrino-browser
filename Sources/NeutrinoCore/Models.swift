@@ -252,6 +252,7 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var blockTrackers: Bool?
     public var autoArchiveDays: Int?
     public var ai: AIConfiguration?
+    public var startGuideHidden: Bool?
     public init() {}
 }
 public struct LibraryState: Codable, Equatable, Sendable {

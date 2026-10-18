@@ -12,9 +12,10 @@ fn icon_definitions(s: &Shell) -> Markup {
         "split", "folder", "bookmark", "history", "download", "settings", "globe", "lock",
         "shield", "pin", "edit", "sun", "moon", "spark", "undo", "arrow", "user", "grid",
         "external", "grip", "key", "book", "activity", "camera", "plug", "appearance", "quote",
+        "focus", "copy",
     ];
     html! {svg class="icon-definitions" aria-hidden="true"{defs{@for name in names{
-        @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules","plus"=>"newTab","download"=>"downloads","edit"=>"notes","book"=>"reader","activity"=>"resources","camera"=>"screenshot","moon"=>"focus",v=>v};
+        @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules","plus"=>"newTab","download"=>"downloads","edit"=>"notes","book"=>"reader","activity"=>"resources","camera"=>"screenshot","focus"=>"focus",v=>v};
         @let pack = text(&s.config()["theme"],"iconPack");
         @let custom = if text(&s.snapshot["svgIcons"],key).is_empty(){text(&s.snapshot["svgIcons"],name)}else{text(&s.snapshot["svgIcons"],key)};
         @let path = if (pack=="module" || pack.is_empty()) && crate::icons::valid_path(custom){custom}else{crate::icons::path(name,pack)};
@@ -172,15 +173,15 @@ fn tab_groups(s: &Shell, preview: bool) -> Markup {
         div class="tab-group today" data-drop-group="today" aria-label="Unpinned tabs" {
             div class="group-label"{span{"Tabs"}@if !s.tab_undo.is_empty(){button data-op="undo-tabs" title="Undo the last tab move"{(icon("undo"))"Undo"}}}
             @for t in s.tabs().iter().filter(|t|!flag(t,"pinned")&&text(t,"folderID").is_empty()&&tab_visible(t,s)){(tab_row(t,s,preview))}
-            button class="new-tab" data-op="newTab" {(icon("plus"))span{"Search or browse"}kbd{"⌘T"}}
+            button class="new-tab" data-op="newTab" {(icon("plus"))span{"New tab"}kbd{"⌘T"}}
             div class="drop-end" data-drop-group="today" {}
         }
     }
 }
 fn spaces(s: &Shell) -> Markup {
     html! {div class="spaces" aria-label="Spaces" {
-        @for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate() {button class=(if space["id"]==s.snapshot["session"]["spaceID"]{"space-button selected"}else{"space-button"}) data-op="switchSpace" data-id=(text(space,"id")) data-space=(text(space,"id")) draggable=((!s.private()).to_string()) title=(text(space,"name")) aria-label=(format!("Switch to {}",text(space,"name"))) aria-pressed=((space["id"]==s.snapshot["session"]["spaceID"]).to_string()) disabled[s.private()] {span class=(format!("space-symbol color-{}",index%5)){(text(space,"name").chars().next().unwrap_or('S'))}}}
-        button class="space-button" data-op="menu" data-value="new-space" aria-label="Create a Space" disabled[s.private()] {(icon("plus"))}
+        @for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate() {button class=(if space["id"]==s.snapshot["session"]["spaceID"]{"space-button selected"}else{"space-button"}) data-op="switchSpace" data-id=(text(space,"id")) data-space=(text(space,"id")) data-tone=(index%5) draggable=((!s.private()).to_string()) data-tip=(text(space,"name")) aria-label=(format!("Switch to {}",text(space,"name"))) aria-pressed=((space["id"]==s.snapshot["session"]["spaceID"]).to_string()) disabled[s.private()] {span class=(format!("space-symbol color-{}",index%5)){(text(space,"name").chars().next().unwrap_or('S'))}}}
+        button class="space-button space-add" data-op="menu" data-value="new-space" aria-label="Create a Space" data-tip="New Space" disabled[s.private()] {(icon("plus"))}
     }}
 }
 fn rail_navigation(s: &Shell) -> Markup {
@@ -198,21 +199,29 @@ fn rail(s: &Shell, preview: bool) -> Markup {
     html! {aside class="workspace-rail" aria-label="Workspace" {
         div class="rail-top" {div class="traffic-clearance" data-window-drag="true"{}
             span class="rail-drag-fill" data-window-drag="true"{}
-            button class="icon-button" data-op="sidebar" aria-label="Hide sidebar"{(icon("sidebar"))}
-            button class="icon-button" data-op="menu" data-value="browser" aria-label="Browser menu"{(icon("more"))}
+            button class="icon-button" data-op="sidebar" aria-label="Hide sidebar" title="Hide sidebar (⌘B)"{(icon("sidebar"))}
+            button class="icon-button" data-op="menu" data-value="browser" aria-label="Browser menu" title="Browser menu"{(icon("more"))}
         }
         @if !bottom && !horizontal {(location(s))}
         @if !preview{(feedback(s))}
-        div class="space-heading"{strong{(if s.private(){"Private"}else{text(&s.snapshot,"spaceName")})}button class="icon-button" data-op="menu" data-value="space" aria-label="Space options"{(icon("more"))}}
+        div class="space-heading"{strong{(if s.private(){"Private"}else{text(&s.snapshot,"spaceName")})}button class="icon-button" data-op="menu" data-value="space" aria-label="Space options" title="Space options"{(icon("more"))}}
         @if horizontal {div class="horizontal-guide"{p{"Tabs live "(if text(&s.config()["layout"],"tabs")=="top"{"above your page."}else{"below your page."})}button class="new-tab" data-op="newTab"{(icon("plus"))"New tab"}button class="new-tab" data-op="screen" data-value="library" data-section="archive"{(icon("folder"))"Archived tabs"}}}
         @else {div class="tabs-scroll"{(tab_groups(s,preview))}}
         @if bottom && !horizontal {div class="rail-bottom-nav"{(location(s))(rail_navigation(s))}}
-        div class="rail-footer"{@for widget in array(&s.snapshot["startWidgets"]){details class="workspace-widget"{summary{(text(widget,"widgetTitle"))}p{(text(widget,"widgetBody"))}}}(spaces(s))(module_tools(s))nav class="rail-destinations" aria-label="Browser tools"{button class=(if s.screen=="library"{"selected"}else{""}) data-op="screen" data-value="library" data-section="bookmarks"{(icon("bookmark"))"Library"}button class=(if s.screen=="modules"{"selected"}else{""}) data-op="screen" data-value="modules"{(icon("grid"))"Modules"}}
-            div class="rail-tools"{button class="icon-button" data-op="screen" data-value="settings" aria-label="Settings"{(icon("settings"))}button class="icon-button" data-op="screen" data-value="extensions" title="Extensions" aria-label="Extensions"{(icon("plug"))}span class="spacer"{}button class="icon-button" data-op="screen" data-value="editor" aria-label="Customize appearance"{(icon("appearance"))}button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){(icon("user"))}}
+        div class="rail-footer"{@for widget in array(&s.snapshot["startWidgets"]){details class="workspace-widget"{summary{(text(widget,"widgetTitle"))}p{(text(widget,"widgetBody"))}}}(spaces(s))
+            nav class="rail-destinations" aria-label="Browser tools"{
+                (destination(s,"library","Library","bookmark"))(destination(s,"modules","Modules","grid"))(destination(s,"extensions","Extensions","plug"))(destination(s,"editor","Customize","appearance"))(destination(s,"settings","Settings","settings"))
+                span class="spacer"{}
+                button class="avatar" data-op="menu" data-value="profiles" data-tip=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){span{(text(&s.snapshot,"profileName").chars().next().unwrap_or('P'))}}
+            }
         }
     }}
 }
 
+fn destination(s: &Shell, screen: &str, label: &str, glyph: &str) -> Markup {
+    let selected = s.screen == screen;
+    html! {button class=(if selected{"icon-button selected"}else{"icon-button"}) data-op="screen" data-value=(screen) data-section=[(screen=="library").then_some("bookmarks")] data-tip=(label) aria-label=(label) aria-current=[selected.then_some("page")]{(icon(glyph))}}
+}
 fn host(url: &str) -> String {
     if url.is_empty() {
         "Search or enter URL".into()
@@ -227,13 +236,45 @@ fn host(url: &str) -> String {
     }
 }
 fn vacant(s: &Shell) -> Markup {
-    html! {section class="vacant-canvas" aria-label="Workspace" {
-        button class="vacant-open" data-op="newTab" {(icon("search"))span{"Where to?"}kbd{"⌘T"}}
-        @if s.private(){p{"Private browsing · downloads stay on your Mac"}}
-    }}
+    let active = text(s.active(), "id");
+    let open: Vec<&Value> = s
+        .tabs()
+        .iter()
+        .filter(|t| text(t, "id") != active && !text(t, "url").is_empty())
+        .take(8)
+        .collect();
+    let guide = !s.private() && !flag(&s.snapshot["preferences"], "startGuideHidden");
+    html! {section class="start-page" aria-label="New tab" {div class="start-inner"{
+        @if s.private(){p class="start-private"{(icon("shield"))"Private window. History, cookies and site data from this window are erased when you close it."}}
+        button class="start-search" data-op="newTab" {(icon("search"))span{"Search or enter an address"}kbd{"⌘T"}}
+        @if !open.is_empty(){section class="start-section" aria-labelledby="start-open"{h2 id="start-open"{"Open in "(if s.private(){"this window"}else{text(&s.snapshot,"spaceName")})}
+            div class="start-tiles"{@for t in &open {button class="start-tile" data-op="selectTab" data-id=(text(t,"id")) title=(text(t,"url")){(site(t))span{strong{(text(t,"title"))}small{(host(text(t,"url")))}}}}}}}
+        @if guide {(start_guide(s))}
+    }}}
+}
+fn start_guide(s: &Shell) -> Markup {
+    let profile = &s.snapshot["session"]["profileID"];
+    let spaces = array(&s.snapshot["spaces"]).iter().filter(|v| v["profileID"] == *profile).count();
+    let steps: [(&str, &str, bool, Markup); 4] = [
+        ("Import your bookmarks", "Use an HTML export from Chrome, Safari, Firefox or Arc.",
+            !array(&s.snapshot["bookmarks"]).is_empty() || flag(&s.snapshot, "imported"),
+            html! {button class="button" data-op="importBookmarks"{"Import…"}}),
+        ("Pin the sites you use every day", "Right-click a tab and choose Pin tab, or drag it above your other tabs.",
+            s.tabs().iter().any(|t| flag(t, "pinned")), html! {}),
+        ("Make a Space for a project", "Spaces keep separate sets of tabs. Switch between them at the bottom of the sidebar.",
+            spaces > 1, html! {button class="button" data-op="menu" data-value="new-space"{"New Space"}}),
+        ("Set Neutrino as your default browser", "Links you open in other apps will open here.",
+            flag(&s.snapshot, "isDefaultBrowser"), html! {button class="button" data-op="defaultBrowser"{"Set as default"}}),
+    ];
+    let done = steps.iter().filter(|step| step.2).count();
+    html! {@if done < steps.len() {section class="start-guide" aria-labelledby="start-guide-title"{
+        header{h2 id="start-guide-title"{"Get set up"}span class="guide-progress" role="progressbar" aria-valuemin="0" aria-valuemax=(steps.len()) aria-valuenow=(done) aria-label="Setup progress"{span style=(format!("--progress:{}",done as f64/steps.len() as f64)){}}small{(done)" of "(steps.len())}span class="spacer"{}button class="button quiet" data-op="preference" data-key="startGuideHidden" data-value="true" data-type="bool"{"Hide"}}
+        ol{@for (title,detail,complete,action) in steps {li class=(if complete{"done"}else{""}){span class="guide-check" aria-hidden="true"{@if complete{(icon("check"))}}div{strong{(title)}@if !complete{small{(detail)}}}@if !complete{(action)}}}}
+        div class="guide-keys" aria-label="Keyboard shortcuts"{span{kbd{"⌘T"}"New tab"}span{kbd{"⌘K"}"Switch tabs"}span{kbd{"⌘L"}"Edit address"}span{kbd{"⌘D"}"Bookmark"}span{kbd{"⌘B"}"Sidebar"}}
+    }}}
 }
 fn module_tools(s: &Shell) -> Markup {
-    html! {div class="module-tools" aria-label="Enabled tools" {
+    html! {div class="module-tools" role="group" aria-label="Page tools" {
         @for m in array(&s.snapshot["modules"]).iter().filter(|m|flag(m,"enabled")) {
             @match text(m,"capability") {
                 "notes" => {button class="icon-button" data-op="panel" data-value="notes" title="Notes beside this page" aria-label="Notes beside this page"{(icon("edit"))}}
@@ -283,7 +324,12 @@ fn browser(s: &Shell, preview: bool) -> Markup {
         .as_f64()
         .unwrap_or(240.)
         .clamp(200., 340.);
-    html! {div class=(format!("browser-shell placement-{} {} {} {}",placement,if panel{"with-panel"}else{""},if s.sidebar_hidden{"rail-hidden"}else{""},if preview{"editing-preview"}else{""})) style=(format!("--rail-width:{width}px;--panel-width:{}px",s.config()["layout"]["sidebarWidth"].as_f64().unwrap_or(300.))) data-navigation=(text(&s.config()["layout"],"navigation")) data-panel=(text(&s.config()["layout"],"sidebar")) {
+    let tone = array(&s.snapshot["spaces"])
+        .iter()
+        .filter(|v| v["profileID"] == s.snapshot["session"]["profileID"])
+        .position(|v| v["id"] == s.snapshot["session"]["spaceID"])
+        .map(|index| index % 5);
+    html! {div class=(format!("browser-shell placement-{} {} {} {}",placement,if panel{"with-panel"}else{""},if s.sidebar_hidden{"rail-hidden"}else{""},if preview{"editing-preview"}else{""})) style=(format!("--rail-width:{width}px;--panel-width:{}px",s.config()["layout"]["sidebarWidth"].as_f64().unwrap_or(300.))) data-navigation=(text(&s.config()["layout"],"navigation")) data-panel=(text(&s.config()["layout"],"sidebar")) data-tone=[(!s.private()).then_some(tone).flatten()] {
         div class="window-grip" data-window-drag="true"{}
         (rail(s,preview))
 
@@ -292,9 +338,9 @@ fn browser(s: &Shell, preview: bool) -> Markup {
             div class="toolbar-controls"{(rail_navigation(s))}
             @if s.sidebar_hidden || horizontal || panel { (button(if panel{"Return to tabs"}else if horizontal && s.sidebar_hidden{"Hide sidebar"}else{"Show sidebar"},if panel{"reveal-workspace"}else{"sidebar"},"sidebar")) }
             span class="toolbar-drag" data-window-drag="true"{}
-            @if horizontal {(location(s))}@else {button class="page-identity" data-op="focus-address" title=(text(s.active(),"url")){(icon(if text(s.active(),"url").starts_with("https:"){"lock"}else{"globe"}))span{(if text(s.active(),"url").is_empty(){"Workspace".into()}else{host(text(s.active(),"url"))})}}}
+            @if horizontal {(location(s))}@else {button class="page-identity" data-op="focus-address" title=(text(s.active(),"url")){(icon(if text(s.active(),"url").starts_with("https:"){"lock"}else{"globe"}))span{(if text(s.active(),"url").is_empty(){"New Tab".into()}else{host(text(s.active(),"url"))})}}}
             span class="toolbar-drag" data-window-drag="true"{}
-            div class="page-actions"{@if flag(&s.snapshot,"focusMode") || array(&s.snapshot["modules"]).iter().any(|m|flag(m,"enabled") && text(m,"capability")=="focusMode"){button class=(if flag(&s.snapshot,"focusMode"){"button focus-exit"}else{"icon-button"}) data-op="native" data-action="toggleFocus" aria-label=(if flag(&s.snapshot,"focusMode"){"Exit Focus mode"}else{"Enter Focus mode"}) title="Focus mode"{(icon("moon"))@if flag(&s.snapshot,"focusMode"){"Exit Focus"}}}button class="icon-button" data-op="bookmark" title="Save bookmark" aria-label="Save bookmark" disabled[s.private() || text(s.active(),"url").is_empty()]{(icon("bookmark"))}button class="icon-button" data-op="menu" data-value="split-choose" title="Split view" aria-label="Split view" disabled[text(s.active(),"url").is_empty()]{(icon("split"))}button class="icon-button" data-op="screen" data-value="assistant" title="Page assistant" aria-label="Page assistant" disabled[text(s.active(),"url").is_empty()]{(icon("spark"))}}
+            div class="page-actions"{(module_tools(s))@if flag(&s.snapshot,"focusMode") || array(&s.snapshot["modules"]).iter().any(|m|flag(m,"enabled") && text(m,"capability")=="focusMode"){button class=(if flag(&s.snapshot,"focusMode"){"button focus-exit"}else{"icon-button"}) data-op="native" data-action="toggleFocus" aria-label=(if flag(&s.snapshot,"focusMode"){"Exit Focus mode"}else{"Enter Focus mode"}) title="Focus mode: hide the sidebar and toolbar"{(icon("focus"))@if flag(&s.snapshot,"focusMode"){"Exit Focus"}}}button class="icon-button" data-op="bookmark" title="Save bookmark" aria-label="Save bookmark" disabled[s.private() || text(s.active(),"url").is_empty()]{(icon("bookmark"))}button class="icon-button" data-op="menu" data-value="split-choose" title="Split view" aria-label="Split view" disabled[text(s.active(),"url").is_empty()]{(icon("split"))}button class="icon-button" data-op="screen" data-value="assistant" title="Page assistant" aria-label="Page assistant" disabled[text(s.active(),"url").is_empty()]{(icon("spark"))}}
         }
         @if s.sidebar_hidden && !preview {(feedback(s))}
         @if horizontal && placement=="top"{(horizontal_tabs(s,preview))}
@@ -384,7 +430,7 @@ fn setup(s: &Shell) -> Markup {
     html! {main class=(format!("onboarding step-{}",s.step)) {
         div class="setup-drag" data-window-drag="true"{}
         aside class="setup-scene" aria-hidden="true" {div class="scene-caption"{span{(["Your browser","Profiles & Spaces","Bookmarks","Appearance","Privacy & modules","Optional AI","All set"][s.step])}}
-            div class="mini-browser" data-layout=(text(&s.setup,"layout")){div class="mini-rail"{div class="mini-dots"{i{}i{}i{}}div class="mini-address"{(icon("search"))"Search or enter URL"}strong{(text(&s.setup,"space"))}div class="mini-pin"{(icon("bookmark"))"GitHub"}div class="mini-folder"{(icon("folder"))"Projects"}div class="mini-tab"{(icon("globe"))"Proton"}div class="mini-tab selected"{(icon("globe"))"Project notes"}div class="mini-plus"{(icon("search"))"Search or browse"}}div class="mini-page"{div class="mini-document"{span{"workspace / research"}h2{"Project notes"}p{"References, questions, and decisions."}div class="mini-document-row"{(icon("book"))"Reading list"}div class="mini-document-row"{(icon("edit"))"Project notes"}div class="mini-document-row"{(icon("bookmark"))"Saved references"}}}}
+            div class="mini-browser" data-layout=(text(&s.setup,"layout")){div class="mini-rail"{div class="mini-dots"{i{}i{}i{}}div class="mini-address"{(icon("search"))"Search or enter URL"}strong{(text(&s.setup,"space"))}div class="mini-pin"{i class="site-icon site-color-0"{"G"}"GitHub"}div class="mini-folder"{(icon("folder"))"Projects"}div class="mini-tab"{i class="site-icon site-color-3"{"M"}"Mail"}div class="mini-tab selected"{i class="site-icon blank-icon"{(icon("plus"))}"New Tab"}div class="mini-plus"{(icon("plus"))"New tab"}}div class="mini-page"{div class="mini-start"{div class="mini-search"{(icon("search"))"Search or enter an address"}div class="mini-tiles"{@for (label,tone) in [("GitHub",0),("Calendar",1),("Docs",2),("Mail",3)]{span class="mini-tile"{i class=(format!("site-icon site-color-{tone}")){(label.chars().next().unwrap_or('N'))}(label)}}}}}}
         }
         section class="setup-content"{header class="setup-header"{span class="wordmark"{img class="brand-icon" src="neutrino.svg" alt="";"neutrino"}}
             div class="setup-copy"{h1 id="setup-heading" tabindex="-1"{(titles[s.step])}p{(descriptions[s.step])}}
@@ -392,10 +438,10 @@ fn setup(s: &Shell) -> Markup {
                 @match s.step {
                     0=>{(preset_picker(s,true))}
                     1=>{(field("Profile name","profile",text(&s.setup,"profile"),s.invalid_field=="profile"))(field("Your first Space","space",text(&s.setup,"space"),s.invalid_field=="space"))}
-                    2=>{button class="import-card" data-op="importBookmarks"{span class="import-symbol"{(icon("download"))}strong{(if flag(&s.snapshot,"imported"){"Bookmarks are in"}else{"Choose bookmarks file"})}span{"HTML export · duplicates skipped"}(icon("arrow"))}p class="field-help"{"Import is optional. Passwords and website sign-ins aren’t included in a bookmarks file."}}
+                    2=>{button class="import-card" data-op="importBookmarks"{span class="import-symbol"{(icon("download"))}span class="import-text"{strong{(if flag(&s.snapshot,"imported"){"Bookmarks imported"}else{"Choose a bookmarks file…"})}span{"In your old browser, export bookmarks as HTML, then choose that file here."}}(icon(if flag(&s.snapshot,"imported"){"check"}else{"arrow"}))}p class="field-help"{"Passwords and website sign-ins aren’t part of a bookmarks file."}}
                     3=>{label class="control-label"{"Color"}(swatches(s,true))label class="control-label"{"Appearance"}(segments("setup-field","appearance",text(&s.setup,"appearance"),&[("system","System"),("light","Light"),("dark","Dark")]))label class="control-label"{"Tabs"}(segments("setup-field","layout",text(&s.setup,"layout"),&[("leading","In the sidebar"),("top","Along the top")]))}
-                    4=>{label class="control-label"{"Search engine"}(segments("setup-field","search",text(&s.setup,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))div class="settings-group"{(toggle("Block ads & trackers","Local blocking rules.","blockTrackers",flag(&s.setup,"blockTrackers"),true))(toggle("Block unwanted popups","","blockPopups",flag(&s.setup,"blockPopups"),true))(toggle("Restore tabs on launch","Private tabs stay temporary.","restoreSession",flag(&s.setup,"restoreSession"),true))}details class="setup-modules"{summary{(icon("grid"))"Built-in modules"(icon("down"))}p{"Add or replace tools from Modules in the sidebar."}@for m in array(&s.snapshot["modules"]).iter().filter(|m|flag(m,"installed") && ["notes","reader","focusMode","resourceMonitor"].contains(&text(m,"capability"))).take(5){button class="setup-module-row" data-op="native" data-action="toggleModule" data-id=(text(m,"id")) role="switch" aria-checked=(flag(m,"enabled").to_string()){(icon(module_glyph(text(m,"id"))))span{(text(m,"name"))}span class="module-status"{(if flag(m,"enabled"){"On"}else{"Off"})}}}}}
-                    5=>{details class="ai-disclosure"{summary{(icon("spark"))"Set up an AI provider"(icon("down"))}(ai_form(s))}div class="ai-off"{(icon("shield"))p{"AI is off until you connect a provider. You can do this later in Settings."}}}
+                    4=>{label class="control-label"{"Search engine"}(segments("setup-field","search",text(&s.setup,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))div class="settings-group"{(toggle("Block ads & trackers","","blockTrackers",flag(&s.setup,"blockTrackers"),true))(toggle("Block popups","Popups you open with a click still appear.","blockPopups",flag(&s.setup,"blockPopups"),true))(toggle("Reopen your tabs at launch","","restoreSession",flag(&s.setup,"restoreSession"),true))}details class="setup-modules"{summary{(icon("grid"))"Built-in modules"(icon("down"))}p{"You can change these later in Modules."}@for m in array(&s.snapshot["modules"]).iter().filter(|m|flag(m,"installed") && ["notes","reader","focusMode","resourceMonitor"].contains(&text(m,"capability"))).take(5){button class="setup-module-row" data-op="native" data-action="toggleModule" data-id=(text(m,"id")) role="switch" aria-checked=(flag(m,"enabled").to_string()){(icon(module_glyph(text(m,"id"))))span{(text(m,"name"))}span class="module-status"{(if flag(m,"enabled"){"On"}else{"Off"})}}}}}
+                    5=>{details class="ai-disclosure"{summary{(icon("spark"))"Set up an AI provider"(icon("down"))}(ai_form(s))}p class="field-help"{"Skip this if you don’t plan to use AI. You can add a provider later in Settings → AI providers."}}
                     _=>{div class="setup-review"{div{span{"Your Space"}strong{(text(&s.setup,"space"))}}div{span{"Profile"}strong{(text(&s.setup,"profile"))}}div{span{"Search"}strong{(match text(&s.setup,"search"){"google"=>"Google","bing"=>"Bing",_=>"DuckDuckGo"})}}div{span{"Privacy"}strong{(if flag(&s.setup,"blockTrackers"){"Blocking on"}else{"Blocking off"})}}div{span{"Built-in tools"}strong{(array(&s.snapshot["modules"]).iter().filter(|m|flag(m,"enabled") && ["notes","reader","focusMode","resourceMonitor"].contains(&text(m,"capability"))).map(|m|text(m,"name")).collect::<Vec<_>>().join(", "))}}}button class="default-browser" data-op="defaultBrowser"{(icon("globe"))span{"Make Neutrino your default"}(icon("external"))}p class="field-help"{(text(&s.snapshot,"defaultStatus"))}}
                 }
             }
@@ -406,7 +452,8 @@ fn setup(s: &Shell) -> Markup {
     }}
 }
 fn segments(op: &str, key: &str, selected: &str, items: &[(&str, &str)]) -> Markup {
-    html! {div class="segments" role="group"{@for (value,label) in items{button class=(if *value==selected{"selected"}else{""}) data-op=(op) data-key=(key) data-value=(value) aria-pressed=((*value==selected).to_string()){(label)}}}}
+    let index = items.iter().position(|(value, _)| *value == selected);
+    html! {div class="segments" role="group" style=(format!("--count:{};--index:{}",items.len(),index.unwrap_or(0))) data-selected=(index.is_some().to_string()){@for (value,label) in items{button class=(if *value==selected{"selected"}else{""}) data-op=(op) data-key=[(!key.is_empty()).then_some(key)] data-value=(value) aria-pressed=((*value==selected).to_string()){(label)}}}}
 }
 fn swatches(s: &Shell, setup: bool) -> Markup {
     let current = if setup {
@@ -504,7 +551,7 @@ fn utility(s: &Shell) -> Markup {
         "extensions" => extensions(s),
         "modules" => modules(s),
         "recovery" => {
-            html! {div class="settings-content"{h2{"A way back"}p class="section-description"{"Recover the interface while keeping your browsing data."}
+            html! {div class="settings-content"{h2{"Recovery"}p class="section-description"{"Fix a broken layout or module. Your tabs, bookmarks and passwords are kept."}
                 div class="list-row"{div{strong{"Restore appearance"}small{"Reset the browser default and this Space’s layout."}}(action("Restore layout","restoreLayout",false))}
                 div class="list-row"{div{strong{"Reset optional modules"}small{"Keep a local backup and stop optional features."}}button class="button" data-op="menu" data-value="reset-modules"{"Reset modules…"}}
                 div class="list-row"{div{strong{"Save your data"}small{"Retry a failed save."}}(action("Retry save","retrySave",false))}
@@ -524,10 +571,10 @@ fn resources(s: &Shell) -> Markup {
 }
 fn settings(s: &Shell) -> Markup {
     let prefs = &s.snapshot["preferences"];
-    html! {div class="settings-layout"{nav class="settings-nav" aria-label="Settings sections"{button data-op="screen" data-value="modules"{(icon("grid"))"Modules"}@for (key,label,glyph) in [("general","General","settings"),("profiles","Profiles","user"),("privacy","Privacy","shield"),("appearance","Appearance","edit"),("ai","AI providers","spark"),("passwords","Passwords","key"),("updates","Updates & engines","download")] {button class=(if s.section==key{"selected"}else{""}) data-op="section" data-value=(key){(icon(glyph))(label)}}}
+    html! {div class="settings-layout"{nav class="settings-nav" aria-label="Settings sections"{@for (key,label,glyph) in [("general","General","settings"),("profiles","Profiles","user"),("privacy","Privacy","shield"),("appearance","Appearance","edit"),("ai","AI providers","spark"),("passwords","Passwords","key"),("updates","Updates & engines","download")] {button class=(if s.section==key || key=="general" && !["profiles","privacy","appearance","ai","passwords","updates","engines"].contains(&s.section.as_str()){"selected"}else{""}) data-op="section" data-value=(key) aria-current=[(s.section==key).then_some("page")]{(icon(glyph))(label)}}}
         div class="settings-content"{@match s.section.as_str(){
             "profiles"=>{h2{"Your Profiles"}p class="section-description"{"Separate website accounts, cookies and extensions. Spaces can share a Profile."}@for p in array(&s.snapshot["profiles"]){div class="list-row"{(icon("user"))div{strong{(text(p,"name"))}small{(if p["id"]==s.snapshot["session"]["profileID"]{"Current Profile"}else{"Separate browsing data"})}}button class="button" data-op="native" data-action="switchProfile" data-id=(text(p,"id")) disabled[s.private()]{"Switch"}}}button class="button" data-op="menu" data-value="new-profile"{"Add Profile"}}
-            "privacy"=>{h2{"Privacy"}p class="section-description"{"Browser data stays on this Mac. Websites still make their own network requests."}(toggle("Block known ads & trackers","Bundled rules run locally.","blockTrackers",prefs["blockTrackers"].as_bool().unwrap_or(true),false))(toggle("Block unwanted popups","Requested windows can still open.","blockPopups",flag(prefs,"blockPopups"),false))div class="settings-group"{div class="list-row"{div{strong{"Browsing history"}small{"Clear saved visits for this Profile."}}button class="button" data-op="menu" data-value="clear-history"{"Clear…"}}}p class="field-help"{"Private windows do not save tabs or history. Downloads remain on disk. Private browsing does not hide activity from websites or your network."}}
+            "privacy"=>{h2{"Privacy"}(toggle("Block ads & trackers","Applies to every Profile.","blockTrackers",prefs["blockTrackers"].as_bool().unwrap_or(true),false))(toggle("Block popups","Popups you open with a click still appear.","blockPopups",flag(prefs,"blockPopups"),false))div class="settings-group"{div class="list-row"{div{strong{"Browsing history"}small{"Clear saved visits for this Profile."}}button class="button" data-op="menu" data-value="clear-history"{"Clear…"}}}p class="field-help"{"Private windows do not save tabs or history. Downloads remain on disk. Private browsing does not hide activity from websites or your network."}}
             "appearance"=>{h2{"Appearance"}p class="section-description"{"Arrange tabs and panels, choose colors, and set up each Space."}button class="appearance-preview" data-op="screen" data-value="editor"{(icon("edit"))span{"Open the appearance editor"}(icon("arrow"))}}
             "ai"=>{h2{"AI providers"}p class="section-description"{"Bring a key or use a local endpoint. Secrets are saved in macOS Keychain."}(ai_form(s))}
             "passwords"=>{h2{"Passwords"}p class="section-description"{"Saved locally in macOS Keychain, separate for each Profile."}
@@ -554,7 +601,7 @@ fn settings(s: &Shell) -> Markup {
             div class="list-row"{(icon("globe"))div{strong{"Blink / Chromium"}small{(if flag(&s.snapshot,"blinkAvailable"){format!("Chromium {} · updates with Neutrino",text(&s.snapshot,"engineVersion"))}else{"Not present in this development build".into()})}}}
             div class="list-row"{(icon("globe"))div{strong{"WebKit"}small{"Provided by macOS"}}}}
 
-            _=>{h2{"Browsing"}label class="control-label"{"Default search engine"}(segments("preference","search",text(prefs,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))(toggle("Pick up where you left off","Restore regular tabs when you reopen Neutrino.","restoreSession",flag(prefs,"restoreSession"),false))div class="list-row"{div{strong{"Default browser"}small{"Open links in Neutrino."}}(action("Set as default","defaultBrowser",false))}div class="list-row"{div{strong{"Your bookmarks"}small{"Bring over an HTML bookmarks export."}}(action("Import","importBookmarks",false))}div class="list-row"{div{strong{"Uninstall Neutrino"}small{"Erase this app and its browser data."}}button class="button danger" data-op="uninstall"{"Uninstall…"}}}
+            _=>{h2{"Browsing"}label class="control-label"{"Default search engine"}(segments("preference","search",text(prefs,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))(toggle("Reopen your tabs at launch","Private windows are never restored.","restoreSession",flag(prefs,"restoreSession"),false))div class="list-row"{div{strong{"Default browser"}small{"Open links in Neutrino."}}(action("Set as default","defaultBrowser",false))}div class="list-row"{div{strong{"Import bookmarks"}small{"Choose an HTML export from another browser."}}(action("Import…","importBookmarks",false))}div class="list-row"{div{strong{"Uninstall Neutrino"}small{"Erase this app and its browser data."}}button class="button danger" data-op="uninstall"{"Uninstall…"}}}
         }}
     }}
 }
@@ -580,15 +627,15 @@ fn library(s: &Shell) -> Markup {
         }
         @match section {
             "history" => {
-                @if array(&s.snapshot["history"]).is_empty(){(empty("A fresh start","Pages you visit in regular windows appear here.","history"))}
+                @if array(&s.snapshot["history"]).is_empty(){(empty("No history yet","Pages you visit appear here. Private windows aren’t recorded.","history"))}
                 @for h in array(&s.snapshot["history"]) {button class="history-row" data-op="navigate" data-value=(text(h,"url")){(site(h))span{strong{(text(h,"title"))}small{(host(text(h,"url")))}}(icon("arrow"))}}
             }
             "downloads" => {
-                @if array(&s.snapshot["downloads"]).is_empty(){(empty("Nothing downloading","Files you download will appear here.","download"))}
+                @if array(&s.snapshot["downloads"]).is_empty(){(empty("No downloads","Files you download appear here.","download"))}
                 @for d in array(&s.snapshot["downloads"]) {div class="list-row"{(icon("download"))div{strong{(text(d,"name"))}small{(text(d,"status"))}}button class="button" data-op="native" data-action=(if flag(d,"complete"){"downloadReveal"}else{"downloadCancel"}) data-id=(text(d,"id")){(if flag(d,"complete"){"Show in Finder"}else{"Cancel"})}}}
             }
             "archive" => {
-                @if array(&s.snapshot["archived"]).is_empty(){(empty("No archived tabs","Recoverable archived tabs for this Space appear here.","folder"))}
+                @if array(&s.snapshot["archived"]).is_empty(){(empty("No archived tabs","Tabs you close in this Space can be restored from here.","folder"))}
                 @for t in array(&s.snapshot["archived"]) {div class="list-row"{(site(t))div{strong{(text(t,"title"))}small{(host(text(t,"url")))}}button class="button" data-op="native" data-action="restoreArchived" data-id=(text(t,"id")){"Restore"}}}
             }
             "notes" => {
@@ -608,8 +655,8 @@ fn library(s: &Shell) -> Markup {
                 }
             }
             _ => {
-                div class="library-actions"{(action("Import","importBookmarks",false))(action("Export","exportBookmarks",false))}
-                @if array(&s.snapshot["bookmarks"]).is_empty(){(empty("Your favorite places","Save a page with ⌘D, or import bookmarks from another browser.","bookmark"))}
+                @if array(&s.snapshot["bookmarks"]).is_empty(){div class="empty-state"{(icon("bookmark"))h3{"No bookmarks yet"}p{"Press ⌘D on any page to bookmark it, or bring bookmarks over from another browser."}(action("Import bookmarks…","importBookmarks",true))}}
+                @else {div class="library-actions"{span class="library-count"{(s.snapshot["libraryCount"].as_u64().unwrap_or(array(&s.snapshot["bookmarks"]).len() as u64))" bookmarks"}span class="spacer"{}(action("Import…","importBookmarks",false))(action("Export…","exportBookmarks",false))}}
                 @for b in array(&s.snapshot["bookmarks"]) {div class="list-row"{
                     button class="bookmark-link" data-op="navigate" data-value=(text(b,"url")){(site(b))span{strong{(text(b,"title"))}small{(host(text(b,"url")))}}}
                     button class="icon-button" data-op="native" data-action="removeBookmark" data-id=(text(b,"id")) aria-label=(format!("Remove {}",text(b,"title"))){(icon("close"))}
@@ -644,7 +691,7 @@ fn ai_form(s: &Shell) -> Markup {
 }
 
 fn assistant(s: &Shell) -> Markup {
-    html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect your intelligence","Use an API key or a local model. You choose what to share.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Choose a provider"}} @else {p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider."}div class="assistant-response"{(text(&s.snapshot,"assistantResponse"))}form data-form="assistant"{label class="field"{span{"Your question"}textarea name="prompt" placeholder="What would you like to know?" required{}}button class="button primary" type="submit" disabled[flag(&s.snapshot,"assistantBusy")]{(if flag(&s.snapshot,"assistantBusy"){"Thinking…"}else{"Share page and ask"})}}}}}
+    html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect an AI provider","Ask questions about the page you’re reading. You need an API key, an OpenAI account, or a local model.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Set up a provider"}} @else {p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider."}div class="assistant-response"{(text(&s.snapshot,"assistantResponse"))}form data-form="assistant"{label class="field"{span{"Your question"}textarea name="prompt" placeholder="What would you like to know?" required{}}button class="button primary" type="submit" disabled[flag(&s.snapshot,"assistantBusy")]{(if flag(&s.snapshot,"assistantBusy"){"Thinking…"}else{"Share page and ask"})}}}}}
 }
 fn module_glyph(id: &str) -> &str {
     if id.contains("theme") {
@@ -660,19 +707,18 @@ fn module_glyph(id: &str) -> &str {
     } else if id.contains("screenshot") {
         "camera"
     } else if id.contains("focus") {
-        "shield"
+        "focus"
     } else {
         "grid"
     }
 }
 fn module_description(module: &Value) -> &str {
     match text(module, "id") {
-        "org.neutrino.reader" => "Read articles in a quiet, focused view.",
-        "org.neutrino.focus" => {
-            "Give the page more room. Press Escape to bring your controls back."
-        }
+        "org.neutrino.notes" => "Write notes and save quotes beside the page you’re reading.",
+        "org.neutrino.reader" => "Show the current article as plain, readable text.",
+        "org.neutrino.focus" => "Hide the sidebar and toolbar. Press Esc to bring them back.",
         "org.neutrino.resource-monitor" => "See CPU and memory use while you browse.",
-        "org.neutrino.memory-monitor" => "See how your Mac’s memory is being used.",
+        "org.neutrino.memory-monitor" => "See how your Mac’s memory is being used, in detail.",
         _ => text(module, "description"),
     }
 }
@@ -694,15 +740,14 @@ fn modules(s: &Shell) -> Markup {
         })
         .collect();
     html! {div class="modules-content"{
-        div class="modules-toolbar"{div class="module-filters" role="group" aria-label="Module list"{@for (key,label) in [("installed","Installed"),("available","Available"),("all","All")]{button class=(if s.module_filter==key{"selected"}else{""}) data-op="module-filter" data-value=(key) aria-pressed=((s.module_filter==key).to_string()){(label)}}}span class="spacer"{}button class="button" data-op="importModule"{(icon("plus"))"Import"}}
-        label class="module-search"{(icon("search"))input id="module-search" data-module-search="true" type="search" value=(s.module_query.as_str()) placeholder="Search modules" aria-label="Search modules" autocomplete="off";}
+        div class="modules-toolbar"{(segments("module-filter","",s.module_filter.as_str(),&[("installed","Installed"),("available","Available"),("all","All")]))label class="module-search"{(icon("search"))input id="module-search" data-module-search="true" type="search" value=(s.module_query.as_str()) placeholder="Search modules" aria-label="Search modules" autocomplete="off";}span class="spacer"{}button class="button" data-op="importModule" title="Install a module package from a file"{(icon("plus"))"Add from file…"}}
         @if all.is_empty(){(empty("Modules could not load","Open Recovery to repair module storage, or import a local package.","grid"))(action("Open Recovery","module-recovery",false))}
         @else if shown.is_empty(){(empty("No matching modules","Try another search or view the available modules.","search"))}
         @else {div class="module-grid"{@for m in shown{article class="module-card"{
-            button class="module-open" data-op="module-select" data-value=(text(m,"id")){span class="module-icon"{(icon(module_glyph(text(m,"id"))))}div{h2{(text(m,"name"))}p{(module_description(m))}}(icon("forward"))}
+            button class="module-open" data-op="module-select" data-value=(text(m,"id")) aria-label=(format!("{} details",text(m,"name"))){span class="module-icon"{(icon(module_glyph(text(m,"id"))))}div{h2{(text(m,"name"))}p{(module_description(m))}}}
             div class="module-card-footer"{span class=(if flag(m,"enabled"){"module-status active"}else{"module-status"}){(if flag(m,"enabled"){"Active"}else if flag(m,"installed"){"Disabled"}else{"Available"})}span class="spacer"{}button class="button quiet" data-op="native" data-action=(if flag(m,"installed"){"toggleModule"}else{"installModule"}) data-id=(text(m,"id")){(if !flag(m,"installed"){"Install"}else if flag(m,"enabled"){"Disable"}else if flag(m,"replacesProvider"){"Replace provider"}else{"Enable"})}}
         }}}}
-        footer class="modules-footer"{span{(all.iter().filter(|m|flag(m,"enabled")).count())" active · "(all.len())" available locally"}button class="button quiet" data-op="native" data-action="importCatalog"{"Import catalog"}}
+        footer class="modules-footer"{span{(all.iter().filter(|m|flag(m,"enabled")).count())" of "(all.len())" modules on"}button class="button quiet" data-op="native" data-action="importCatalog" title="Add a list of modules published by someone else"{"Add a catalog…"}}
     }}
 }
 fn module_details(s: &Shell, m: &Value) -> Markup {
@@ -718,7 +763,7 @@ fn module_details(s: &Shell, m: &Value) -> Markup {
         }
         @if flag(m,"enabled"){div class="module-use"{@match text(m,"capability"){
             "resourceMonitor"=>{button class="button primary" data-op="screen" data-value="resources"{(icon("activity"))"Open monitor"}}
-            "focusMode"=>{button class="button primary" data-op="native" data-action="toggleFocus"{(icon("moon"))(if flag(&s.snapshot,"focusMode"){"Exit Focus"}else{"Enter Focus"})}}
+            "focusMode"=>{button class="button primary" data-op="native" data-action="toggleFocus"{(icon("focus"))(if flag(&s.snapshot,"focusMode"){"Exit Focus"}else{"Enter Focus"})}}
             "notes"=>{button class="button primary" data-op="open-panel" data-value="notes"{(icon("edit"))"Open beside page"}}
             "reader"=>{button class="button primary" data-op="reader" disabled[text(s.active(),"url").is_empty()]{(icon("book"))"Read current page"}}
             "screenshot"=>{button class="button primary" data-op="capture" disabled[text(s.active(),"url").is_empty()]{(icon("camera"))"Capture current page"}}
@@ -755,9 +800,24 @@ fn extensions(s: &Shell) -> Markup {
 fn menu_item(label: &str, op: &str, value: &str, glyph: &str) -> Markup {
     html! {button class="menu-item" data-op=(op) data-value=(value){(icon(glyph))span{(label)}}}
 }
+fn menu_title(s: &Shell) -> &'static str {
+    match s.menu.as_str() {
+        "rename-space" => "Rename Space",
+        "new-space" => "New Space",
+        "new-folder" => "New folder",
+        "new-profile" => "New Profile",
+        "find" => "Find on page",
+        "clear-history" => "Clear history",
+        "discard-editor" => "Unsaved changes",
+        "reset-modules" => "Reset modules",
+        m if m.starts_with("folder:") => "Folder",
+        m if m.starts_with("delete-") => "Delete",
+        _ => "",
+    }
+}
 fn menu(s: &Shell) -> Markup {
     let id = s.menu.split_once(':').map(|x| x.1).unwrap_or("");
-    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.menu!="notes-scope"{header{strong{(if s.menu.starts_with("tab:"){"Tab options"}else if s.menu.starts_with("folder:"){"Folder options"}else{"Neutrino"})}(button("Close menu","escape","close"))}}
+    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.modal_menu() || ["rename-space","new-space","new-folder","new-profile","find"].contains(&s.menu.as_str()) || s.menu.starts_with("folder:"){header{strong{(menu_title(s))}(button("Close","escape","close"))}}
         @match s.menu.as_str(){
             "notes-scope"=>{@for (value,label) in [("space","This Space"),("all","All notes")]{button class="menu-item" data-op="native" data-action="notesScope" data-value=(value){(icon(if text(&s.snapshot,"notesScope")==value{"check"}else{"folder"}))span{(label)}}}}
             "browser"=>{@let mut actions=std::collections::HashSet::new();@for item in array(&s.snapshot["menuItems"]){@if actions.insert(text(item,"action")){@match text(item,"action"){
@@ -777,9 +837,10 @@ fn menu(s: &Shell) -> Markup {
             "discard-editor"=>{p{"You have unsaved appearance changes."}div class="button-row"{(action("Keep editing","escape",false))(action("Discard changes","editor-cancel",false))(action("Save changes","editor-save",true))}}
             "reset-modules"=>{p{"Stop optional modules? A local backup and your saved data are kept."}(action("Reset modules","resetModules",true))}
             _=>{@if s.menu.starts_with("delete-setup:"){p{"Delete this saved setup? Spaces using it will use your app appearance."}button class="button primary" data-op="editor-remove-named" data-id=(id){"Delete setup"}} @else if s.menu.starts_with("delete-credential:"){p{"Delete this saved login from this Profile’s Keychain?"}button class="button primary" data-op="native" data-action="credentialDelete" data-id=(id){"Delete login"}} @else if s.menu.starts_with("delete-note:"){p{"Delete this note? This cannot be undone."}button class="button primary" data-op="native" data-action="deleteNote" data-id=(id){"Delete note"}} @else if s.menu.starts_with("tab:"){ @if let Some(t)=s.tabs().iter().find(|t|text(t,"id")==id){
-                @for (op,label,glyph) in [("pinTab",if flag(t,"pinned"){"Unpin tab"}else{"Pin tab"},"pin"),("duplicateTab","Duplicate tab","plus"),("closeTab","Close tab","close")]{button class="menu-item" data-op=(op) data-id=(id){(icon(glyph))(label)}}
-                div class="menu-label"{"Move to"}button class="menu-item" data-op="move-tab" data-id=(id) data-group="today"{(icon("globe"))"Today"}@for f in array(&s.snapshot["folders"]){button class="menu-item" data-op="move-tab" data-id=(id) data-group="folder" data-folder-id=(text(f,"id")){(icon("folder"))(text(f,"name"))}}
-                @for space in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]&&v["id"]!=s.snapshot["session"]["spaceID"]){button class="menu-item" data-op="move-space" data-id=(id) data-space-id=(text(space,"id")){(icon("sidebar"))(text(space,"name"))}}
+                @for (op,label,glyph) in [("pinTab",if flag(t,"pinned"){"Unpin tab"}else{"Pin tab"},"pin"),("duplicateTab","Duplicate tab","copy"),("closeTab","Close tab","close")]{button class="menu-item" data-op=(op) data-id=(id){(icon(glyph))(label)}}
+                div class="menu-separator"{}div class="menu-label"{"Move to"}@if flag(t,"pinned") || !text(t,"folderID").is_empty(){button class="menu-item" data-op="move-tab" data-id=(id) data-group="today"{(icon("sidebar"))"Tabs"}}@for f in array(&s.snapshot["folders"]).iter().filter(|f|f["id"]!=t["folderID"]){button class="menu-item" data-op="move-tab" data-id=(id) data-group="folder" data-folder-id=(text(f,"id")){(icon("folder"))(text(f,"name"))}}
+                @for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate().filter(|(_,v)|v["id"]!=s.snapshot["session"]["spaceID"]){button class="menu-item" data-op="move-space" data-id=(id) data-space-id=(text(space,"id")){span class="space-symbol menu-space" data-tone=(index%5){(text(space,"name").chars().next().unwrap_or('S'))}span{(text(space,"name"))}}}
+                
             }} @else if s.menu.starts_with("folder:"){label class="field"{span{"Rename folder"}input data-name="true" value=(s.name.as_str()) placeholder="New name" maxlength="80"; }button class="button" data-op="renameFolder" data-id=(id) disabled[s.name.is_empty()]{"Rename"}button class="menu-item" data-op="deleteFolder" data-id=(id){(icon("close"))"Remove folder; keep its tabs"}}
             }
         }

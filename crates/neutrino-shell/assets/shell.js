@@ -232,6 +232,12 @@
       ]),
     );
     const hadPanel = !!root.querySelector(".workspace-panel");
+    const overlays = [...root.querySelectorAll(".palette-scrim, .menu-scrim")];
+    const spaceOrder = [...root.querySelectorAll(".spaces [data-space]")].map(
+      (el) => el.dataset.space,
+    );
+    const previousSpace = root.querySelector(".space-button.selected")?.dataset.space;
+    const previousSection = root.querySelector(".library-tabs .selected")?.dataset.value;
     const sameContext =
       currentContext === null || currentContext === result.context;
     if (result.context) currentContext = result.context;
@@ -263,6 +269,7 @@
       "";
     if (sameContext) reconcile(root, template.content, true);
     else root.replaceChildren(template.content.cloneNode(true));
+    for (const overlay of overlays) if (!overlay.isConnected) leave(overlay);
     currentOverlay = !!result.overlay;
     currentEditing = !!result.editing;
     if (result.commandRevision !== commandRevision) {
@@ -382,6 +389,42 @@
           );
       }
     }
+    const space = root.querySelector(".space-button.selected")?.dataset.space;
+    const tabs = root.querySelector(".tabs-scroll");
+    if (previousSpace && space && space !== previousSpace && tabs) {
+      const forward = spaceOrder.indexOf(space) > spaceOrder.indexOf(previousSpace);
+      animate(
+        tabs,
+        [
+          { opacity: 0, transform: `translateX(${forward ? 18 : -18}px)` },
+          { opacity: 1, transform: "translateX(0)" },
+        ],
+        240,
+      );
+    } else if (sameContext && motionAllowed()) {
+      for (const tab of root.querySelectorAll(".tab-row")) {
+        if (tabPositions.size && !tabPositions.has(tab.dataset.tab))
+          animate(
+            tab,
+            [
+              { opacity: 0, transform: "translateX(-6px)" },
+              { opacity: 1, transform: "translateX(0)" },
+            ],
+            200,
+          );
+      }
+    }
+    const section = root.querySelector(".library-tabs .selected")?.dataset.value;
+    if (previousSection && section && section !== previousSection)
+      for (const el of root.querySelectorAll(".library-content > :not(.library-tabs)"))
+        animate(
+          el,
+          [
+            { opacity: 0, transform: "translateY(4px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          180,
+        );
     const panel = root.querySelector(".workspace-panel");
     if (panel && !hadPanel)
       animate(
@@ -403,6 +446,33 @@
       root.querySelector(".command-palette")
     );
   }
+  // Removed overlays fade out from an inert copy outside the reconciled tree,
+  // so the next render can never reuse a leaving node.
+  function leave(overlay) {
+    const shell = root.querySelector(".app-shell");
+    if (!motionAllowed() || !shell) return;
+    const layer = document.createElement("div");
+    for (const { name, value } of shell.attributes) layer.setAttribute(name, value);
+    layer.classList.add("ghost-layer");
+    layer.inert = true;
+    overlay.classList.add("leaving");
+    layer.append(overlay);
+    document.body.append(layer);
+    const panel = overlay.querySelector(".command-palette, .popover-menu");
+    const fade = overlay.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: 140,
+      easing: "ease-out",
+      fill: "forwards",
+    });
+    panel?.animate(
+      [
+        { transform: "none" },
+        { transform: "translateY(-3px) scale(0.98)" },
+      ],
+      { duration: 140, easing: "ease-out", fill: "forwards" },
+    );
+    fade.finished.finally(() => layer.remove());
+  }
   function motionAllowed() {
     return (
       !matchMedia("(prefers-reduced-motion: reduce)").matches &&
@@ -421,20 +491,20 @@
     const scope = menu.dataset.menu === "notes-scope"
       ? document.getElementById("notes-scope-trigger")?.getBoundingClientRect()
       : null;
-    const width = scope ? 220 : r?.width ? Math.max(180, r.width - 20) : 260;
+    const width = scope ? 220 : 240;
     menu.style.width = Math.min(width, innerWidth - 24) + "px";
-    const anchor = scope ? { x: scope.left, y: scope.bottom + 4 } : menuAnchor || { x: r?.left || 10, y: 44 };
+    const anchor = scope
+      ? { x: scope.left, y: scope.bottom + 4 }
+      : menuAnchor || { x: (r?.left || 0) + 10, y: 44 };
     menu.style.left =
-      Math.max(
-        12,
-        Math.min(
-          !scope && r?.width ? r.left + 10 : anchor.x,
-          innerWidth - menu.offsetWidth - 12,
-        ),
-      ) + "px";
+      Math.max(8, Math.min(anchor.x, innerWidth - menu.offsetWidth - 8)) + "px";
+    const below = anchor.y + menu.offsetHeight + 8 <= innerHeight;
+    menu.style.transformOrigin = below ? "top left" : "bottom left";
     menu.style.top =
-      Math.max(12, Math.min(anchor.y, innerHeight - menu.offsetHeight - 12)) +
-      "px";
+      Math.max(
+        8,
+        below ? anchor.y : Math.min(anchor.y, innerHeight) - menu.offsetHeight - 4,
+      ) + "px";
   }
   function positionDialog() {
     const dialog = root.querySelector(".command-palette");
@@ -557,6 +627,17 @@
     });
   }
   new ResizeObserver(scheduleGeometry).observe(root);
+  let tracking = 0;
+  root.addEventListener("transitionrun", (e) => {
+    if (!e.target.matches?.(".browser-shell") || e.propertyName !== "grid-template-columns") return;
+    cancelAnimationFrame(tracking);
+    const until = performance.now() + 420;
+    const step = () => {
+      scheduleGeometry();
+      if (performance.now() < until) tracking = requestAnimationFrame(step);
+    };
+    tracking = requestAnimationFrame(step);
+  });
   window.addEventListener("resize", scheduleGeometry);
   function dataRequest(el) {
     const r = { op: el.dataset.op };

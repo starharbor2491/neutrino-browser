@@ -11,7 +11,7 @@ struct StartupRecovery: View {
             Image(systemName: "lifepreserver").font(.system(size: 36)).foregroundStyle(Color.accentColor)
             Text("Let's get Neutrino open.").font(.largeTitle.weight(.semibold))
             Text("Your saved data could not be opened. It has not been deleted.").foregroundStyle(.secondary)
-            Text(error).font(.callout).textSelection(.enabled).padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+            Text(error).font(.callout).textSelection(.enabled).padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             HStack {
                 Button("Try again") { Task { await app.load() } }
                 Button("Show data folder") { NSWorkspace.shared.open(app.dataDirectory) }

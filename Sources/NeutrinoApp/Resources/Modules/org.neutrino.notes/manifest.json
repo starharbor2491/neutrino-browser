@@ -2,7 +2,7 @@
   "id": "org.neutrino.notes",
   "name": "Notes",
   "version": 2,
-  "summary": "A quiet place for notes, stored locally within your profile.",
+  "summary": "Write notes and save quotes beside the page you’re reading.",
   "publisher": "Neutrino",
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "notes",

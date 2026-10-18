@@ -256,6 +256,21 @@ impl Shell {
                         if let Some(section) = request["section"].as_str() {
                             self.section = section.into();
                         }
+                        if screen == "settings"
+                            && ![
+                                "general",
+                                "profiles",
+                                "privacy",
+                                "appearance",
+                                "ai",
+                                "passwords",
+                                "updates",
+                                "engines",
+                            ]
+                            .contains(&self.section.as_str())
+                        {
+                            self.section = "general".into();
+                        }
                         if screen == "library" {
                             if !["bookmarks", "history", "downloads", "notes", "archive"]
                                 .contains(&self.section.as_str())
@@ -705,6 +720,7 @@ impl Shell {
                         "blockPopups",
                         "restoreSession",
                         "automaticUpdates",
+                        "startGuideHidden",
                     ]
                     .contains(&key)
                         && value.is_boolean()

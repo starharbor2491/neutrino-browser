@@ -212,7 +212,7 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
             selected = destination
         } else {
             let panel = NSSavePanel(); panel.nameFieldStringValue = item.name
-            panel.message = "Save this download. Files are never opened automatically."
+            panel.message = "Choose where to save this download."
             item.destinationPanel = panel
             let choice = panel.runModal()
             item.destinationPanel = nil
