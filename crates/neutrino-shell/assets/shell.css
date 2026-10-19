@@ -5505,10 +5505,23 @@ input[type="color"] {
   width: var(--rail-width);
   display: flex;
   visibility: visible;
+  opacity: 1;
   border-radius: calc(12px * var(--sq));
   background: var(--rail);
   box-shadow: var(--shadow);
   animation: peek-in var(--t-med) var(--ease-out);
+}
+.placement-trailing.rail-hidden,
+.browser-shell.placement-trailing.rail-peek {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+.placement-trailing > .rail-edge {
+  left: auto;
+  right: 0;
+}
+.browser-shell.placement-trailing.rail-peek > .workspace-rail {
+  left: auto;
+  right: 6px;
 }
 @keyframes peek-in {
   from {
