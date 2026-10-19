@@ -1355,8 +1355,8 @@
   });
   function clearTargets() {
     root
-      .querySelectorAll(".drop-hover,.drop-before")
-      .forEach((x) => x.classList.remove("drop-hover", "drop-before"));
+      .querySelectorAll(".drop-hover,.drop-before,.drop-stack")
+      .forEach((x) => x.classList.remove("drop-hover", "drop-before", "drop-stack"));
   }
   document.addEventListener("dragstart", (e) => {
     if (e.target.closest(".editing-preview")) return;
@@ -1454,12 +1454,26 @@
     }
   });
   // Vivaldi: a tab dropped on the middle of another loose tab stacks the two.
+  // Stacking is deliberate: the pointer rests on the middle of a loose tab, along the
+  // list's own axis, for a moment. A quicker drop reorders, as in every other layout.
+  let stackDwell = { target: null, since: 0 };
   function stacking(e, target) {
     if (!drag || drag.kind !== "tab" || !target.dataset.tab || target.dataset.tab === drag.id) return false;
-    // Loose tab rows carry an empty data-folder; only a tab already in a folder or stack is excluded.
-    if (!root.querySelector(".browser-shell.style-vivaldi") || target.closest("[data-folder]:not([data-folder=''])")) return false;
+    if (!root.querySelector(".browser-shell[data-stacks]")) return false;
+    // Loose tab rows carry an empty data-folder; pinned tabs and tabs in a stack or folder can't stack.
+    const loose = (row) => row && !(row.dataset.folder || "") && row.dataset.group !== "pinned";
+    if (!loose(target) || !loose(root.querySelector(`[data-tab="${CSS.escape(drag.id)}"]`))) return false;
     const r = target.getBoundingClientRect();
-    return e.clientX > r.left + r.width * 0.25 && e.clientX < r.right - r.width * 0.25;
+    const across = target.closest(".horizontal-tabs") ? [e.clientX, r.left, r.width] : [e.clientY, r.top, r.height];
+    if (!(across[0] > across[1] + across[2] * 0.25 && across[0] < across[1] + across[2] * 0.75)) {
+      stackDwell = { target: null, since: 0 };
+      return false;
+    }
+    if (stackDwell.target !== target) {
+      stackDwell = { target, since: performance.now() };
+      return false;
+    }
+    return performance.now() - stackDwell.since >= 600;
   }
   // Arc: a folder dropped on the middle of another folder's heading goes inside it.
   function nesting(e, target) {
@@ -1515,6 +1529,7 @@
   });
   function cleanupDrag() {
     drag = null;
+    stackDwell = { target: null, since: 0 };
     lastDragPoint = null;
     armSplit(false);
     document.body.classList.remove(

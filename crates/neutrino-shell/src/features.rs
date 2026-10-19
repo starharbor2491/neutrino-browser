@@ -1348,7 +1348,14 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "stack-tabs" => {
             let loose = |key: &str| s.tabs().iter().any(|t| text(t, "id") == text(r, key) && !flag(t, "pinned") && text(t, "folderID").is_empty());
             if regular && crate::render::style(s) == "vivaldi" && on(s, "tab-stacks") && text(r, "id") != text(r, "onto") && loose("id") && loose("onto") {
+                // ⌘Z puts both tabs back where they were and removes the stack's folder.
+                let folders: Vec<Value> = array(&s.snapshot["folders"]).iter().map(|f| f["id"].clone()).collect();
+                s.tab_undo.push(json!({"tabs":s.tabs(),"folders":folders}));
+                if s.tab_undo.len() > 20 {
+                    s.tab_undo.remove(0);
+                }
                 commands.push(json!({"op":"stackTabs","id":r["id"],"onto":r["onto"]}));
+                s.notice = "Tabs stacked. Undo is available.".into();
             }
         }
         "tab-preview" => {

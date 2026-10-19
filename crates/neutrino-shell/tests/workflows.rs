@@ -599,6 +599,26 @@ fn tab_thumbnails_show_page_pictures_when_turned_on() {
     assert!(!html.contains("javascript:alert"));
 }
 #[test]
+fn a_vivaldi_stack_can_be_undone() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("vivaldi");
+    s.snapshot["features"] = json!({"tab-stacks": true});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-stacks="true""#));
+    let r = s.dispatch(json!({"op":"stack-tabs","id":"c","onto":"a"}));
+    assert_eq!(commands(&r)[0]["op"], "stackTabs");
+    assert!(s.notice.contains("Undo"));
+    // The native side made folder f2 for the stack.
+    s.snapshot["folders"] = json!([{"id":"f1","name":"Work"},{"id":"f2","name":"example.com"}]);
+    s.snapshot["session"]["tabs"][0]["folderID"] = json!("f2");
+    s.snapshot["session"]["tabs"][2]["folderID"] = json!("f2");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let r = s.dispatch(json!({"op":"undo-tabs"}));
+    assert_eq!(commands(&r)[0]["op"], "replaceTabs");
+    assert_eq!(commands(&r)[1], json!({"op":"deleteFolder","id":"f2"}));
+    assert_eq!(commands(&r).len(), 2);
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

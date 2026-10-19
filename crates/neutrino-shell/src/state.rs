@@ -678,13 +678,23 @@ impl Shell {
                         }
                         return self.response(commands);
                     }
-                    if let Some(tabs) = self.tab_undo.pop() {
+                    if let Some(entry) = self.tab_undo.pop() {
+                        // A stack's entry also lists the folders that existed before it.
+                        let tabs = if entry.is_object() { entry["tabs"].clone() } else { entry.clone() };
                         let current: HashSet<_> =
                             self.tabs().iter().map(|t| text(t, "id")).collect();
                         let prior: HashSet<_> =
                             array(&tabs).iter().map(|t| text(t, "id")).collect();
                         if current == prior {
                             commands.push(json!({"op":"replaceTabs","tabs":tabs}));
+                            if entry.is_object() {
+                                for folder in array(&self.snapshot["folders"]) {
+                                    let added = !array(&entry["folders"]).contains(&folder["id"]);
+                                    if added && !array(&tabs).iter().any(|t| t["folderID"] == folder["id"]) {
+                                        commands.push(json!({"op":"deleteFolder","id":folder["id"]}));
+                                    }
+                                }
+                            }
                             self.notice = "Tab move undone.".into();
                         } else {
                             self.notice =
