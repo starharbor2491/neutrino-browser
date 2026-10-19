@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.mouse-gestures",
+  "name": "Mouse Gestures",
+  "version": 1,
+  "summary": "Hold Option and drag on a page to go back, forward or reload.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

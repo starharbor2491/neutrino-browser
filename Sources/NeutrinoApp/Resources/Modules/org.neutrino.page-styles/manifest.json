@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.page-styles",
+  "name": "Page Filters",
+  "version": 1,
+  "summary": "Force dark mode, grayscale, sepia and other filters on a site.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

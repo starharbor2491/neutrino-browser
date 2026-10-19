@@ -496,6 +496,33 @@ impl Shell {
                         self.setup["layout"] = c["layout"]["tabs"].clone();
                     }
                 }
+                "setup-module" => {
+                    let id = text(&request, "value");
+                    if let Some(m) = array(&self.snapshot["modules"]).iter().find(|m| text(m, "id") == id && flag(m, "bundled")) {
+                        let on = crate::onboarding::module_on(self, m);
+                        self.setup["modules"][id] = json!(!on);
+                    }
+                }
+                "setup-modules" => match text(&request, "value") {
+                    "defaults" => {
+                        self.setup["modules"] = json!({});
+                        self.setup["providers"] = json!({});
+                    }
+                    "all" => {
+                        let ids: Vec<String> = array(&self.snapshot["modules"]).iter().filter(|m| flag(m, "bundled") && text(m, "capability") == "feature").map(|m| text(m, "id").to_string()).collect();
+                        for id in ids {
+                            self.setup["modules"][id.as_str()] = json!(true);
+                        }
+                    }
+                    _ => {}
+                },
+                "setup-provider" => {
+                    let (role, id) = (text(&request, "key"), text(&request, "value"));
+                    let known = array(&self.snapshot["modules"]).iter().any(|m| flag(m, "bundled") && text(m, "capability") == role && text(m, "id") == id);
+                    if ["tabSystem", "resourceMonitor", "theme", "icons", "layout"].contains(&role) && (known || (id.is_empty() && role != "tabSystem")) {
+                        self.setup["providers"][role] = json!(id);
+                    }
+                }
                 "setup-favorite" | "setup-tool" => {
                     let value = text(&request, "value");
                     let (key, allowed) = if op == "setup-favorite" {
@@ -729,7 +756,9 @@ impl Shell {
                         && !text(&self.setup, "profile").is_empty()
                         && !text(&self.setup, "space").is_empty()
                     {
-                        commands.push(json!({"op":"finishSetup","setup":self.setup,"configuration":crate::appearance::setup_configuration(&self.setup)}));
+                        let mut setup = self.setup.clone();
+                        setup["modules"] = crate::onboarding::module_choices(self);
+                        commands.push(json!({"op":"finishSetup","setup":setup,"configuration":crate::appearance::setup_configuration(&self.setup)}));
                         self.setup_busy = true;
                     }
                 }
@@ -1333,11 +1362,11 @@ impl Shell {
         }
         if !query.is_empty() {
             for (id, label, _, _) in crate::features::ACTIONS {
-                if label.to_lowercase().contains(&query) && out.iter().filter(|v| v["kind"] == "action").count() < 4 {
+                if crate::features::action_on(self, id) && label.to_lowercase().contains(&query) && out.iter().filter(|v| v["kind"] == "action").count() < 4 {
                     out.push(json!({"kind":"action","title":label,"detail":"Action","value":id}));
                 }
             }
-            for chain in array(&self.snapshot["preferences"]["commandChains"]) {
+            for chain in array(&self.snapshot["preferences"]["commandChains"]).iter().filter(|_| crate::features::on(self, "command-chains")) {
                 if text(chain, "name").to_lowercase().contains(&query) {
                     out.push(json!({"kind":"action","title":chain["name"],"detail":"Command chain","value":chain["id"]}));
                 }

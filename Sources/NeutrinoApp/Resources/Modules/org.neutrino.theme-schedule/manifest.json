@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.theme-schedule",
+  "name": "Theme Schedule",
+  "version": 1,
+  "summary": "Switch between light and dark at the times you set.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

@@ -249,7 +249,7 @@ final class BrowserModel: ObservableObject {
             self.app.library.preferences.siteSettings = (self.app.library.preferences.siteSettings ?? [:]).merging([site: settings]) { $1 }
         }
         tab.onPeek = { [weak self] url in
-            guard let self, self.app.library.preferences.peek != false else { return false }
+            guard let self, self.app.feature("peek") else { return false }
             PeekWindow.show(url, model: self); return true
         }
         tab.setPrivacyPreferences(httpsOnly: preferences.httpsUpgrade != false, blockThirdPartyCookies: preferences.blockThirdPartyCookies != false)
@@ -424,6 +424,7 @@ final class BrowserModel: ObservableObject {
         webTabs.removeValue(forKey: id)?.dispose()
         tabProfiles.removeValue(forKey: id)
         app.tabOwnership.release(id, from: session.id)
+        defer { forgetSiteIfClosed(closing.url) }
         for i in session.tabs.indices where session.tabs[i].parentID == id { session.tabs[i].parentID = closing.parentID }
         let otherPane = session.split.map { $0.first == id ? $0.second : $0.first }
         if session.split?.contains(id) == true { session.split = nil; session.splitSuppressed = true }

@@ -116,6 +116,15 @@ final class AppState: ObservableObject {
                 repository = repo
                 let available = catalog.filter { $0.runtime == nil || modulePayloads[$0.id] != nil }
                 try repo.seedDefaults(available, payloads: modulePayloads)
+                // Feature modules added after this library was first seeded arrive on, once each;
+                // one the person later removes stays removed.
+                var seen = Set(library.preferences.seededFeatures ?? [])
+                let present = Set(try repo.installed().map(\.id))
+                for manifest in catalog where manifest.capability == .feature && !seen.contains(manifest.id) {
+                    if !present.contains(manifest.id) { try repo.install(manifest, enabled: true) }
+                    seen.insert(manifest.id)
+                }
+                if seen != Set(library.preferences.seededFeatures ?? []) { library.preferences.seededFeatures = seen.sorted() }
                 installedModules = try repo.installed()
                 try refreshBundledNativePackages()
                 try loadCommunityCatalogs()
@@ -161,6 +170,12 @@ final class AppState: ObservableObject {
                 modulePayloads[manifest.id] = try Data(contentsOf: executable)
             } catch { notice = "\(manifest.name) is unavailable because its bundled package could not load. Rebuild or reinstall Neutrino to use it. Browsing is still available." }
         }
+    }
+    /// Whether a built-in feature module (`org.neutrino.<key>`) is on. A feature
+    /// this build doesn't bundle as a module stays on.
+    func feature(_ key: String) -> Bool {
+        let id = "org.neutrino." + key
+        return installedModules.first { $0.id == id }?.enabled ?? !bundledModuleIDs.contains(id)
     }
     func enabled(_ capability: ModuleCapability) -> Bool {
         installedModules.contains {
@@ -371,6 +386,26 @@ final class AppState: ObservableObject {
                 }
             }
             try setModuleEnabledApproved(module.id, enabled: !module.enabled)
+        }
+    }
+    /// Applies the module choices made during setup, where the person reviewed
+    /// each one. Bundled modules only; a role's chosen provider replaces the old one.
+    func applySetupModules(_ choices: [String: Bool]) {
+        guard let repository else { return }
+        let ordered = choices.sorted { !$0.value && $1.value } // turn modules off before replacing providers
+        for (id, on) in ordered where bundledModuleIDs.contains(id) {
+            do {
+                if let module = installedModules.first(where: { $0.id == id }) {
+                    guard module.enabled != on else { continue }
+                    if on, module.manifest.capability.isExclusive,
+                       installedModules.contains(where: { $0.enabled && $0.manifest.capability == module.manifest.capability && $0.id != id }) {
+                        if module.manifest.capability == .resourceMonitor { try replaceResourceProvider(with: id) }
+                        else { try repository.replaceProvider(role: module.manifest.capability, with: id); installedModules = try repository.installed() }
+                    } else if !on && module.manifest.capability == .tabSystem {
+                        continue
+                    } else { try setModuleEnabledApproved(id, enabled: on) }
+                } else if on { try installApprovedModule(id) }
+            } catch { notice = "\(catalog.first { $0.id == id }?.name ?? id) couldn’t be changed: \(error.localizedDescription)" }
         }
     }
     /// Mutation after the graphical permission preview, also used by native

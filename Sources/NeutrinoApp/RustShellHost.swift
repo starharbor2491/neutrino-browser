@@ -234,7 +234,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                     self.sendAction(request)
                     return true
                 }
-                if typed, self.app.library.preferences.keyboardSounds == true {
+                if typed, self.app.feature("sounds"), self.app.library.preferences.keyboardSounds == true {
                     self.container.chrome.evaluateJavaScript("window.neutrinoSound&&window.neutrinoSound('key')", completionHandler: nil)
                 }
                 return false
@@ -1109,6 +1109,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         app.library.preferences.blockPopups = values["blockPopups"] as? Bool ?? true
         app.library.preferences.restoreSession = values["restoreSession"] as? Bool ?? true
         app.library.preferences.blockAds = values["blockAds"] as? Bool ?? true
+        let modules = (values["modules"] as? [String: Any] ?? [:]).compactMapValues { $0 as? Bool }
+        app.applySetupModules(modules)
+        // A theme, layout, icon set or tab system chosen here restyles the browser after its preset.
+        let lookModules = { [weak self] in
+            guard let self else { return }
+            for (id, on) in modules where on { self.applyActiveStyle(id) }
+        }
         var configuration = Configuration()
         // Rust computes the chosen browser's configuration; older shells send only the preset.
         if let computed, let data = try? JSONSerialization.data(withJSONObject: computed),
@@ -1126,6 +1133,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 guard !model.session.tabs.contains(where: { $0.pinned && $0.url?.host == url.host }) else { continue }
                 model.newTab(url: url); model.pinTab(model.session.selectedTabID)
             }
+            lookModules()
             finishOnboarding()
             return
         }
@@ -1137,6 +1145,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         configuration.theme.colorMode = (values["appearance"] as? String).flatMap(ColorMode.init(rawValue:)) ?? .system
         configuration.layout.tabs = (values["layout"] as? String).flatMap(TabPlacement.init(rawValue:)) ?? .leading
         app.applyConfiguration(configuration)
+        lookModules()
         finishOnboarding()
     }
     private func finishOnboarding() {

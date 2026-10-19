@@ -317,6 +317,10 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var backgroundMusic: Bool?
     public var musicVolume: Double?
     public var littleArc: Bool?
+    /// Built-in feature modules already offered to this library, so removed ones stay removed.
+    public var seededFeatures: [String]?
+    /// Air Traffic Control: links from other apps to these sites open in a Space.
+    public var linkRoutes: [LinkRoute]?
     public var peek: Bool?
     public var tabIslands: Bool?
     /// Option-drag gestures on pages; on by default in the Vivaldi and Opera GX styles.
@@ -343,7 +347,14 @@ public struct SiteSettings: Codable, Equatable, Sendable {
     public var filter: String?
     public var css: String?
     public var hide: [String]?
+    /// Clear the site's data when its last tab closes.
+    public var forget: Bool?
     public init() {}
+}
+public struct LinkRoute: Codable, Equatable, Sendable {
+    public var host: String
+    public var spaceID: UUID
+    public init(host: String, spaceID: UUID) { self.host = host; self.spaceID = spaceID }
 }
 public struct ReadingItem: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID

@@ -2,13 +2,14 @@
 import Foundation
 
 public enum ModuleCapability: String, Codable, CaseIterable, Sendable {
-    case resourceMonitor, notes, reader, screenshot, focusMode, tabSystem, theme, layout, icons, menu, startWidget
+    /// `feature` is a built-in browser feature the host implements; its module only turns it on or off.
+    case resourceMonitor, notes, reader, screenshot, focusMode, tabSystem, theme, layout, icons, menu, startWidget, feature
     public var permission: String? {
         switch self {
         case .resourceMonitor: "Read system CPU and memory statistics. No browsing data is read."
         case .reader: "Read the current page when you choose Reader."
         case .screenshot: "Capture the current page when you choose Save screenshot."
-        case .notes, .focusMode, .tabSystem, .theme, .layout, .icons, .menu, .startWidget: nil
+        case .notes, .focusMode, .tabSystem, .theme, .layout, .icons, .menu, .startWidget, .feature: nil
         }
     }
     public var isExclusive: Bool { [.resourceMonitor, .notes, .screenshot, .focusMode, .tabSystem, .theme, .layout, .icons, .menu].contains(self) }

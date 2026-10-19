@@ -198,12 +198,34 @@ fn setup_validates_names_and_submits_only_once_until_host_responds() {
     s.dispatch(json!({"op":"setup-next"}));
     assert_eq!(s.step, 1);
     s.dispatch(json!({"op":"setup-field","key":"space","value":"Home"}));
-    for _ in 0..5 {
+    for _ in 0..6 {
         s.dispatch(json!({"op":"setup-next"}));
     }
-    assert_eq!(s.step, 6);
+    assert_eq!(s.step, 7);
     assert_eq!(commands(&s.dispatch(json!({"op":"setup-finish"}))).len(), 1);
     assert!(commands(&s.dispatch(json!({"op":"setup-finish"}))).is_empty());
+}
+#[test]
+fn setup_sends_module_choices_that_follow_the_chosen_browser() {
+    let mut s = Shell::default();
+    let module = |key: &str| json!({"id":format!("org.neutrino.{key}"),"name":key,"capability":"feature","bundled":true,"installed":true,"enabled":true});
+    s.snapshot["modules"] = json!([module("peek"), module("limiter"), {"id":"org.neutrino.notes","name":"Notes","capability":"notes","bundled":true,"installed":true,"enabled":true}, {"id":"org.neutrino.theme-native","name":"macOS Theme","capability":"theme","bundled":true,"installed":false,"enabled":false}]);
+    s.dispatch(json!({"op":"setup-field","key":"profile","value":"Personal"}));
+    s.dispatch(json!({"op":"setup-field","key":"space","value":"Home"}));
+    s.setup["preset"] = json!("arc");
+    let flow = ["layout", "arc-welcome", "arc-theme", "arc-import", "arc-favorites", "arc-modules"];
+    s.step = flow.len() - 1;
+    let html = s.dispatch(json!({"op":"setup-module","value":"org.neutrino.notes"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("module-picker") && html.contains("data-value=\"org.neutrino.peek\""));
+    s.dispatch(json!({"op":"setup-provider","key":"theme","value":"org.neutrino.theme-native"}));
+    s.dispatch(json!({"op":"setup-provider","key":"tabSystem","value":""}));
+    s.step = 7;
+    let finish = commands(&s.dispatch(json!({"op":"setup-finish"})))[0].clone();
+    let choices = &finish["setup"]["modules"];
+    assert_eq!(choices["org.neutrino.peek"], true);
+    assert_eq!(choices["org.neutrino.limiter"], false);
+    assert_eq!(choices["org.neutrino.notes"], false);
+    assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
 fn closing_palette_restores_page_identity() {

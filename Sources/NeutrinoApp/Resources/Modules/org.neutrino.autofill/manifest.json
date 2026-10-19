@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.autofill",
+  "name": "Address Autofill",
+  "version": 1,
+  "summary": "Save addresses on this Mac and fill forms with them.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

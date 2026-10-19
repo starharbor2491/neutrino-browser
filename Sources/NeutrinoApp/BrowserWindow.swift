@@ -25,8 +25,15 @@ struct BrowserWindowRoot: View {
         .onOpenURL { url in
             guard !app.finalQuitDataFrozen, AddressResolver.isWebURL(url) else { return }
             if let model, !model.isClosed {
+                // Air Traffic Control sends a site's links to its chosen Space.
+                if let site = ContentBlocking.site(url), app.feature("link-routes"), !model.isPrivate,
+                   let route = app.library.preferences.linkRoutes?.first(where: { site == $0.host || site.hasSuffix("." + $0.host) }),
+                   app.library.spaces?.contains(where: { $0.id == route.spaceID && $0.profileID == model.session.profileID }) == true {
+                    if model.session.spaceID != route.spaceID { model.switchSpace(route.spaceID) }
+                    model.newTab(url: url)
+                }
                 // Arc opens links from other apps in a small window first.
-                if model.configuration.theme.preset == "arc" && app.library.preferences.littleArc != false { PeekWindow.show(url, model: model) }
+                else if model.configuration.theme.preset == "arc" && app.feature("little-arc") { PeekWindow.show(url, model: model) }
                 else { model.newTab(url: url) }
             }
             else { pendingURLs.append(url); if app.ready { createModel() } }

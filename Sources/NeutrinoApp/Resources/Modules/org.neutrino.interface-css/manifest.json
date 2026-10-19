@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.interface-css",
+  "name": "Interface CSS",
+  "version": 1,
+  "summary": "Restyle Neutrino’s own interface with your CSS.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

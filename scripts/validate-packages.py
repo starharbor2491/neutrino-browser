@@ -5,9 +5,9 @@ import json
 import pathlib
 
 root = pathlib.Path(__file__).resolve().parents[1] / "Sources/NeutrinoApp/Resources/Modules"
-capabilities = {"resourceMonitor", "notes", "reader", "screenshot", "focusMode", "tabSystem", "theme", "layout", "icons", "menu", "startWidget"}
+capabilities = {"resourceMonitor", "notes", "reader", "screenshot", "focusMode", "tabSystem", "theme", "layout", "icons", "menu", "startWidget", "feature"}
 found = set()
-counts = {"native": 0, "behavior": 0, "declarative": 0}
+counts = {"native": 0, "behavior": 0, "declarative": 0, "feature": 0}
 for path in sorted(root.glob("*/manifest.json")):
     manifest = json.loads(path.read_text())
     assert manifest["id"] == path.parent.name and manifest["id"] not in found, path
@@ -16,8 +16,12 @@ for path in sorted(root.glob("*/manifest.json")):
     assert manifest["version"] > 0 and manifest["publisher"] == "Neutrino", path
     assert manifest["source"] == "https://github.com/starharbor2491/neutrino-browser", path
     assert not manifest["dependencies"], path
-    runtime = manifest["runtime"]
-    if runtime in {"nativeResourceWorker", "nativeReaderWorker"}:
+    runtime = manifest.get("runtime")
+    if manifest["capability"] == "feature":
+        # Built-in features: a manifest only, implemented by the host.
+        assert runtime is None and [p.name for p in path.parent.iterdir()] == ["manifest.json"], path
+        counts["feature"] += 1
+    elif runtime in {"nativeResourceWorker", "nativeReaderWorker"}:
         assert (runtime, manifest["capability"]) in {("nativeResourceWorker", "resourceMonitor"), ("nativeReaderWorker", "reader")}, path
         counts["native"] += 1
     elif runtime == "behaviorProgram":
@@ -30,5 +34,5 @@ for path in sorted(root.glob("*/manifest.json")):
         definition = json.loads((path.parent / "definition.json").read_text())
         assert definition["formatVersion"] == 1, path
         counts["declarative"] += 1
-assert counts == {"native": 3, "behavior": 3, "declarative": 12}, counts
-print(f"{len(found)} official packages validated: {counts['native']} native, {counts['behavior']} behavior, {counts['declarative']} declarative.")
+assert counts == {"native": 3, "behavior": 3, "declarative": 12, "feature": 28}, counts
+print(f"{len(found)} official packages validated: {counts['native']} native, {counts['behavior']} behavior, {counts['declarative']} declarative, {counts['feature']} built-in features.")

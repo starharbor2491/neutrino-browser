@@ -147,7 +147,7 @@ final class BrowserFeatures {
         }
     }
     private var limitsEnabled: Bool {
-        (app.library.preferences.memoryLimitMB ?? 0) > 0 || (app.library.preferences.cpuLimit ?? 0) > 0
+        app.feature("limiter") && ((app.library.preferences.memoryLimitMB ?? 0) > 0 || (app.library.preferences.cpuLimit ?? 0) > 0)
     }
     private func sampleUsage(_ model: BrowserModel) async {
         var rows: [[String: Any]] = []
@@ -175,6 +175,7 @@ final class BrowserFeatures {
     /// recently used background tab goes to sleep.
     private func enforceLimits(_ model: BrowserModel, memory: Double, processor: Double) {
         let preferences = app.library.preferences
+        guard app.feature("limiter") else { overLimit = 0; return }
         let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
         let memoryLimit = Double(preferences.memoryLimitMB ?? 0), processorLimit = Double(preferences.cpuLimit ?? 0)
         let over = (memoryLimit > 0 && memory > memoryLimit) || (processorLimit > 0 && processor / cores > processorLimit)
@@ -189,7 +190,7 @@ final class BrowserFeatures {
         if preferences.batterySaver == true, Self.onBattery { minutes = minutes == 0 ? 5 : min(minutes, 5) }
         let now = Date()
         for id in model.liveEngineTabs.map(\.id) where firstSeen[id] == nil { firstSeen[id] = now }
-        guard minutes > 0 else { return }
+        guard minutes > 0, app.feature("tab-sleep") else { return }
         let cutoff = now.addingTimeInterval(-Double(minutes) * 60)
         for id in model.liveEngineTabs.map(\.id) where !audible.contains(id) && lastUsed(id, model) < cutoff { model.sleepTab(id) }
     }
@@ -354,6 +355,7 @@ final class BrowserFeatures {
                 case "microphone": settings.microphone = choice
                 case "filter": settings.filter = choice
                 case "hide": settings.hide = nil
+                case "forget": settings.forget = on ? true : nil
                 default: return true
                 }
             }
@@ -660,6 +662,13 @@ final class BrowserFeatures {
         case "httpsUpgrade": preferences.httpsUpgrade = value as? Bool
         case "stripTracking": preferences.stripTracking = value as? Bool
         case "littleArc": preferences.littleArc = value as? Bool
+        case "linkRoutes":
+            let routes = (value as? [[String: Any]] ?? []).prefix(50).compactMap { row -> LinkRoute? in
+                guard let host = row["host"] as? String, !host.isEmpty, host.count <= 253,
+                      let raw = row["spaceID"] as? String, let id = UUID(uuidString: raw) else { return nil }
+                return LinkRoute(host: host.lowercased(), spaceID: id)
+            }
+            preferences.linkRoutes = routes.isEmpty ? nil : Array(routes)
         case "peek": preferences.peek = value as? Bool
         case "tabIslands": preferences.tabIslands = value as? Bool
         case "mouseGestures": preferences.mouseGestures = value as? Bool
@@ -796,6 +805,24 @@ final class BrowserFeatures {
 }
 
 extension BrowserModel {
+    /// Brave's "Forget me": once a site's last tab in its Profile closes, its cookies and storage go.
+    func forgetSiteIfClosed(_ url: URL?) {
+        guard !isPrivate, app.feature("forget-sites"), let site = ContentBlocking.site(url),
+              app.library.preferences.siteSettings?[site]?.forget == true else { return }
+        let profileID = session.profileID
+        let open = app.windows.values.compactMap(\.model).contains { model in
+            model.session.profileID == profileID && model.session.tabs.contains { ContentBlocking.site($0.url) == site }
+        }
+        guard !open else { return }
+        let store = app.webKitDataStore(profileID: profileID), all = WKWebsiteDataStore.allWebsiteDataTypes()
+        store.fetchDataRecords(ofTypes: all) { records in
+            let matching = records.filter { site == $0.displayName || site.hasSuffix("." + $0.displayName) }
+            store.removeData(ofTypes: all, for: matching) {}
+        }
+        if let chromium = liveEngineTabs.map({ $0.page }).first(where: { $0.engineID == .chromium }) {
+            Task { await chromium.clearSiteData(host: site) }
+        }
+    }
     /// Reapplies per-site tools after a page loads: zoom, sound, styles and limits.
     func pageLoaded(_ tab: BrowserEngineTab, id: UUID) {
         let preferences = app.library.preferences
@@ -804,17 +831,16 @@ extension BrowserModel {
         if let zoom = preferences.siteZoom?[site], abs(zoom - tab.zoom) > 0.01 { tab.setZoom(zoom) }
         if session.tabs.first(where: { $0.id == id })?.muted == true || settings?.muted == true { tab.setMuted(true) }
         var style: [String: Any] = [:]
-        if let filter = settings?.filter { style["filter"] = filter }
+        if app.feature("page-styles"), let filter = settings?.filter { style["filter"] = filter }
         if let hide = settings?.hide { style["hide"] = hide }
-        if let css = settings?.css { style["css"] = css }
+        if app.feature("boosts"), let css = settings?.css { style["css"] = css }
         let shields = preferences.blockTrackers != false && !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? [])
         let cosmetic = shields ? preferences.customCosmetic ?? [] : []
-        if let script = PageScript.source("style", ["settings": style, "cookieBanners": preferences.hideCookieBanners != false, "site": site, "cosmetic": cosmetic]) {
+        if let script = PageScript.source("style", ["settings": style, "cookieBanners": app.feature("cookie-banners"), "site": site, "cosmetic": cosmetic]) {
             Task { _ = try? await tab.runPageScript(script) }
         }
-        if let limit = preferences.networkLimitKBps, limit > 0, tab.engineID == .chromium { tab.setNetworkLimit(bytesPerSecond: limit * 1024) }
-        let gestures = preferences.mouseGestures ?? ["vivaldi", "gx"].contains(configuration.theme.preset ?? "")
-        if gestures, let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
+        if app.feature("limiter"), let limit = preferences.networkLimitKBps, limit > 0, tab.engineID == .chromium { tab.setNetworkLimit(bytesPerSecond: limit * 1024) }
+        if app.feature("mouse-gestures"), let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
     }
     /// Remembers the zoom chosen for the active page's site.
     func rememberZoom(_ value: Double) {

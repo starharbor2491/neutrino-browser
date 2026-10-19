@@ -5,6 +5,7 @@ use crate::appearance::{setup_flow, FAVORITE_SITES, GX_THEMES, SIDEBAR_TOOLS, VI
 use crate::render::{icon, segments, swatches};
 use crate::state::{array, flag, text, Shell};
 use maud::{html, Markup};
+use serde_json::Value;
 
 /// Browsers whose bookmarks and history can be read from this Mac.
 pub const IMPORT_SOURCES: &[(&str, &str)] = &[
@@ -31,6 +32,7 @@ pub fn render(s: &Shell) -> Markup {
             _ => "Finish",
         },
         "arc-welcome" | "chrome-welcome" | "brave-welcome" | "vivaldi-welcome" | "gx-welcome" => "Get started",
+        "safari-modules" => "Open Neutrino",
         "arc-import" | "gx-import" | "vivaldi-import" | "brave-import" if !flag(&s.snapshot, "imported") => "Skip",
         "arc-default" | "chrome-default" if !flag(&s.snapshot, "isDefaultBrowser") => "Not now",
         _ => "Continue",
@@ -207,6 +209,124 @@ fn step(s: &Shell, id: &str) -> Markup {
             (segments("setup-field", "appearance", text(setup, "appearance"), &[("light", "Light"), ("dark", "Dark"), ("system", "Device")]))
         },
         "chrome-default" => html! {(heading("Set as your default browser", "Open links from other apps here."))(default_browser(s))},
+        // Every flow: the features to turn on, in that browser's words.
+        "arc-modules" => html! {(heading("Choose your features", "Arc’s tools are on. Turn on anything else you want."))(module_picker(s))},
+        "gx-modules" => html! {(heading("Pick your features", "GX Control, sounds and panels are ready. Add or remove anything."))(module_picker(s))},
+        "vivaldi-modules" => html! {(heading("Fine-tune your features", "Your edition turned these on. Vivaldi is yours to shape: change anything."))(module_picker(s))},
+        "brave-modules" => html! {(heading("Choose your features", "Turn on the tools you want. Shields stay on either way."))(module_picker(s))},
+        "chrome-modules" | "safari-modules" => html! {(heading("Choose your features", "Turn on the tools you want. You can change them later."))(module_picker(s))},
         _ => html! {},
     }
+}
+
+/// Tools offered as on/off modules during setup, by role.
+const TOOL_ROLES: &[&str] = &["notes", "reader", "focusMode", "screenshot", "startWidget", "menu"];
+/// Roles where one module replaces another: (role, label, whether none is allowed).
+const PROVIDER_ROLES: &[(&str, &str, bool)] = &[("tabSystem", "Tabs", false), ("resourceMonitor", "Resource monitor", true), ("theme", "Theme", true), ("icons", "Icons", true), ("layout", "Layout", true)];
+
+fn bundled(s: &Shell) -> impl Iterator<Item = &Value> {
+    array(&s.snapshot["modules"]).iter().filter(|m| flag(m, "bundled"))
+}
+
+/// Whether a feature or tool module is on after setup: the choice made here,
+/// else the chosen browser's default.
+pub fn module_on(s: &Shell, m: &Value) -> bool {
+    let id = text(m, "id");
+    if let Some(choice) = s.setup["modules"][id].as_bool() {
+        return choice;
+    }
+    match id.strip_prefix("org.neutrino.").filter(|_| text(m, "capability") == "feature") {
+        Some(key) => {
+            let preset = text(&s.setup, "preset");
+            match (preset, text(&s.setup, "edition")) {
+                ("vivaldi", "essentials") => crate::features::module_default(key, "chrome"),
+                ("vivaldi", "full") => key != "interface-css",
+                _ => crate::features::module_default(key, preset),
+            }
+        }
+        None => flag(m, "enabled"),
+    }
+}
+
+/// The module chosen for a replaceable role, or "" for none.
+pub fn provider(s: &Shell, role: &str) -> String {
+    if let Some(id) = s.setup["providers"][role].as_str() {
+        return id.to_string();
+    }
+    bundled(s).find(|m| text(m, "capability") == role && flag(m, "enabled")).map(|m| text(m, "id").to_string()).unwrap_or_default()
+}
+
+/// Every bundled module's state after setup, sent with the finished setup.
+pub fn module_choices(s: &Shell) -> Value {
+    let mut out = serde_json::Map::new();
+    for m in bundled(s) {
+        let role = text(m, "capability");
+        let on = if role == "feature" || TOOL_ROLES.contains(&role) {
+            module_on(s, m)
+        } else if PROVIDER_ROLES.iter().any(|r| r.0 == role) {
+            provider(s, role) == text(m, "id")
+        } else {
+            continue;
+        };
+        out.insert(text(m, "id").to_string(), Value::Bool(on));
+    }
+    Value::Object(out)
+}
+
+/// The module step: features grouped as in Modules, then tools and providers.
+pub fn module_picker(s: &Shell) -> Markup {
+    let features: Vec<&Value> = bundled(s).filter(|m| text(m, "capability") == "feature").collect();
+    let row = |m: &Value| {
+        let on = module_on(s, m);
+        html! {button class="setup-module-row" data-op="setup-module" data-value=(text(m, "id")) role="switch" aria-checked=(on.to_string()) title=(text(m, "description")) {
+            span{strong{(text(m, "name"))}small{(text(m, "description"))}}
+            span class=(if on {"switch on"} else {"switch"}){span{}}
+        }}
+    };
+    let mut groups: Vec<&str> = vec![];
+    for (_, group, _) in crate::features::MODULES {
+        if !groups.contains(group) {
+            groups.push(group);
+        }
+    }
+    let total = features.len() + bundled(s).filter(|m| TOOL_ROLES.contains(&text(m, "capability"))).count();
+    let count = features.iter().filter(|m| module_on(s, m)).count() + bundled(s).filter(|m| TOOL_ROLES.contains(&text(m, "capability")) && module_on(s, m)).count();
+    html! {div class="module-picker" {
+        div class="module-picker-bar"{
+            span{(count)" of "(total)" on"}
+            span class="spacer"{}
+            button class="button quiet" type="button" data-op="setup-modules" data-value="defaults"{"Use defaults"}
+            button class="button quiet" type="button" data-op="setup-modules" data-value="all"{"Turn all on"}
+        }
+        @for group in groups {
+            @let members: Vec<&&Value> = features.iter().filter(|m| crate::features::MODULES.iter().any(|f| f.1 == group && text(m, "id") == format!("org.neutrino.{}", f.0))).collect();
+            @if !members.is_empty() {
+                details class="module-group" {
+                    summary{strong{(group)}span{(members.iter().filter(|m| module_on(s, m)).count())" of "(members.len())}(icon("down"))}
+                    div class="module-rows"{@for m in members {(row(m))}}
+                }
+            }
+        }
+        details class="module-group" {
+            @let tools: Vec<&Value> = bundled(s).filter(|m| TOOL_ROLES.contains(&text(m, "capability"))).collect();
+            summary{strong{"Tools"}span{(tools.iter().filter(|m| module_on(s, m)).count())" of "(tools.len())}(icon("down"))}
+            div class="module-rows"{@for m in tools {(row(m))}}
+        }
+        details class="module-group" {
+            summary{strong{"Look and providers"}span{"One of each"}(icon("down"))}
+            div class="module-providers"{
+                @for (role, label, none) in PROVIDER_ROLES {
+                    @let options: Vec<&Value> = bundled(s).filter(|m| text(m, "capability") == *role).collect();
+                    @if !options.is_empty() {
+                        @let current = provider(s, role);
+                        @let none_label = if ["theme", "layout"].contains(role) {"Browser’s own"} else if *role == "icons" {"Built-in"} else {"Off"};
+                        @let items: Vec<(String, String)> = none.then(|| (String::new(), none_label.to_string())).into_iter().chain(options.iter().map(|m| (text(m, "id").to_string(), text(m, "name").trim_end_matches(" Theme").trim_end_matches(" SVG Icons").to_string()))).collect();
+                        label class="control-label"{(label)}
+                        (segments("setup-provider", role, &current, &items.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>()))
+                    }
+                }
+            }
+        }
+        p class="mimic-note"{"Change any of these later in Modules."}
+    }}
 }

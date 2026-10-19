@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.link-routes",
+  "name": "Air Traffic Control",
+  "version": 1,
+  "summary": "Send links from other apps to the Space you choose for each site.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

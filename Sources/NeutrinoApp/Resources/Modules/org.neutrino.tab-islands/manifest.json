@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.tab-islands",
+  "name": "Tab Islands",
+  "version": 1,
+  "summary": "Keep tabs you open from a page beside it as a group, as Opera GX does.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

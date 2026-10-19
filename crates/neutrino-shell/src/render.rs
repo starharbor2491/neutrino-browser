@@ -229,7 +229,7 @@ fn rail(s: &Shell, preview: bool) -> Markup {
         }
         @if !bottom && !horizontal {(location(s))}
         @if !preview && !compact {(feedback(s))}
-        @if arc {(crate::views::favorites(s))}
+        @if arc && crate::features::on(s, "favorites") {(crate::views::favorites(s))}
         div class="space-heading"{strong{(if s.private(){"Private"}else{text(&s.snapshot,"spaceName")})}button class="icon-button" data-op="menu" data-value="space" aria-label="Space options" title="Space options"{(icon("more"))}}
         @if horizontal {div class="horizontal-guide"{button class="new-tab" data-op="newTab"{(icon("plus"))"New tab"}button class="new-tab" data-op="screen" data-value="library" data-section="archive"{(icon("folder"))"Archived tabs"}}}
         @else {div class="tabs-scroll"{(tab_groups(s,preview))}}
@@ -357,7 +357,7 @@ fn shortcut_grid(s: &Shell, limit: usize, class: &str) -> Markup {
     html! {div class=(format!("shortcut-grid {class}-grid")){
         @for (title, url, id) in dial.iter().take(limit) {div class="dial-entry" data-dial=(id){(site_tile(title, url, class))button class="icon-button dial-edit" data-op="menu" data-value=(format!("edit-bookmark:{id}")) aria-label=(format!("Edit {title}")){(icon("edit"))}}}
         @for (title, url) in &sites {(site_tile(title, url, class))}
-        @if !s.private() {button class=(format!("site-tile {class} add-tile")) data-op="menu" data-value=(if class=="favorite" {"add-site"} else {"add-site:dial"}) title="Add a site"{span class="tile-mark"{span class="site-icon blank-icon"{(icon("plus"))}}span class="tile-title"{"Add"}}}
+        @if !s.private() && (class == "favorite" || crate::features::on(s, "speed-dial")) {button class=(format!("site-tile {class} add-tile")) data-op="menu" data-value=(if class=="favorite" {"add-site"} else {"add-site:dial"}) title="Add a site"{span class="tile-mark"{span class="site-icon blank-icon"{(icon("plus"))}}span class="tile-title"{"Add"}}}
     }}
 }
 fn start_guide(s: &Shell) -> Markup {
@@ -398,6 +398,9 @@ pub(crate) fn module_tools(s: &Shell) -> Markup {
 }
 fn workspace_panel(s: &Shell, key: &str) -> Markup {
     if key.starts_with("web:") {
+        if !crate::features::on(s, "web-panels") {
+            return html! {};
+        }
         return crate::views::web_panel(s, key);
     }
     let mut copy = s.clone();
@@ -552,8 +555,8 @@ fn status_bar(s: &Shell) -> Markup {
     }}
 }
 fn horizontal_tabs(s: &Shell, preview: bool) -> Markup {
-    let stacks = style(s) == "vivaldi";
-    let islands = style(s) == "gx" && s.snapshot["preferences"]["tabIslands"].as_bool().unwrap_or(true);
+    let stacks = style(s) == "vivaldi" && crate::features::on(s, "tab-stacks");
+    let islands = style(s) == "gx" && crate::features::on(s, "tab-islands");
     html! {div class="horizontal-tabs" {
         div class="tab-strip-lead" data-window-drag="true" {@if style(s) != "safari" && text(&s.config()["layout"],"tabs") != "bottom" {div class="traffic-clearance"{}}@if !s.private() {(workspace_button(s, false))}}
         div class="horizontal-group" data-drop-group="pinned" {
@@ -650,6 +653,9 @@ fn page_error(message: &str, id: &str) -> Markup {
 }
 
 fn sound_flags(s: &Shell) -> String {
+    if !crate::features::on(s, "sounds") {
+        return String::new();
+    }
     let p = &s.snapshot["preferences"];
     let gx = style(s) == "gx";
     let mut out = vec![];
@@ -665,6 +671,9 @@ fn sound_flags(s: &Shell) -> String {
     out.join(" ")
 }
 fn schedule(s: &Shell) -> Option<String> {
+    if !crate::features::on(s, "theme-schedule") {
+        return None;
+    }
     let t = &s.snapshot["preferences"]["themeSchedule"];
     (flag(t, "enabled") && !s.onboarding()).then(|| format!("{}-{}", text(t, "light"), text(t, "dark")))
 }
@@ -714,6 +723,7 @@ fn setup(s: &Shell) -> Markup {
         "Import your bookmarks",
         "Choose your appearance",
         "Set your defaults",
+        "Choose your modules",
         "Connect AI, if you want",
         "Ready to browse",
     ];
@@ -722,13 +732,14 @@ fn setup(s: &Shell) -> Markup {
         "Profiles separate website accounts. Spaces organize your tabs within a Profile.",
         "Choose an HTML bookmarks export. You can skip this step.",
         "Start with a layout and color. Customize either later.",
-        "Choose your search engine, privacy defaults and built-in modules.",
+        "Choose your search engine and privacy defaults.",
+        "Each feature is a module. Turn on the ones you want; change them any time in Modules.",
         "Use an API key, an OpenAI account or a local model.",
         "Review your choices and open Neutrino.",
     ];
     html! {main class=(format!("onboarding step-{}",s.step)) {
         div class="setup-drag" data-window-drag="true"{}
-        aside class="setup-scene" aria-hidden="true" {div class="scene-caption"{span{(["Your browser","Profiles & Spaces","Bookmarks","Appearance","Privacy & modules","Optional AI","All set"][s.step])}}
+        aside class="setup-scene" aria-hidden="true" {div class="scene-caption"{span{(["Your browser","Profiles & Spaces","Bookmarks","Appearance","Privacy","Modules","Optional AI","All set"][s.step.min(7)])}}
             div class="mini-browser" data-layout=(text(&s.setup,"layout")){div class="mini-rail"{div class="mini-dots"{i{}i{}i{}}div class="mini-address"{(icon("search"))"Search or enter URL"}strong{(text(&s.setup,"space"))}div class="mini-pin"{i class="site-icon site-color-0"{"G"}"GitHub"}div class="mini-folder"{(icon("folder"))"Projects"}div class="mini-tab"{i class="site-icon site-color-3"{"M"}"Mail"}div class="mini-tab selected"{i class="site-icon blank-icon"{(icon("plus"))}"New Tab"}div class="mini-plus"{(icon("plus"))"New tab"}}div class="mini-page"{div class="mini-start"{div class="mini-search"{(icon("search"))"Search or enter an address"}div class="mini-tiles"{@for (label,tone) in [("GitHub",0),("Calendar",1),("Docs",2),("Mail",3)]{span class="mini-tile"{i class=(format!("site-icon site-color-{tone}")){(label.chars().next().unwrap_or('N'))}(label)}}}}}}
         }
         section class="setup-content"{header class="setup-header"{span class="wordmark"{img class="brand-icon" src="neutrino.svg" alt="";"neutrino"}}
@@ -739,13 +750,14 @@ fn setup(s: &Shell) -> Markup {
                     1=>{(field("Profile name","profile",text(&s.setup,"profile"),s.invalid_field=="profile"))(field("Your first Space","space",text(&s.setup,"space"),s.invalid_field=="space"))}
                     2=>{button class="import-card" data-op="importBookmarks"{span class="import-symbol"{(icon("download"))}span class="import-text"{strong{(if flag(&s.snapshot,"imported"){"Bookmarks imported"}else{"Choose a bookmarks file…"})}span{"In your old browser, export bookmarks as HTML, then choose that file here."}}(icon(if flag(&s.snapshot,"imported"){"check"}else{"arrow"}))}p class="field-help"{"Passwords and website sign-ins aren’t part of a bookmarks file."}}
                     3=>{label class="control-label"{"Color"}(swatches(s,true))label class="control-label"{"Appearance"}(segments("setup-field","appearance",text(&s.setup,"appearance"),&[("system","System"),("light","Light"),("dark","Dark")]))label class="control-label"{"Tabs"}(segments("setup-field","layout",text(&s.setup,"layout"),&[("leading","In the sidebar"),("top","Along the top")]))}
-                    4=>{label class="control-label"{"Search engine"}(segments("setup-field","search",text(&s.setup,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))div class="settings-group"{(toggle("Block ads & trackers","Applies to every Profile.","blockTrackers",flag(&s.setup,"blockTrackers"),true))(toggle("Block popups","Popups you open with a click still appear.","blockPopups",flag(&s.setup,"blockPopups"),true))(toggle("Reopen your tabs at launch","Private windows are never restored.","restoreSession",flag(&s.setup,"restoreSession"),true))}details class="setup-modules"{summary{(icon("grid"))"Built-in modules"(icon("down"))}p{"You can change these later in Modules."}@for m in array(&s.snapshot["modules"]).iter().filter(|m|flag(m,"installed") && ["notes","reader","focusMode","resourceMonitor"].contains(&text(m,"capability"))).take(5){button class="setup-module-row" data-op="native" data-action="toggleModule" data-id=(text(m,"id")) role="switch" aria-checked=(flag(m,"enabled").to_string()){(icon(module_glyph(text(m,"id"))))span{(text(m,"name"))}span class="module-status"{(if flag(m,"enabled"){"On"}else{"Off"})}}}}}
-                    5=>{details class="ai-disclosure"{summary{(icon("spark"))"Set up an AI provider"(icon("down"))}(ai_form(s))}p class="field-help"{"Skip this if you don’t plan to use AI. You can add a provider later in Settings → AI providers."}}
-                    _=>{div class="setup-review"{div{span{"Your Space"}strong{(text(&s.setup,"space"))}}div{span{"Profile"}strong{(text(&s.setup,"profile"))}}div{span{"Search"}strong{(match text(&s.setup,"search"){"google"=>"Google","bing"=>"Bing",_=>"DuckDuckGo"})}}div{span{"Privacy"}strong{(if flag(&s.setup,"blockTrackers"){"Blocking on"}else{"Blocking off"})}}div{span{"Built-in tools"}strong{(array(&s.snapshot["modules"]).iter().filter(|m|flag(m,"enabled") && ["notes","reader","focusMode","resourceMonitor"].contains(&text(m,"capability"))).map(|m|text(m,"name")).collect::<Vec<_>>().join(", "))}}}button class="default-browser" data-op="defaultBrowser"{(icon("globe"))span{"Make Neutrino your default"}(icon("external"))}p class="field-help"{(text(&s.snapshot,"defaultStatus"))}}
+                    4=>{label class="control-label"{"Search engine"}(segments("setup-field","search",text(&s.setup,"search"),&[("duckDuckGo","DuckDuckGo"),("google","Google"),("bing","Bing")]))div class="settings-group"{(toggle("Block ads & trackers","Applies to every Profile.","blockTrackers",flag(&s.setup,"blockTrackers"),true))(toggle("Block popups","Popups you open with a click still appear.","blockPopups",flag(&s.setup,"blockPopups"),true))(toggle("Reopen your tabs at launch","Private windows are never restored.","restoreSession",flag(&s.setup,"restoreSession"),true))}}
+                    5=>{(crate::onboarding::module_picker(s))}
+                    6=>{details class="ai-disclosure"{summary{(icon("spark"))"Set up an AI provider"(icon("down"))}(ai_form(s))}p class="field-help"{"Skip this if you don’t plan to use AI. You can add a provider later in Settings → AI providers."}}
+                    _=>{div class="setup-review"{div{span{"Your Space"}strong{(text(&s.setup,"space"))}}div{span{"Profile"}strong{(text(&s.setup,"profile"))}}div{span{"Search"}strong{(match text(&s.setup,"search"){"google"=>"Google","bing"=>"Bing",_=>"DuckDuckGo"})}}div{span{"Privacy"}strong{(if flag(&s.setup,"blockTrackers"){"Blocking on"}else{"Blocking off"})}}div{span{"Modules"}strong{(crate::onboarding::module_choices(s).as_object().map_or(0, |m| m.values().filter(|v| v == &&serde_json::Value::Bool(true)).count()))" on"}}}button class="default-browser" data-op="defaultBrowser"{(icon("globe"))span{"Make Neutrino your default"}(icon("external"))}p class="field-help"{(text(&s.snapshot,"defaultStatus"))}}
                 }
             }
-            footer class="setup-footer"{(feedback(s))div class="setup-progress" role="progressbar" aria-label="Setup progress" aria-valuemin="1" aria-valuemax=(flow.len()) aria-valuenow=(s.step+1) aria-valuetext=(format!("Step {} of {}: {}",s.step+1,flow.len(),titles[s.step.min(6)])){span class="step-count"{(s.step+1)" of "(flow.len())}@for i in 0..flow.len(){span class=(if i==s.step{"current"}else if i<s.step{"done"}else{""}) aria-hidden="true"{}}}
-                div class="setup-actions"{@if s.step>0{button class="button quiet" data-op="setup-back" disabled[s.setup_busy]{(icon("back"))"Back"}}span class="spacer"{}button class="button primary" data-op=(if last{"setup-finish"}else{"setup-next"}) disabled[s.setup_busy]{(if s.setup_busy{"Saving…"}else if last{"Open Neutrino"}else if s.step==0{"Continue"}else if s.step==2&&!flag(&s.snapshot,"imported")||s.step==5&&s.snapshot["preferences"]["ai"].is_null(){"Skip for now"}else{"Continue"})(icon("arrow"))}}
+            footer class="setup-footer"{(feedback(s))div class="setup-progress" role="progressbar" aria-label="Setup progress" aria-valuemin="1" aria-valuemax=(flow.len()) aria-valuenow=(s.step+1) aria-valuetext=(format!("Step {} of {}: {}",s.step+1,flow.len(),titles[s.step.min(7)])){span class="step-count"{(s.step+1)" of "(flow.len())}@for i in 0..flow.len(){span class=(if i==s.step{"current"}else if i<s.step{"done"}else{""}) aria-hidden="true"{}}}
+                div class="setup-actions"{@if s.step>0{button class="button quiet" data-op="setup-back" disabled[s.setup_busy]{(icon("back"))"Back"}}span class="spacer"{}button class="button primary" data-op=(if last{"setup-finish"}else{"setup-next"}) disabled[s.setup_busy]{(if s.setup_busy{"Saving…"}else if last{"Open Neutrino"}else if s.step==0{"Continue"}else if s.step==2&&!flag(&s.snapshot,"imported")||s.step==6&&s.snapshot["preferences"]["ai"].is_null(){"Skip for now"}else{"Continue"})(icon("arrow"))}}
             }
         }
     }}
@@ -950,7 +962,7 @@ fn library(s: &Shell) -> Markup {
     let count = s.snapshot["libraryCount"].as_u64().unwrap_or(0);
     html! {div class="library-content" {
         @if !flag(&s.snapshot,"downloadsWindow") {nav class="library-tabs" aria-label="Library sections" {
-            @for (key,label,glyph) in [("bookmarks","Bookmarks","bookmark"),("reading","Reading List","book"),("history","History","history"),("downloads","Downloads","download"),("notes","Notes","edit"),("boards","Boards","grid"),("sessions","Sessions","folder"),("archive","Archived","undo")] {
+            @for (key,label,glyph) in [("bookmarks","Bookmarks","bookmark"),("reading","Reading List","book"),("history","History","history"),("downloads","Downloads","download"),("notes","Notes","edit"),("boards","Boards","grid"),("sessions","Sessions","folder"),("archive","Archived","undo")].into_iter().filter(|(k,_,_)| crate::features::on(s, match *k {"reading" => "reading-list", "boards" => "boards", "sessions" => "sessions", _ => "*"})) {
                 button class=(if section==key{"selected"}else{""}) data-op="section" data-value=(key) title=(label) aria-label=(label) aria-pressed=((section==key).to_string()){(icon(glyph))span{(label)}}
             }
         }
@@ -1014,7 +1026,29 @@ fn assistant(s: &Shell) -> Markup {
     html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect an AI provider","Ask questions about the page you’re reading. You need an API key, an OpenAI account, or a local model.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Set up a provider"}} @else {p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider."}div class="assistant-response"{(text(&s.snapshot,"assistantResponse"))}form data-form="assistant"{label class="field"{span{"Your question"}textarea name="prompt" placeholder="What would you like to know?" required{}}button class="button primary" type="submit" disabled[flag(&s.snapshot,"assistantBusy")]{(if flag(&s.snapshot,"assistantBusy"){"Thinking…"}else{"Share page and ask"})}}}}}
 }
 fn module_glyph(id: &str) -> &str {
-    if id.contains("theme") {
+    let feature = match id.strip_prefix("org.neutrino.").unwrap_or("") {
+        "tab-sleep" => "moon",
+        "tab-islands" | "tab-stacks" => "folder",
+        "favorites" => "star",
+        "tidy-tabs" => "spark",
+        "peek" | "little-arc" => "external",
+        "link-routes" => "forward",
+        "mouse-gestures" | "command-chains" => "code",
+        "page-styles" | "boosts" | "interface-css" | "wallpapers" | "theme-schedule" => "appearance",
+        "cookie-banners" | "forget-sites" | "panic" => "shield",
+        "autofill" => "user",
+        "web-panels" => "panel",
+        "boards" | "speed-dial" => "grid",
+        "reading-list" => "book",
+        "sessions" => "folder",
+        "media-controls" | "sounds" => "volume",
+        "break-mode" => "pause",
+        "limiter" => "activity",
+        _ => "",
+    };
+    if !feature.is_empty() {
+        feature
+    } else if id.contains("theme") {
         "spark"
     } else if id.contains("tabs") || id.contains("layout") {
         "sidebar"
@@ -1031,6 +1065,19 @@ fn module_glyph(id: &str) -> &str {
     } else {
         "grid"
     }
+}
+/// Modules grouped as in setup: built-in features by area, then everything else.
+fn module_groups<'a>(shown: &[&'a Value]) -> Vec<(&'static str, Vec<&'a Value>)> {
+    let mut groups: Vec<(&'static str, Vec<&'a Value>)> = vec![];
+    for m in shown {
+        let group = crate::features::MODULES.iter().find(|f| text(m, "capability") == "feature" && text(m, "id") == format!("org.neutrino.{}", f.0)).map_or("Tools and looks", |f| f.1);
+        match groups.iter_mut().find(|g| g.0 == group) {
+            Some(g) => g.1.push(m),
+            None => groups.push((group, vec![m])),
+        }
+    }
+    groups.sort_by_key(|g| if g.0 == "Tools and looks" { 0 } else { 1 + crate::features::MODULES.iter().position(|f| f.1 == g.0).unwrap_or(99) });
+    groups
 }
 fn module_description(module: &Value) -> &str {
     match text(module, "id") {
@@ -1063,10 +1110,13 @@ fn modules(s: &Shell) -> Markup {
         div class="modules-toolbar"{(segments("module-filter","",s.module_filter.as_str(),&[("installed","Installed"),("available","Available"),("all","All")]))label class="module-search"{(icon("search"))input id="module-search" data-module-search="true" type="search" value=(s.module_query.as_str()) placeholder="Search modules" aria-label="Search modules" autocomplete="off";}span class="spacer"{}button class="button" data-op="importModule" title="Install a module package from a file"{(icon("plus"))"Add from file…"}}
         @if all.is_empty(){(empty("Modules could not load","Open Recovery to repair module storage, or import a local package.","grid"))(action("Open Recovery","module-recovery",false))}
         @else if shown.is_empty(){(empty("No matching modules","Try another search or view the available modules.","search"))}
-        @else {div class="module-grid"{@for m in shown{article class="module-card"{
+        @else {@for (group, members) in module_groups(&shown) {
+            @if module_groups(&shown).len() > 1 {h2 class="module-group-title"{(group)}}
+            div class="module-grid"{@for m in members{article class="module-card"{
             button class="module-open" data-op="module-select" data-value=(text(m,"id")) aria-label=(format!("{} details",text(m,"name"))){span class="module-icon"{(icon(module_glyph(text(m,"id"))))}div{h2{(text(m,"name"))}p{(module_description(m))}}}
             div class="module-card-footer"{span class=(if flag(m,"enabled"){"module-status active"}else{"module-status"}){(if flag(m,"enabled"){"Active"}else if flag(m,"installed"){"Disabled"}else{"Available"})}span class="spacer"{}button class="button quiet" data-op="native" data-action=(if flag(m,"installed"){"toggleModule"}else{"installModule"}) data-id=(text(m,"id")){(if !flag(m,"installed"){"Install"}else if flag(m,"enabled"){"Disable"}else if flag(m,"replacesProvider"){"Replace provider"}else{"Enable"})}}
-        }}}}
+        }}}
+        }}
         footer class="modules-footer"{span{(all.iter().filter(|m|flag(m,"enabled")).count())" of "(all.len())" modules on"}button class="button quiet" data-op="native" data-action="importCatalog" title="Add a list of modules published by someone else"{"Add a catalog…"}}
     }}
 }
@@ -1151,9 +1201,9 @@ fn menu(s: &Shell) -> Markup {
             m if m.starts_with("add-site")=>{label class="field"{span{"Site address"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="example.com" maxlength="2000" autocomplete="off" spellcheck="false";}button class="button primary" data-op="addSite" disabled[s.name.is_empty()]{"Add"}p class="field-help"{(if m=="add-site:dial" {"Sites you add are saved in the Speed Dial bookmarks folder."} else {"Sites you add are saved as bookmarks."})}}
             "notes-scope"=>{@for (value,label) in [("space","This Space"),("all","All notes")]{button class="menu-item" data-op="native" data-action="notesScope" data-value=(value){(icon(if text(&s.snapshot,"notesScope")==value{"check"}else{"folder"}))span{(label)}}}}
             "split-choose"=>{div class="menu-label"{"Open beside this page"}@for t in s.tabs().iter().filter(|t|t["id"]!=s.active()["id"] && !text(t,"url").is_empty()){button class="menu-item" data-op="split-with" data-id=(text(t,"id")){(site(t))span{(text(t,"title"))}}}@if s.tabs().iter().filter(|t|!text(t,"url").is_empty()).count()<2{p class="field-help"{"Open a second page, then choose it here."}}}
-            "space"=>{div class="menu-group"{(menu_item("New folder","menu","new-folder","folder"))(menu_item("Save tabs as session…","menu","save-session","download"))button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))span{"Archived tabs"}}}
-                div class="menu-separator"{}
-                button class="menu-item" data-op="tidy-tabs" disabled[s.private()]{(icon("spark"))span{"Tidy tabs into folders"}}
+            "space"=>{div class="menu-group"{(menu_item("New folder","menu","new-folder","folder"))@if crate::features::on(s, "sessions") {(menu_item("Save tabs as session…","menu","save-session","download"))}button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))span{"Archived tabs"}}}
+                @if crate::features::on(s, "tidy-tabs") {div class="menu-separator"{}
+                button class="menu-item" data-op="tidy-tabs" disabled[s.private()]{(icon("spark"))span{"Tidy tabs into folders"}}}
                 div class="menu-separator"{}
                 div class="menu-group"{(menu_item("Rename Space","menu","rename-space","edit"))(menu_item("Icon and colors…","menu","space-style","appearance"))(menu_item("Edit layout","screen","editor","sidebar"))(menu_item("New Space","menu","new-space","plus"))}
                 div class="menu-separator"{}

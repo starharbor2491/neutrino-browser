@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.boosts",
+  "name": "Boosts",
+  "version": 1,
+  "summary": "Add your own CSS to a site, or click elements to hide them.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

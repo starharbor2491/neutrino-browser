@@ -24,13 +24,13 @@ pub const PRESETS: &[(&str, &str, &str)] = &[
 /// flow. Account and sync steps are left out: they need the vendor's service.
 pub fn setup_flow(preset: &str) -> &'static [&'static str] {
     match preset {
-        "arc" => &["layout", "arc-welcome", "arc-theme", "arc-import", "arc-favorites", "arc-default", "arc-tour"],
-        "gx" => &["layout", "gx-welcome", "gx-theme", "gx-sounds", "gx-sidebar", "gx-blocking", "gx-import"],
-        "vivaldi" => &["layout", "vivaldi-welcome", "vivaldi-edition", "vivaldi-import", "vivaldi-theme", "vivaldi-tabs", "vivaldi-blocking", "vivaldi-done"],
-        "brave" => &["layout", "brave-welcome", "brave-import", "brave-shields", "brave-done"],
-        "chrome" => &["layout", "chrome-welcome", "chrome-theme", "chrome-default"],
-        "safari" => &["layout"],
-        _ => &["layout", "workspace", "import", "appearance", "defaults", "ai", "review"],
+        "arc" => &["layout", "arc-welcome", "arc-theme", "arc-import", "arc-favorites", "arc-modules", "arc-default", "arc-tour"],
+        "gx" => &["layout", "gx-welcome", "gx-theme", "gx-sounds", "gx-sidebar", "gx-blocking", "gx-modules", "gx-import"],
+        "vivaldi" => &["layout", "vivaldi-welcome", "vivaldi-edition", "vivaldi-modules", "vivaldi-import", "vivaldi-theme", "vivaldi-tabs", "vivaldi-blocking", "vivaldi-done"],
+        "brave" => &["layout", "brave-welcome", "brave-import", "brave-shields", "brave-modules", "brave-done"],
+        "chrome" => &["layout", "chrome-welcome", "chrome-theme", "chrome-modules", "chrome-default"],
+        "safari" => &["layout", "safari-modules"],
+        _ => &["layout", "workspace", "import", "appearance", "defaults", "modules", "ai", "review"],
     }
 }
 

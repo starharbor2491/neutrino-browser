@@ -6306,3 +6306,111 @@ input[type="color"] {
   background: transparent;
   pointer-events: none;
 }
+
+/* Module picker in setup, and grouped Modules */
+.module-picker {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.module-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.module-picker-bar .spacer {
+  flex: 1;
+}
+.module-group {
+  border: 1px solid var(--line);
+  border-radius: calc(10px * var(--sq));
+  background: var(--hover);
+}
+.module-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: default;
+  list-style: none;
+  font-size: 13px;
+}
+.module-group > summary::-webkit-details-marker {
+  display: none;
+}
+.module-group > summary strong {
+  flex: 1;
+  font-weight: 600;
+}
+.module-group > summary span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.module-group > summary .icon {
+  transition: transform 160ms ease;
+}
+.module-group[open] > summary .icon {
+  transform: rotate(180deg);
+}
+.module-rows,
+.module-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 6px 8px;
+}
+.module-providers {
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+.module-providers .control-label {
+  margin-top: 4px;
+}
+.module-picker .setup-module-row {
+  text-align: left;
+  min-height: 44px;
+}
+.module-picker .setup-module-row:hover {
+  background: var(--hover);
+}
+.module-picker .setup-module-row span:first-of-type {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.module-picker .setup-module-row strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.module-picker .setup-module-row small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.module-picker .mimic-note {
+  margin-top: 6px;
+  text-align: center;
+}
+.mimic-onboarding.step-arc-modules .mimic-stage,
+.mimic-onboarding.step-gx-modules .mimic-stage,
+.mimic-onboarding.step-vivaldi-modules .mimic-stage,
+.mimic-onboarding.step-brave-modules .mimic-stage,
+.mimic-onboarding.step-chrome-modules .mimic-stage,
+.mimic-onboarding.step-safari-modules .mimic-stage {
+  justify-content: flex-start;
+  padding-top: 40px;
+}
+.module-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 18px 2px 8px;
+}
+.module-group-title:first-of-type {
+  margin-top: 4px;
+}

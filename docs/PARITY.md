@@ -21,6 +21,8 @@ The target is equivalent local user workflows from Arc, Chrome, Opera GX, Vivald
 | Brave | Shields per site, blocked counts, private search start page | Shields per site implemented. Chromium tabs report blocked requests per page and in total; WebKit content rule lists do not report matches, so WebKit tabs show no count |
 | Distribution | One offline ARM installer, signing/notarization/trust/payload closure/clean-Mac setup | ARM development DMGs built; installed WebKit copy/launch/quit/removal pass; full Blink, consumer trust and clean-Mac core acceptance pending |
 
+Every feature beyond core browsing (tabs, address bar, find, history, bookmarks, downloads, settings) is a built-in module under `org.neutrino.*` with the `feature` role. Setup has a Modules step in every flow whose defaults follow the browser chosen, and each module can be turned off later in Modules or from the setting it governs.
+
 Before declaring core complete, resolve daily-use gaps, pass native/installed acceptance, verify extensions, and demonstrate protected streaming. Stubs, hidden stock controls, untested logins, and historical receipts do not satisfy gates.
 
 Cloud sync/storage, VPN, crypto wallets, rewards, remote safe-browsing lists and a Neutrino store are excluded. Optional AI services and extension downloads are allowed.

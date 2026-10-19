@@ -35,6 +35,11 @@ pub fn title(t: &Value) -> &str {
 pub fn setting_toggle(label: &str, detail: &str, key: &str, value: bool) -> Markup {
     html! {button class="toggle-row" data-op="setting" data-key=(key) data-value=((!value).to_string()) data-type="bool" role="switch" aria-checked=(value.to_string()) {span {strong{(label)}@if !detail.is_empty(){small{(detail)}}} span class=(if value{"switch on"}else{"switch"}) {span{}}}}
 }
+/// A switch for a built-in feature module, shown where its settings live.
+pub fn module_toggle(s: &Shell, key: &str, label: &str, detail: &str) -> Markup {
+    let value = features::on(s, key);
+    html! {button class="toggle-row" data-op="native" data-action="toggleModule" data-id=(format!("org.neutrino.{key}")) role="switch" aria-checked=(value.to_string()) {span {strong{(label)}@if !detail.is_empty(){small{(detail)}}} span class=(if value{"switch on"}else{"switch"}) {span{}}}}
+}
 fn choice(key: &str, current: i64, items: &[(i64, &str)]) -> Markup {
     let index = items.iter().position(|(v, _)| *v == current);
     html! {div class="segments" role="group" style=(format!("--count:{};--index:{}",items.len(),index.unwrap_or(0))) data-selected=(index.is_some().to_string()){@for (value,label) in items{button class=(if *value==current{"selected"}else{""}) data-op="setting" data-key=(key) data-value=(value) data-type="number" aria-pressed=((*value==current).to_string()){(label)}}}}
@@ -150,6 +155,7 @@ pub fn site_menu(s: &Shell) -> Markup {
             (site_toggle("JavaScript", "Turn off to stop scripts on this site.", "blockScripts", !flag(settings, "blockScripts")))
             (site_toggle("Pop-ups", "Allow this site to open windows.", "allowPopups", flag(settings, "allowPopups")))
             (site_toggle("Sound", "Turn off to mute this site in every tab.", "muted", !flag(settings, "muted")))
+            @if features::on(s, "forget-sites") {(site_toggle("Forget me when I close this site", "Clear its cookies and storage when its last tab closes.", "forget", !flag(settings, "forget")))}
             @for (key, label) in [("camera", "Camera"), ("microphone", "Microphone")] {
                 div class="site-permission"{span{(label)}(segments("site-setting", key, if text(settings,key).is_empty() {"ask"} else {text(settings,key)}, &[("ask","Ask"),("allow","Allow"),("block","Block")]))}
             }
@@ -184,18 +190,18 @@ pub fn page_menu(s: &Shell) -> Markup {
             button class="menu-item" data-op="menu" data-value="split-choose" disabled[blank]{(icon("split"))span{"Split view"}}
             @if enabled("reader"){button class="menu-item" data-op="reader" disabled[blank]{(icon("book"))span{"Reader view"}}}
             button class="menu-item" data-op="page-command" data-value="pip" disabled[blank]{(icon("pip"))span{"Picture in picture"}}
-            button class="menu-item" data-op="menu" data-value="page-style" disabled[blank]{(icon("appearance"))span{(if gx {"Page shaders"} else {"Page style"})}}
-            button class="menu-item" data-op="menu" data-value="boost" disabled[blank || s.private()]{(icon("edit"))span{(if arc {"Boost this site"} else {"Site CSS"})}}
-            button class="menu-item" data-op="page-command" data-value="pick-element" disabled[blank || s.private()]{(icon("focus"))span{(if arc {"Zap an element"} else {"Hide an element"})}}
+            @if features::on(s, "page-styles") {button class="menu-item" data-op="menu" data-value="page-style" disabled[blank]{(icon("appearance"))span{(if gx {"Page shaders"} else {"Page style"})}}}
+            @if features::on(s, "boosts") {button class="menu-item" data-op="menu" data-value="boost" disabled[blank || s.private()]{(icon("edit"))span{(if arc {"Boost this site"} else {"Site CSS"})}}
+            button class="menu-item" data-op="page-command" data-value="pick-element" disabled[blank || s.private()]{(icon("focus"))span{(if arc {"Zap an element"} else {"Hide an element"})}}}
             @if enabled("focusMode"){button class="menu-item" data-op="native" data-action="toggleFocus"{(icon("focus"))span{"Focus mode"}}}
         }
         div class="menu-separator"{}
         div class="menu-group"{
-            button class="menu-item" data-op="reading" data-value="add" disabled[blank || s.private()]{(icon("book"))span{"Add to Reading List"}kbd{"⇧⌘D"}}
+            @if features::on(s, "reading-list") {button class="menu-item" data-op="reading" data-value="add" disabled[blank || s.private()]{(icon("book"))span{"Add to Reading List"}kbd{"⇧⌘D"}}}
             @if enabled("screenshot"){button class="menu-item" data-op="menu" data-value="capture" disabled[blank]{(icon("camera"))span{"Capture"}kbd{"⇧⌘S"}}}
             @if enabled("notes"){button class="menu-item" data-op="panel" data-value="notes"{(icon("edit"))span{"Notes beside page"}}}
             button class="menu-item" data-op="summarize" disabled[blank]{(icon("spark"))span{"Summarize page"}}
-            @if !profile_items(s, "addresses").is_empty() || !array(&prefs(s)["addresses"]).is_empty() {button class="menu-item" data-op="menu" data-value="fill-address" disabled[blank]{(icon("user"))span{"Fill address"}}}
+            @if features::on(s, "autofill") && (!profile_items(s, "addresses").is_empty() || !array(&prefs(s)["addresses"]).is_empty()) {button class="menu-item" data-op="menu" data-value="fill-address" disabled[blank]{(icon("user"))span{"Fill address"}}}
         }
         div class="menu-separator"{}
         div class="menu-group"{
@@ -225,14 +231,14 @@ pub fn browser_menu(s: &Shell) -> Markup {
             button class="menu-item" data-op="menu" data-value="recently-closed" disabled[array(&s.snapshot["closedTabs"]).is_empty()]{(icon("undo"))span{"Recently closed"}}
             button class="menu-item" data-op="screen" data-value="library" data-section="bookmarks"{(icon("bookmark"))span{"Bookmarks"}}
             button class="menu-item" data-op="screen" data-value="library" data-section="downloads"{(icon("download"))span{"Downloads"}}
-            button class="menu-item" data-op="screen" data-value="library" data-section="reading"{(icon("book"))span{"Reading List"}}
+            @if features::on(s, "reading-list") {button class="menu-item" data-op="screen" data-value="library" data-section="reading"{(icon("book"))span{"Reading List"}}}
         }
         div class="menu-separator"{}
         div class="menu-group"{
             button class="menu-item" data-op="screen" data-value="extensions"{(icon("plug"))span{"Extensions"}}
             button class="menu-item" data-op="screen" data-value="settings" data-section="performance"{(icon("activity"))span{"Task manager"}}
             button class="menu-item" data-op="menu" data-value="clear-data"{(icon("trash"))span{"Clear browsing data…"}}
-            @if gx {button class="menu-item" data-op="page-command" data-value="panic"{(icon("shield"))span{"Panic button"}kbd{"⌃⌥⌘P"}}}
+            @if gx && features::on(s, "panic") {button class="menu-item" data-op="page-command" data-value="panic"{(icon("shield"))span{"Panic button"}kbd{"⌃⌥⌘P"}}}
         }
         div class="menu-separator"{}
         div class="menu-group"{
@@ -257,14 +263,14 @@ pub fn tab_menu(s: &Shell, t: &Value) -> Markup {
             button class="menu-item" data-op="pinTab" data-id=(id){(icon("pin"))span{(if flag(t,"pinned"){"Unpin"}else{"Pin"})}}
             @if pinned_away {button class="menu-item" data-op="tab-action" data-id=(id) data-value="reset-pinned"{(icon("home"))span{"Back to pinned page"}}}
             button class="menu-item" data-op="tab-action" data-id=(id) data-value="mute"{(icon(if muted {"volume"} else {"muted"}))span{(if muted {"Unmute tab"} else {"Mute tab"})}}
-            @if !active && has_page {button class="menu-item" data-op="tab-action" data-id=(id) data-value="sleep" disabled[sleeping(s,id)]{(icon("moon"))span{(if sleeping(s,id){"Sleeping"}else{"Put to sleep"})}}}
+            @if !active && has_page && features::on(s, "tab-sleep") {button class="menu-item" data-op="tab-action" data-id=(id) data-value="sleep" disabled[sleeping(s,id)]{(icon("moon"))span{(if sleeping(s,id){"Sleeping"}else{"Put to sleep"})}}}
             button class="menu-item" data-op="tab-action" data-id=(id) data-value="rename"{(icon("edit"))span{"Rename"}}
         }
         div class="menu-separator"{}
         div class="menu-group"{
             button class="menu-item" data-op="tab-action" data-id=(id) data-value="copy" disabled[!has_page]{(icon("copy"))span{"Copy link"}}
             button class="menu-item" data-op="tab-action" data-id=(id) data-value="bookmark" disabled[!has_page || s.private()]{(icon("bookmark"))span{"Add to bookmarks"}}
-            @if style(s) == "arc" {button class="menu-item" data-op="tab-action" data-id=(id) data-value="favorite" disabled[!has_page || s.private()]{(icon("star"))span{"Add to Favorites"}}}
+            @if style(s) == "arc" && features::on(s, "favorites") {button class="menu-item" data-op="tab-action" data-id=(id) data-value="favorite" disabled[!has_page || s.private()]{(icon("star"))span{"Add to Favorites"}}}
             @if !active && has_page {button class="menu-item" data-op="tab-action" data-id=(id) data-value="split"{(icon("split"))span{"Split with current tab"}}}
         }
         div class="menu-separator"{}
@@ -409,10 +415,16 @@ pub fn bookmarks_bar(s: &Shell) -> Markup {
 
 /// Sites for the Speed Dial: its bookmark folder, if the person filled it.
 pub fn speed_dial(s: &Shell) -> Vec<(String, String, String)> {
+    if !features::on(s, "speed-dial") {
+        return vec![];
+    }
     array(&s.snapshot["bookmarkIndex"]).iter().filter(|b| text(b, "folder") == "Speed Dial").take(24).map(|b| (text(b, "title").to_string(), text(b, "url").to_string(), text(b, "id").to_string())).collect()
 }
 
 pub fn wallpaper_style(s: &Shell) -> String {
+    if !features::on(s, "wallpapers") {
+        return String::new();
+    }
     let image = text(&s.snapshot, "wallpaper");
     if (image.starts_with("data:image/jpeg;base64,") || image.starts_with("data:image/png;base64,") || image.starts_with("data:image/svg+xml;base64,"))
         && image.len() < 4_000_000
@@ -430,6 +442,9 @@ pub fn start_option(s: &Shell, key: &str) -> bool {
 
 /// A strip of panel buttons for web panels the person added.
 pub fn web_panel_buttons(s: &Shell) -> Markup {
+    if !features::on(s, "web-panels") {
+        return html! {};
+    }
     let open = s.visible_panel_key();
     html! {
         @for p in profile_items(s, "webPanels") {
@@ -450,6 +465,9 @@ pub fn web_panel(s: &Shell, key: &str) -> Markup {
 
 /// Now playing: the tab that most recently made sound.
 pub fn media_card(s: &Shell) -> Markup {
+    if !features::on(s, "media-controls") {
+        return html! {};
+    }
     let media = &s.snapshot["media"];
     let id = text(media, "id");
     let Some(t) = s.tabs().iter().find(|t| text(t, "id") == id) else { return html! {} };
@@ -656,22 +674,28 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
             }
         }
         "autofill" => html! {h2{"Autofill"}p class="section-description"{"Addresses are saved on this Mac. Fill a form from the page menu → Fill address."}
+            div class="settings-group"{(module_toggle(s, "autofill", "Address autofill", "Offer saved addresses in the page menu."))}
+            @if features::on(s, "autofill") {
             @for a in array(&p["addresses"]) {div class="list-row"{(icon("user"))div{strong{(text(a,"name"))}small{(text(a,"street"))" "(text(a,"city"))}}button class="icon-button" data-op="address-book" data-value="remove" data-id=(text(a,"id")) aria-label="Remove address"{(icon("close"))}}}
             details class="credential-disclosure"{summary{"Add an address"}form data-form="address-book"{
                 @for (key, label) in [("name","Full name"),("organization","Organization"),("street","Street address"),("city","City"),("region","State or region"),("postalCode","Postal code"),("country","Country"),("email","Email"),("phone","Phone")] {label class="field"{span{(label)}input name=(key) maxlength="200" autocomplete="off";}}
                 button class="button primary" type="submit"{"Save address"}
             }}
+            }
             p class="field-help"{"Payment cards aren’t stored. Passwords are in Settings → Passwords."}
         },
         "performance" => {
             let rows = array(&s.snapshot["tabResources"]);
             html! {h2{"Performance"}
-                label class="control-label"{"Put inactive tabs to sleep after"}(choice("sleepAfterMinutes", p["sleepAfterMinutes"].as_i64().unwrap_or(60), &[(0,"Never"),(15,"15 min"),(30,"30 min"),(60,"1 hour"),(120,"2 hours"),(240,"4 hours")]))
-                p class="field-help"{"Sleeping tabs keep their place and reload when you select them. Tabs playing sound are never put to sleep."}
+                div class="settings-group"{(module_toggle(s, "tab-sleep", "Sleeping tabs", "Sleeping tabs keep their place and reload when you select them. Tabs playing sound never sleep."))}
+                @if features::on(s, "tab-sleep") {label class="control-label"{"Put inactive tabs to sleep after"}(choice("sleepAfterMinutes", p["sleepAfterMinutes"].as_i64().unwrap_or(60), &[(0,"Never"),(15,"15 min"),(30,"30 min"),(60,"1 hour"),(120,"2 hours"),(240,"4 hours")]))}
+                div class="settings-group"{(module_toggle(s, "limiter", if style(s) == "gx" {"GX Control"} else {"Resource limits"}, "Put background tabs to sleep when memory or processor use passes a limit."))}
+                @if features::on(s, "limiter") {
                 label class="control-label"{"Memory limit"}(choice("memoryLimitMB", p["memoryLimitMB"].as_i64().unwrap_or(0), &[(0,"Off"),(1024,"1 GB"),(2048,"2 GB"),(4096,"4 GB"),(8192,"8 GB")]))
                 label class="control-label"{"CPU limit"}(choice("cpuLimit", p["cpuLimit"].as_i64().unwrap_or(0), &[(0,"Off"),(25,"25%"),(50,"50%"),(75,"75%")]))
                 p class="field-help"{"Above a limit, the least recently used background tabs go to sleep until usage drops."}
                 label class="control-label"{"Network limit for Chromium tabs"}(choice("networkLimitKBps", p["networkLimitKBps"].as_i64().unwrap_or(0), &[(0,"Off"),(256,"256 KB/s"),(1024,"1 MB/s"),(5120,"5 MB/s"),(10240,"10 MB/s")]))
+                }
                 (setting_toggle("Battery saver", "On battery power, background tabs sleep after 5 minutes and background music stops.", "batterySaver", flag(p,"batterySaver")))
                 h3{"Tabs by resource use"}
                 @if rows.is_empty() {p class="field-help"{"Measuring open tabs…"}}
@@ -684,7 +708,7 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
         "shortcuts" => {
             let map = features::shortcuts(s);
             html! {h2{"Keyboard shortcuts"}p class="section-description"{"Add your own shortcut to any action. Custom shortcuts work alongside the standard ones, in pages and in the browser."}
-                div class="settings-group shortcut-list"{@for (id, label, glyph, _) in ACTIONS {
+                div class="settings-group shortcut-list"{@for (id, label, glyph, _) in ACTIONS.iter().filter(|a| features::action_on(s, a.0)) {
                     @let keys: Vec<&String> = map.iter().filter(|(_, a)| a == id).map(|(b, _)| b).collect();
                     div class="list-row"{(icon(glyph))div{strong{(label)}}
                         span class="shortcut-keys"{@for k in &keys {kbd{(pretty(k))}}}
@@ -693,13 +717,16 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
                         @if p["shortcuts"][*id].is_string() {button class="icon-button" data-op="shortcut" data-action=(id) data-value="" aria-label=(format!("Remove custom shortcut for {label}")){(icon("close"))}}
                     }
                 }}
-                h3{"Command chains"}p class="section-description"{"Run several actions in a row from the command bar (⌘K)."}
+                h3{"Command chains"}
+                div class="settings-group"{(module_toggle(s, "command-chains", "Command chains", "Run several actions in a row from the command bar (⌘K)."))}
+                @if features::on(s, "command-chains") {
                 @for c in array(&p["commandChains"]) {div class="list-row"{(icon("code"))div{strong{(text(c,"name"))}small{(array(&c["steps"]).iter().filter_map(Value::as_str).map(features::action_label).collect::<Vec<_>>().join(" → "))}}button class="icon-button" data-op="chain" data-value="remove" data-id=(text(c,"id")) aria-label="Remove chain"{(icon("close"))}}}
                 details class="credential-disclosure"{summary{"Create a chain"}form data-form="chain"{
                     label class="field"{span{"Name"}input data-name="true" value=(s.name.as_str()) maxlength="60";}
                     @for step in 0..4 {label class="field"{span{"Step "(step+1)}select name="steps"{option value=""{"—"}@for (id,label,_,_) in ACTIONS {option value=(id){(label)}}}}}
                     button class="button primary" type="submit"{"Save chain"}
                 }}
+                }
             }
         }
         _ => return None,
@@ -731,7 +758,7 @@ pub fn privacy_extra(s: &Shell) -> Markup {
         div class="settings-group"{
             (setting_toggle("Upgrade connections to HTTPS", "Load the secure version of sites when one exists.", "httpsUpgrade", p["httpsUpgrade"].as_bool().unwrap_or(true)))
             (setting_toggle("Block third-party cookies", "Sites can’t follow you with cookies set by other sites.", "blockThirdPartyCookies", p["blockThirdPartyCookies"].as_bool().unwrap_or(true)))
-            (setting_toggle("Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer.", "hideCookieBanners", p["hideCookieBanners"].as_bool().unwrap_or(true)))
+            (module_toggle(s, "cookie-banners", "Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer."))
         }
         details class="credential-disclosure"{summary{"Custom blocking rules"@if rules > 0 {" ("(rules)")"}}form data-form="custom-rules"{
             p class="field-help"{"Paste domains, hosts-file lines, rules like ||ads.example.com^ or element rules like example.com##.banner."}
@@ -758,10 +785,35 @@ pub fn general_extra(s: &Shell) -> Markup {
         @if mode == "pages" {form data-form="startup-pages"{label class="field"{span{"Pages, one per line"}textarea name="pages" rows="3" spellcheck="false"{(array(&p["startupPages"]).iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"))}}button class="button" type="submit"{"Save pages"}}}
         div class="settings-group"{
             div class="list-row"{div{strong{"Downloads"}small{(if text(p,"downloadFolder").is_empty(){"Ask where to save each file".to_string()}else{format!("Save to {}", text(p,"downloadFolder"))})}}button class="button" data-op="native" data-action="chooseDownloadFolder"{"Choose folder…"}@if !text(p,"downloadFolder").is_empty(){button class="button quiet" data-op="native" data-action="clearDownloadFolder"{"Always ask"}}}
-            @if style(s) == "arc" {(setting_toggle("Open links from other apps in a small window", "Like Little Arc: read it, then keep it as a tab or close it.", "littleArc", p["littleArc"].as_bool().unwrap_or(true)))}
-            (setting_toggle("Peek at links", "Shift-click a link to preview it in a floating window. WebKit tabs only.", "peek", p["peek"].as_bool().unwrap_or(true)))
-            (setting_toggle("Mouse gestures", "Hold ⌥ and drag on a page: left goes back, right forward, up then down reloads.", "mouseGestures", p["mouseGestures"].as_bool().unwrap_or(["vivaldi", "gx"].contains(&style(s)))))
-            @if style(s) == "gx" {(setting_toggle("Group tabs from the same page", "Tabs you open from a page stay beside it as an island.", "tabIslands", p["tabIslands"].as_bool().unwrap_or(true)))}
+            @if style(s) == "arc" {(module_toggle(s, "little-arc", "Little Arc", "Open links from other apps in a small window. Keep it as a tab or close it."))}
+            (module_toggle(s, "peek", "Peek at links", "Shift-click a link to preview it in a floating window. WebKit tabs only."))
+            (module_toggle(s, "mouse-gestures", "Mouse gestures", "Hold ⌥ and drag on a page: left goes back, right forward, up then down reloads."))
+            @if style(s) == "gx" {(module_toggle(s, "tab-islands", "Tab islands", "Tabs you open from a page stay beside it as an island."))}
+        }
+        (link_routes(s))
+    }
+}
+
+/// Rules that send links from other apps to a Space, like Arc's Air Traffic Control.
+fn link_routes(s: &Shell) -> Markup {
+    let spaces: Vec<&Value> = array(&s.snapshot["spaces"]).iter().filter(|v| v["profileID"] == s.snapshot["session"]["profileID"]).collect();
+    let name = |id: &str| spaces.iter().find(|v| text(v, "id") == id).map(|v| text(v, "name").to_string()).unwrap_or_else(|| "a removed Space".into());
+    let routes = array(&prefs(s)["linkRoutes"]);
+    html! {
+        @if spaces.len() > 1 && !s.private() {
+            div class="settings-group"{
+                (module_toggle(s, "link-routes", if style(s) == "arc" {"Air Traffic Control"} else {"Route links by site"}, "Links from other apps open in the Space you choose."))
+                @if features::on(s, "link-routes") {
+                @for (i, route) in routes.iter().enumerate() {
+                    div class="list-row"{div{strong{(text(route,"host"))}small{"Opens in "(name(text(route,"spaceID")))}}button class="button quiet" data-op="link-route" data-value="remove" data-index=(i){"Remove"}}
+                }
+                form class="route-form" data-form="link-route"{
+                    input type="text" name="host" placeholder="github.com" aria-label="Site" spellcheck="false" autocomplete="off";
+                    select name="space" aria-label="Space"{@for space in &spaces {option value=(text(space,"id")){(text(space,"name"))}}}
+                    button class="button" type="submit"{"Add rule"}
+                }
+                }
+            }
         }
     }
 }
@@ -773,29 +825,35 @@ pub fn appearance_extra(s: &Shell) -> Markup {
     html! {
         h3{"Start page"}
         div class="settings-group"{
-            @for (key, label) in [("search","Search box"),("sites","Sites"),("clock","Clock"),("stats","Privacy stats"),("wallpaper","Background image")] {
+            @for (key, label) in [("search","Search box"),("sites","Sites"),("clock","Clock"),("stats","Privacy stats"),("wallpaper","Background image")].into_iter().filter(|(k, _)| *k != "wallpaper" || features::on(s, "wallpapers")) {
                 @let on = start_option(s, key);
                 button class="toggle-row" data-op="setting" data-key="startPage" data-json=(start_page_with(p, key, !on)) role="switch" aria-checked=(on.to_string()){span{strong{(label)}}span class=(if on{"switch on"}else{"switch"}){span{}}}
             }
-            div class="list-row"{div{strong{"Background image"}small{(if text(&s.snapshot,"wallpaper").is_empty(){"None"}else{"Chosen"})}}button class="button" data-op="native" data-action="chooseWallpaper"{"Choose image…"}@if !text(&s.snapshot,"wallpaper").is_empty(){button class="button quiet" data-op="native" data-action="removeWallpaper"{"Remove"}}}
+            (module_toggle(s, "wallpapers", "Wallpapers", "Use your own picture behind the start page."))
+            @if features::on(s, "wallpapers") {div class="list-row"{div{strong{"Background image"}small{(if text(&s.snapshot,"wallpaper").is_empty(){"None"}else{"Chosen"})}}button class="button" data-op="native" data-action="chooseWallpaper"{"Choose image…"}@if !text(&s.snapshot,"wallpaper").is_empty(){button class="button quiet" data-op="native" data-action="removeWallpaper"{"Remove"}}}}
         }
         h3{"Light and dark schedule"}
-        form class="schedule-form" data-form="schedule"{
+        div class="settings-group"{(module_toggle(s, "theme-schedule", "Theme schedule", "Switch between light and dark at the times you set."))}
+        @if features::on(s, "theme-schedule") {form class="schedule-form" data-form="schedule"{
             label class="check-row"{input type="checkbox" name="enabled" checked[flag(schedule,"enabled")];span{strong{"Switch automatically"}small{"Use light mode during the day and dark mode at night."}}}
             div class="color-pair"{label class="field"{span{"Light from"}input type="time" name="light" value=(if text(schedule,"light").is_empty(){"07:00"}else{text(schedule,"light")});}label class="field"{span{"Dark from"}input type="time" name="dark" value=(if text(schedule,"dark").is_empty(){"19:00"}else{text(schedule,"dark")});}}
             button class="button" type="submit"{"Save schedule"}
-        }
+        }}
         h3{(if gx {"Sounds and music"} else {"Sounds"})}
         div class="settings-group"{
+            (module_toggle(s, "sounds", "Browser sounds", "Interface and keyboard sounds, and background music."))
+            @if features::on(s, "sounds") {
             (setting_toggle("Interface sounds", "Soft clicks when you open, close and switch tabs.", "interfaceSounds", p["interfaceSounds"].as_bool().unwrap_or(gx)))
             (setting_toggle("Keyboard sounds", "A key click as you type.", "keyboardSounds", flag(p,"keyboardSounds")))
             (setting_toggle("Background music", "A quiet generated soundtrack while the browser is in front.", "backgroundMusic", flag(p,"backgroundMusic")))
+            }
         }
-        details class="credential-disclosure"{summary{"Interface CSS"}form data-form="interface-css"{
+        div class="settings-group"{(module_toggle(s, "interface-css", "Interface CSS", "Restyle Neutrino’s own interface with your CSS."))}
+        @if features::on(s, "interface-css") {details class="credential-disclosure"{summary{"Interface CSS"}form data-form="interface-css"{
             p class="field-help"{"Restyle Neutrino’s own interface. Use Site CSS in the page menu for websites."}
             textarea name="css" rows="6" spellcheck="false" placeholder=".tab-row { border-radius: 4px; }"{(text(p,"interfaceCSS"))}
             div class="button-row"{button class="button quiet" type="button" data-op="setting" data-key="interfaceCSS" data-value=""{"Remove"}button class="button primary" type="submit"{"Apply"}}
-        }}
+        }}}
     }
 }
 
@@ -812,6 +870,9 @@ pub fn folder_menu_extra(id: &str, current: &str) -> Markup {
 
 /// The person's interface CSS, already checked to contain no markup.
 pub fn interface_css(s: &Shell) -> Option<String> {
+    if !features::on(s, "interface-css") {
+        return None;
+    }
     let css = text(prefs(s), "interfaceCSS");
     (!css.is_empty() && !css.contains('<') && css.len() <= 65_536).then(|| css.to_string())
 }

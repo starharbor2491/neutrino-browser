@@ -16,8 +16,67 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route",
 ];
+
+/// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
+/// and the starting layouts that turn it on during setup ("*" for all).
+pub const MODULES: &[(&str, &str, &[&str])] = &[
+    ("tab-sleep", "Tabs", &["*"]),
+    ("tab-islands", "Tabs", &["gx"]),
+    ("tab-stacks", "Tabs", &["vivaldi"]),
+    ("favorites", "Tabs", &["arc"]),
+    ("tidy-tabs", "Tabs", &["arc"]),
+    ("peek", "Links", &["arc"]),
+    ("little-arc", "Links", &["arc"]),
+    ("link-routes", "Links", &["arc"]),
+    ("mouse-gestures", "Links", &["vivaldi", "gx"]),
+    ("command-chains", "Links", &["vivaldi"]),
+    ("page-styles", "Pages", &["vivaldi", "gx"]),
+    ("boosts", "Pages", &["arc"]),
+    ("cookie-banners", "Pages", &["brave", "vivaldi", "gx", "neutrino"]),
+    ("autofill", "Pages", &["*"]),
+    ("forget-sites", "Pages", &["brave"]),
+    ("web-panels", "Workspace", &["vivaldi", "gx"]),
+    ("boards", "Workspace", &["arc", "gx"]),
+    ("reading-list", "Workspace", &["*"]),
+    ("sessions", "Workspace", &["vivaldi"]),
+    ("speed-dial", "Workspace", &["vivaldi", "gx"]),
+    ("media-controls", "Media and sound", &["arc", "gx"]),
+    ("break-mode", "Media and sound", &["vivaldi"]),
+    ("sounds", "Media and sound", &["gx"]),
+    ("limiter", "Performance", &["gx"]),
+    ("panic", "Performance", &["gx"]),
+    ("wallpapers", "Look", &["gx", "vivaldi", "brave"]),
+    ("theme-schedule", "Look", &["vivaldi"]),
+    ("interface-css", "Look", &[]),
+];
+
+/// Whether a built-in feature module is on. A feature the host does not list
+/// as a module (an older host) stays on.
+pub fn on(s: &Shell, key: &str) -> bool {
+    let id = format!("org.neutrino.{key}");
+    array(&s.snapshot["modules"]).iter().find(|m| text(m, "id") == id).is_none_or(|m| flag(m, "enabled"))
+}
+
+/// Whether an action's feature module is on.
+pub fn action_on(s: &Shell, id: &str) -> bool {
+    match id {
+        "sleep-tab" => on(s, "tab-sleep"),
+        "reading-add" | "reading-list" => on(s, "reading-list"),
+        "sessions" | "save-session" => on(s, "sessions"),
+        "boards" => on(s, "boards"),
+        "break" => on(s, "break-mode"),
+        "panic" => on(s, "panic"),
+        _ => true,
+    }
+}
+
+/// Whether setup turns a feature module on for a starting layout.
+pub fn module_default(key: &str, preset: &str) -> bool {
+    let preset = if preset.is_empty() { "neutrino" } else { preset };
+    MODULES.iter().find(|m| m.0 == key).is_some_and(|m| m.2.contains(&"*") || m.2.contains(&preset))
+}
 
 /// Actions offered by the command bar, shortcuts and command chains:
 /// identifier, label, glyph, default shortcut.
@@ -93,6 +152,7 @@ pub fn shortcuts(s: &Shell) -> Vec<(String, String)> {
             }
         }
     }
+    out.retain(|(_, action)| action_on(s, action));
     out
 }
 
@@ -395,6 +455,29 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
     let value = text(r, "value");
     let tab = s.tabs().iter().find(|t| t["id"] == id).cloned();
     let regular = !s.private();
+    let module = match op {
+        "reading" => "reading-list",
+        "session" => "sessions",
+        "board" | "board-select" => "boards",
+        "web-panel" => "web-panels",
+        "favorite" => "favorites",
+        "boost" => "boosts",
+        "chain" => "command-chains",
+        "link-route" => "link-routes",
+        "tidy-tabs" => "tidy-tabs",
+        "address-book" => "autofill",
+        "page-command" if value == "panic" => "panic",
+        "page-command" if value == "break" => "break-mode",
+        "tab-action" if value == "sleep" => "tab-sleep",
+        "tab-action" if value == "favorite" => "favorites",
+        "site-setting" if text(r, "key") == "filter" => "page-styles",
+        "site-setting" if text(r, "key") == "forget" => "forget-sites",
+        _ => "",
+    };
+    if !module.is_empty() && !on(s, module) {
+        s.notice = "That feature is off. Turn it on in Modules.".into();
+        return;
+    }
     match op {
         "tab-action" => {
             let Some(t) = tab else { return };
@@ -584,7 +667,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             let key = text(r, "key");
             let Some(site) = site_of_active(s) else { return };
             let valid = match key {
-                "blockScripts" | "allowPopups" | "muted" => r["value"].is_boolean(),
+                "blockScripts" | "allowPopups" | "muted" | "forget" => r["value"].is_boolean(),
                 "camera" | "microphone" => ["ask", "allow", "block"].contains(&value),
                 "filter" => ["", "dark", "grayscale", "sepia", "invert", "contrast", "noimages"].contains(&value),
                 "hide" => value.is_empty(),
@@ -891,6 +974,30 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             commands.push(json!({"op":"siteBoost","host":site,"css":css,"hide":hide}));
             s.menu.clear();
             s.notice = format!("Styles saved for {site}.");
+        }
+        "link-route" => {
+            let mut routes: Vec<Value> = array(&s.snapshot["preferences"]["linkRoutes"]).to_vec();
+            match value {
+                "add" => {
+                    let host = text(r, "host").trim().trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.").trim_end_matches('/').to_ascii_lowercase();
+                    let space = text(r, "space");
+                    let known = array(&s.snapshot["spaces"]).iter().any(|v| text(v, "id") == space && v["profileID"] == s.snapshot["session"]["profileID"]);
+                    let valid = host.contains('.') && host.len() <= 253 && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+                    if !regular || !known || !valid {
+                        s.notice = "Enter a site such as github.com and choose a Space.".into();
+                        return;
+                    }
+                    routes.retain(|v| text(v, "host") != host);
+                    routes.push(json!({"host":host,"spaceID":space}));
+                    routes.truncate(50);
+                }
+                "remove" => {
+                    let Some(index) = r["index"].as_u64().map(|i| i as usize).filter(|i| *i < routes.len()) else { return };
+                    routes.remove(index);
+                }
+                _ => return,
+            }
+            commands.push(json!({"op":"preference","key":"linkRoutes","value":routes}));
         }
         "startup-pages" => {
             let pages: Vec<String> = value.lines().map(str::trim).filter(|l| !l.is_empty()).take(20).filter_map(web_address).collect();

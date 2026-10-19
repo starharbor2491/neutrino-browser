@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.web-panels",
+  "name": "Web Panels",
+  "version": 1,
+  "summary": "Keep sites like WhatsApp or Spotify in a panel beside the page.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}
