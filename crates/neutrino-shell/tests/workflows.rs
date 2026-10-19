@@ -466,6 +466,19 @@ fn brave_start_page_counts_every_block_and_the_time_saved() {
     assert!(html.contains("<strong>1 hour</strong><small>Estimated time saved</small>"));
 }
 #[test]
+fn named_themes_bring_their_window_colors() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-value","key":"themePack","value":"Hackerman"}));
+    let theme = &s.draft.as_ref().unwrap()["theme"];
+    assert_eq!((theme["accentHex"].as_str(), theme["colorMode"].as_str(), theme["surfaceHex"].as_str()), (Some("1ed760"), Some("dark"), Some("0d1910")));
+    // Vivaldi's own theme keeps the light window.
+    s.dispatch(json!({"op":"editor-value","key":"themePack","value":"Vivaldi"}));
+    assert!(s.draft.as_ref().unwrap()["theme"]["surfaceHex"].is_null());
+    s.dispatch(json!({"op":"editor-value","key":"themePack","value":"Not a theme"}));
+    assert_eq!(s.draft.as_ref().unwrap()["theme"]["themePack"], "Vivaldi");
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

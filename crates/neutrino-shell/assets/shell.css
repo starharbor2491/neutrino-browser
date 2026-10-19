@@ -5622,8 +5622,11 @@ input[type="color"] {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--chip);
-  box-shadow: inset 0 0 0 1px #ffffff26;
+  background: linear-gradient(135deg, var(--chip-ground, var(--chip)) 50%, var(--chip) 50%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.theme-chip.selected {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--chip);
 }
 .toolbar-choices {
   display: grid;

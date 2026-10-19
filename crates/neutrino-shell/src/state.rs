@@ -1198,6 +1198,14 @@ impl Shell {
         }
         let key = text(r, "key");
         let v = &r["value"];
+        if key == "themePack" {
+            let mut theme = self.draft.as_ref().unwrap()["theme"].clone();
+            if crate::appearance::apply_theme_pack(&mut theme, text(r, "value")) && theme != self.draft.as_ref().unwrap()["theme"] {
+                self.push_undo();
+                self.draft.as_mut().unwrap()["theme"] = theme;
+            }
+            return;
+        }
         let target = match key {
             "accent" | "colorMode" | "density" | "reducedMotion" | "iconPack" | "iconStroke"
             | "cornerRadius" | "fontScale" | "spacingScale" | "typography" | "transparency"

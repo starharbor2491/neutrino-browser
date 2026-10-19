@@ -1002,7 +1002,10 @@ fn editor_extra(s: &Shell) -> Markup {
     html! {
         div class="inspector-section"{h2{"Color"}
             label class="field color-field"{span{"Any accent color"}input type="color" data-editor-color="accentHex" value=(if crate::appearance::hex(accent) {format!("#{}", accent.trim_start_matches('#'))} else {"#7c5cff".to_string()}) aria-label="Accent color";}
-            div class="theme-chips" role="group" aria-label="Themes"{@for (name, hex) in crate::appearance::GX_THEMES.iter().copied().chain(crate::appearance::VIVALDI_THEMES.iter().filter(|t| t.0 != "system" && t.0 != "dark").map(|t| (t.1, t.3))) {button class="theme-chip" data-op="editor-value" data-key="accentHex" data-value=(hex) title=(name) aria-label=(format!("{name} theme")) style=(format!("--chip:#{hex}")){}}}
+            div class="theme-chips" role="group" aria-label="Themes"{@for (name, hex, _, surface, _) in crate::appearance::THEME_PACKS {
+                @let current = text(&s.config()["theme"], "themePack") == *name && text(&s.config()["theme"], "accentHex") == *hex;
+                button class=(if current {"theme-chip selected"} else {"theme-chip"}) data-op="editor-value" data-key="themePack" data-value=(name) title=(name) aria-label=(format!("{name} theme")) aria-pressed=(current.to_string()) style=(format!("--chip:#{hex};--chip-ground:#{}", if surface.is_empty() {"ffffff"} else {surface})){}
+            }}
         }
         div class="inspector-section"{h2{"Toolbar"}
             p{"Choose extra buttons for the toolbar."}

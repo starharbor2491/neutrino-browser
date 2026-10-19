@@ -203,6 +203,8 @@ public struct Theme: Codable, Equatable, Sendable {
     public var accentHex: String?
     public var surfaceHex: String?
     public var textHex: String?
+    /// The named GX or Vivaldi theme these colors came from, if any.
+    public var themePack: String?
     public var borderWidth: Double?
     public var shadowStrength: Double?
     public var iconPack: String?

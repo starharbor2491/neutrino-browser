@@ -80,6 +80,29 @@ pub const GX_THEMES: &[(&str, &str)] = &[
     ("Frutti di mare", "1ec8e6"),
     ("Rose quartz", "ff6fa8"),
 ];
+/// Named GX and Vivaldi themes with their window colors:
+/// (name, accent, color mode, window surface, text). An empty surface keeps the mode's own.
+pub const THEME_PACKS: &[(&str, &str, &str, &str, &str)] = &[
+    ("GX Classic", "fa1e4e", "dark", "1c1420", "f3edf2"),
+    ("Ultraviolet", "8f44fd", "dark", "16112a", "eee9ff"),
+    ("Hackerman", "1ed760", "dark", "0d1910", "e3f4e7"),
+    ("Lambda", "ff6a00", "dark", "1c140e", "f6ede6"),
+    ("Frutti di mare", "1ec8e6", "dark", "0e191e", "e5f4f8"),
+    ("Rose quartz", "ff6fa8", "dark", "20141c", "f8eaf1"),
+    ("Vivaldi", "ef3939", "light", "", ""),
+    ("Blueprint", "4a90d9", "dark", "1b2633", "e1e8f0"),
+    ("Subtle", "6a7f99", "light", "eceff3", "1e2733"),
+];
+/// Applies a named theme's accent, mode and window colors.
+pub fn apply_theme_pack(theme: &mut Value, name: &str) -> bool {
+    let Some(pack) = THEME_PACKS.iter().find(|p| p.0 == name) else { return false };
+    theme["accentHex"] = json!(pack.1);
+    theme["colorMode"] = json!(pack.2);
+    theme["surfaceHex"] = if pack.3.is_empty() { Value::Null } else { json!(pack.3) };
+    theme["textHex"] = if pack.4.is_empty() { Value::Null } else { json!(pack.4) };
+    theme["themePack"] = json!(pack.0);
+    true
+}
 /// Vivaldi's bundled themes: (id, label, color mode, accent hex).
 pub const VIVALDI_THEMES: &[(&str, &str, &str, &str)] = &[
     ("vivaldi", "Vivaldi", "light", "ef3939"),
@@ -104,6 +127,15 @@ pub fn setup_configuration(setup: &Value) -> Value {
     }
     if let Some(hex_value) = setup["accentHex"].as_str().filter(|h| hex(h)) {
         c["theme"]["accentHex"] = json!(hex_value.trim_start_matches('#'));
+    }
+    // A GX color theme in the dark appearance, or a Vivaldi theme, also tints the window.
+    let pack = match id {
+        "gx" if setup["appearance"].as_str() != Some("light") => GX_THEMES.iter().find(|t| setup["accentHex"].as_str() == Some(t.1)).map(|t| t.0),
+        "vivaldi" => VIVALDI_THEMES.iter().find(|t| setup["theme"].as_str() == Some(t.0)).map(|t| t.1),
+        _ => None,
+    };
+    if let Some(name) = pack {
+        apply_theme_pack(&mut c["theme"], name);
     }
     if id == "gx" {
         c["theme"]["sounds"] = json!(setup["sounds"].as_bool().unwrap_or(true));
@@ -200,6 +232,9 @@ pub fn normalize_theme(mut t: Value) -> Value {
             t[key] = Value::Null;
         }
     }
+    if t["themePack"].as_str().is_some_and(|v| !THEME_PACKS.iter().any(|p| p.0 == v)) {
+        t["themePack"] = Value::Null;
+    }
     if t["surfaceHex"].is_null() != t["textHex"].is_null() {
         t["surfaceHex"] = Value::Null;
         t["textHex"] = Value::Null;
@@ -253,4 +288,20 @@ pub fn normalize_layout(mut l: Value) -> Value {
         components.truncate(32);
     }
     l
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn setup_themes_tint_the_window_as_their_browsers_do() {
+        // A GX color in the dark appearance tints the window; in light it is only the accent.
+        let dark = setup_configuration(&json!({"preset":"gx","accentHex":"8f44fd","appearance":"dark"}));
+        assert_eq!(dark["theme"]["surfaceHex"], "16112a");
+        let light = setup_configuration(&json!({"preset":"gx","accentHex":"8f44fd","appearance":"light"}));
+        assert!(light["theme"]["surfaceHex"].is_null() && light["theme"]["accentHex"] == "8f44fd");
+        let blueprint = setup_configuration(&json!({"preset":"vivaldi","theme":"blueprint","appearance":"dark","accentHex":"4a90d9"}));
+        assert_eq!(blueprint["theme"]["surfaceHex"], "1b2633");
+        assert!(normalize_theme(json!({"themePack":"Nope"}))["themePack"].is_null());
+    }
 }
