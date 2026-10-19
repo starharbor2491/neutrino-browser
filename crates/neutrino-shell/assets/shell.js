@@ -741,7 +741,9 @@
           kind: "geometry",
           generation,
           overlay:
-            currentOverlay || drag?.kind === "component" || !!overlapsMenu,
+            currentOverlay || drag?.kind === "component" || !!overlapsMenu ||
+            // The icon-only sidebar expands over the page while hovered.
+            !!root.querySelector(".compact-rail:not(.editing-preview) > .workspace-rail:hover"),
           editing: currentEditing,
           pages,
           menuRect: menu
@@ -758,6 +760,10 @@
     });
   }
   new ResizeObserver(scheduleGeometry).observe(root);
+  for (const type of ["mouseover", "mouseout"])
+    document.addEventListener(type, (e) => {
+      if (e.target.closest?.(".compact-rail > .workspace-rail")) scheduleGeometry();
+    });
   let tracking = 0;
   root.addEventListener("transitionrun", (e) => {
     if (!e.target.matches?.(".browser-shell") || e.propertyName !== "grid-template-columns") return;

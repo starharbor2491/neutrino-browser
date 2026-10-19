@@ -5601,38 +5601,39 @@ input[type="color"] {
   color: transparent;
 }
 
-/* Icon-only sidebar: favicons with the page title as a tooltip */
-.compact-rail .workspace-rail {
+/* Icon-only sidebar: favicons with the page title as a tooltip; hovering
+   expands it over the page with titles, as Edge's and Vivaldi's do. */
+.compact-rail .workspace-rail:not(:hover) {
   align-items: center;
   padding-left: 0;
   padding-right: 0;
 }
-.compact-rail .workspace-rail .location,
-.compact-rail .space-heading strong,
-.compact-rail .group-label,
-.compact-rail .rail-drag-fill,
-.compact-rail .tab-select > span:not(.site-icon),
-.compact-rail .folder-heading > button > .icon:first-child,
-.compact-rail .rail-feedback,
-.compact-rail .tab-close,
-.compact-rail .tab-menu,
-.compact-rail .tab-audio,
-.compact-rail .folder-heading span,
-.compact-rail .folder-heading .icon-button,
-.compact-rail .new-tab span,
-.compact-rail .new-tab kbd,
-.compact-rail .media-card,
-.compact-rail .workspace-widget,
-.compact-rail .folder-empty {
+.compact-rail .workspace-rail:not(:hover) .location,
+.compact-rail .workspace-rail:not(:hover) .space-heading strong,
+.compact-rail .workspace-rail:not(:hover) .group-label,
+.compact-rail .workspace-rail:not(:hover) .rail-drag-fill,
+.compact-rail .workspace-rail:not(:hover) .tab-select > span:not(.site-icon),
+.compact-rail .workspace-rail:not(:hover) .folder-heading > button > .icon:first-child,
+.compact-rail .workspace-rail:not(:hover) .rail-feedback,
+.compact-rail .workspace-rail:not(:hover) .tab-close,
+.compact-rail .workspace-rail:not(:hover) .tab-menu,
+.compact-rail .workspace-rail:not(:hover) .tab-audio,
+.compact-rail .workspace-rail:not(:hover) .folder-heading span,
+.compact-rail .workspace-rail:not(:hover) .folder-heading .icon-button,
+.compact-rail .workspace-rail:not(:hover) .new-tab span,
+.compact-rail .workspace-rail:not(:hover) .new-tab kbd,
+.compact-rail .workspace-rail:not(:hover) .media-card,
+.compact-rail .workspace-rail:not(:hover) .workspace-widget,
+.compact-rail .workspace-rail:not(:hover) .folder-empty {
   display: none;
 }
 /* The Space menu stays reachable: only the name is hidden. */
-.compact-rail .space-heading {
+.compact-rail .workspace-rail:not(:hover) .space-heading {
   justify-content: center;
   padding: 0;
   margin: 0 0 4px;
 }
-.compact-rail .rail-top {
+.compact-rail .workspace-rail:not(:hover) .rail-top {
   flex-direction: column;
   align-items: center;
   gap: 4px;
@@ -5640,37 +5641,53 @@ input[type="color"] {
   min-height: 0;
   margin-bottom: 8px;
 }
-.compact-rail .rail-top .traffic-clearance {
+.compact-rail .workspace-rail:not(:hover) .rail-top .traffic-clearance {
   width: 52px;
   height: 22px;
 }
-.compact-rail .tabs-scroll {
+.compact-rail .workspace-rail:not(:hover) .tabs-scroll {
   width: 100%;
 }
-.compact-rail .tab-row,
-.compact-rail .new-tab {
+.compact-rail .workspace-rail:not(:hover) .tab-row,
+.compact-rail .workspace-rail:not(:hover) .new-tab {
   justify-content: center;
   margin-left: 6px;
   margin-right: 6px;
 }
-.compact-rail .tab-select {
+.compact-rail .workspace-rail:not(:hover) .tab-select {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
 }
-.compact-rail .folder-heading {
+.compact-rail .workspace-rail:not(:hover) .folder-heading {
   justify-content: center;
 }
-.compact-rail .rail-dock {
+.compact-rail .workspace-rail:not(:hover) .rail-dock {
   flex-direction: column;
   gap: 6px;
 }
-.compact-rail .spaces {
+.compact-rail .workspace-rail:not(:hover) .spaces {
   flex-direction: column;
 }
-.compact-rail .favorites-grid {
+.compact-rail .workspace-rail:not(:hover) .favorites-grid {
   grid-template-columns: 1fr;
   margin: 0 6px 8px;
+}
+
+.browser-shell.compact-rail:not(.editing-preview) > .workspace-rail:hover {
+  position: absolute;
+  z-index: 30;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: 260px;
+  border-radius: calc(12px * var(--sq));
+  background: var(--rail);
+  box-shadow: var(--shadow);
+}
+.browser-shell.placement-trailing.compact-rail:not(.editing-preview) > .workspace-rail:hover {
+  left: auto;
+  right: 6px;
 }
 
 /* Brave's shield count */
