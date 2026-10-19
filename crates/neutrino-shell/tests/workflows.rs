@@ -462,8 +462,13 @@ fn brave_start_page_counts_every_block_and_the_time_saved() {
     s.snapshot["preferences"]["startPage"] = json!({"stats": true});
     s.snapshot["shieldsStats"] = json!({"blocked": 12, "lifetime": 90_000});
     let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
-    assert!(html.contains("<strong>90000</strong><small>Trackers &amp; ads blocked</small>"), "{html}");
+    assert!(html.contains("<strong>90,000</strong><small>Trackers &amp; ads blocked</small>"), "{html}");
+    assert!(html.contains("<strong>2.3 GB</strong><small>Estimated bandwidth saved</small>"));
     assert!(html.contains("<strong>1 hour</strong><small>Estimated time saved</small>"));
+    // A fresh install shows the figures at zero.
+    s.snapshot["shieldsStats"] = Value::Null;
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("<strong>0</strong><small>Trackers &amp; ads blocked</small>"));
 }
 #[test]
 fn named_themes_bring_their_window_colors() {

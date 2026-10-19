@@ -391,10 +391,12 @@ fn vacant_page(s: &Shell) -> Markup {
         }}},
         "brave" => html! {section class="start-page brave-start" aria-label="New tab"{
             div class="brave-top"{
-                @if s.snapshot["shieldsStats"].is_object() && crate::views::start_option(s, "stats") {
+                // Brave's three figures, shown from the first launch.
+                @if crate::views::start_option(s, "stats") && !s.private() {
                     @let blocked = s.snapshot["shieldsStats"]["lifetime"].as_u64().unwrap_or(0).max(s.snapshot["shieldsStats"]["blocked"].as_u64().unwrap_or(0));
                     div class="brave-stats" title="Chromium tabs count blocked requests; WebKit tabs count blocked addresses found on each page."{
-                        div{strong{(blocked)}small{"Trackers & ads blocked"}}
+                        div{strong{(count_label(blocked))}small{"Trackers & ads blocked"}}
+                        div title="Neutrino’s estimate: about 25 KB per blocked request."{strong{(bytes_label(blocked.saturating_mul(25 * 1024)))}small{"Estimated bandwidth saved"}}
                         div title="Brave’s estimate: 50 milliseconds per blocked request."{strong{(time_saved(blocked))}small{"Estimated time saved"}}
                     }
                 }
@@ -440,6 +442,29 @@ fn vacant_page(s: &Shell) -> Markup {
             }}}
         }
     }
+}
+/// A count with thousands separators, shortened to K or M once it gets long.
+pub(crate) fn count_label(n: u64) -> String {
+    match n {
+        0..=99_999 => {
+            let digits = n.to_string();
+            let mut out = String::new();
+            for (i, c) in digits.chars().enumerate() {
+                if i > 0 && (digits.len() - i) % 3 == 0 {
+                    out.push(',');
+                }
+                out.push(c);
+            }
+            out
+        }
+        100_000..=999_999 => format!("{}K", n / 1000),
+        _ => format!("{:.1}M", n as f64 / 1_000_000.),
+    }
+}
+/// Bytes as KB, MB or GB.
+pub(crate) fn bytes_label(bytes: u64) -> String {
+    let b = bytes as f64;
+    if b >= 1e9 { format!("{:.1} GB", b / 1e9) } else if b >= 1e6 { format!("{:.0} MB", b / 1e6) } else { format!("{:.0} KB", b / 1e3) }
 }
 /// Brave's "time saved": 50 milliseconds for each blocked request.
 pub(crate) fn time_saved(blocked: u64) -> String {
