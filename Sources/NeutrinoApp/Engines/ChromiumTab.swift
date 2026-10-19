@@ -607,6 +607,8 @@ final class ChromiumTab: BrowserEngineTab {
             let source = (value["url"] as? String).flatMap(URL.init(string:))
             downloads.beginChromium(id: key, profileID: profileID, suggestedName: value["name"] as? String ?? "Download", sourceURL: source, cancel: { [weak self] in
                 self?.command(Int(NEUTRINO_CEF_DOWNLOAD_CANCEL), value: Double(id))
+            }, pause: { [weak self] pause in
+                self?.command(Int(NEUTRINO_CEF_DOWNLOAD_PAUSE), text: pause ? "1" : "0", value: Double(id))
             }, completion: { [weak self] destination in
                 self?.command(Int(NEUTRINO_CEF_DOWNLOAD_PATH), text: destination?.path ?? "", value: Double(id))
             })

@@ -362,7 +362,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             observeDownloads(center)
             let snapshot: [String: Any] = ["downloadsWindow":true,"completedOnboarding":true,
                 "frozen":app.finalQuitDataFrozen,"private":true,
-                "downloads":center.items.map { ["id":$0.id.uuidString,"name":$0.name,"status":$0.status,"complete":!$0.active && $0.destination != nil] as [String:Any] }]
+                "downloads":center.items.map(\.summary)]
             return stamped(handle.dispatch(["op":"sync","snapshot":snapshot]))
         }
         let update = DistributionManager.shared
@@ -461,7 +461,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             let visible = model.visibleEngineTabs
             snapshot["pageErrors"] = Dictionary(uniqueKeysWithValues: visible.compactMap { id, page in page.errorMessage.map { (id.uuidString, $0) } })
             if let error = tab.errorMessage { snapshot["pageError"] = error }
-            snapshot["downloads"] = model.downloads.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
+            snapshot["downloads"] = model.downloads.items.map(\.summary)
             // Only account identity is projected. Password values never enter the UI snapshot.
             snapshot["credentials"] = credentialMetadata
             let engines = visible.map(\.page)
@@ -477,7 +477,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
 
         }
         if let center = downloadCenter {
-            snapshot["downloads"] = center.items.map { ["id": $0.id.uuidString, "name": $0.name, "status": $0.status, "complete": !$0.active && $0.destination != nil] as [String: Any] }
+            snapshot["downloads"] = center.items.map(\.summary)
         }
         if features.credentialsChanged { features.credentialsChanged = false; refreshCredentialMetadata(profileID: profileID) }
         var result = handle.dispatch(["op": "sync", "snapshot": snapshot])
@@ -691,7 +691,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     }
     private func perform(_ command: [String: Any]) {
         guard !app.finalQuitDataFrozen, let operation = command["op"] as? String else { return }
-        if downloadCenter != nil && !["downloadCancel","downloadReveal","downloadOpen"].contains(operation) { return }
+        if downloadCenter != nil && !["downloadCancel","downloadPause","downloadResume","downloadReveal","downloadOpen"].contains(operation) { return }
         if ["navigate","newTab","selectTab","selectChromePage","closeChromePage","closeTab","duplicateTab",
             "reopenTab","back","forward","reload","stop","switchSpace","switchProfile","moveTabToSpace",
             "useWebKit","openNoteSource"].contains(operation) { sourceRestoreTask?.cancel() }
@@ -884,9 +884,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             app.pendingWindowTab = (spaceID, id)
             openWindow?(false)
         case "privateWindow": openWindow?(true)
-        case "downloadCancel", "downloadReveal", "downloadOpen":
+        case "downloadCancel", "downloadPause", "downloadResume", "downloadReveal", "downloadOpen":
             guard let center = downloadCenter ?? model?.downloads, let item = center.items.first(where: { $0.id == id }) else { return }
             if operation == "downloadCancel" { center.cancel(item) }
+            else if operation == "downloadPause" || operation == "downloadResume" { center.setPaused(item, operation == "downloadPause") }
             else if let url = item.destination, !item.active {
                 if operation == "downloadOpen" { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             }

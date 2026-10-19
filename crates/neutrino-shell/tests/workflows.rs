@@ -262,6 +262,19 @@ fn clearing_on_quit_is_chosen_per_kind_of_data() {
     assert!(html.contains("Clear when Neutrino quits (1 on)"));
 }
 #[test]
+fn downloads_show_progress_and_pause_or_resume() {
+    let mut s = shell();
+    s.snapshot["downloads"] = json!([
+        {"id":"d1","name":"movie.mp4","status":"Downloading","complete":false,"fraction":0.4,"paused":false,"canPause":true},
+        {"id":"d2","name":"notes.zip","status":"Paused","complete":false,"fraction":0.7,"paused":true,"canPause":true}]);
+    s.dispatch(json!({"op":"screen","value":"library"}));
+    let html = s.dispatch(json!({"op":"section","value":"downloads"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-action=\"downloadPause\" data-id=\"d1\"") && html.contains("data-action=\"downloadResume\" data-id=\"d2\""));
+    assert!(html.contains("<progress class=\"download-progress\" max=\"1\" value=\"0.4\""));
+    let r = s.dispatch(json!({"op":"native","action":"downloadPause","id":"d1"}));
+    assert_eq!(commands(&r)[0]["op"], "downloadPause");
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

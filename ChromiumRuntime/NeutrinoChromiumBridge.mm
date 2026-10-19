@@ -910,6 +910,11 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (callback && path && *path) callback->Continue(path,false);
     else if (found->second.control) found->second.control->Cancel();
   }
+  void PauseDownload(int id,bool pause) {
+    auto found = downloads_.find(id);
+    if (found == downloads_.end() || !found->second.control) return;
+    if (pause) found->second.control->Pause(); else found->second.control->Resume();
+  }
   void CancelDownload(int id) {
     auto found = downloads_.find(id);
     if (found == downloads_.end()) return;
@@ -1431,9 +1436,10 @@ int NativeTabCommand(void* opaque,int command) {
 }
 void Command(void* opaque,int command,const char* text,double value) {
   auto owner=static_cast<Page*>(opaque); if (!pages.count(owner) || owner->closing) return;
-  if (command==NEUTRINO_CEF_DOWNLOAD_PATH || command==NEUTRINO_CEF_DOWNLOAD_CANCEL) {
+  if (command==NEUTRINO_CEF_DOWNLOAD_PATH || command==NEUTRINO_CEF_DOWNLOAD_CANCEL || command==NEUTRINO_CEF_DOWNLOAD_PAUSE) {
     for (auto& entry : pages) if (entry.first->client->HasDownload(static_cast<int>(value),owner)) {
       if (command==NEUTRINO_CEF_DOWNLOAD_PATH) entry.first->client->DownloadPath(static_cast<int>(value),text);
+      else if (command==NEUTRINO_CEF_DOWNLOAD_PAUSE) entry.first->client->PauseDownload(static_cast<int>(value),text && text[0]=='1');
       else entry.first->client->CancelDownload(static_cast<int>(value));
       return;
     }

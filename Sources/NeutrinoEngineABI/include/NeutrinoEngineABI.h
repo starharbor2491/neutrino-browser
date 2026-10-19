@@ -33,7 +33,9 @@ enum { NEUTRINO_CEF_LOAD = 1, NEUTRINO_CEF_RELOAD, NEUTRINO_CEF_STOP,
        /* Text names an allowed Chrome command such as IDC_PRINT. */
        NEUTRINO_CEF_CHROME_COMMAND,
        /* Text names an allowed profile preference; value is its number or 0/1. */
-       NEUTRINO_CEF_PREFERENCE };
+       NEUTRINO_CEF_PREFERENCE,
+       /* Value is a download ID; text "1" pauses it and "0" resumes it. */
+       NEUTRINO_CEF_DOWNLOAD_PAUSE };
 
 /// Versioned ABI loaded only from an explicitly installed engine package.
 typedef struct neutrino_cef_api {

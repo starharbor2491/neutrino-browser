@@ -160,7 +160,7 @@ impl Shell {
             && op != "sync"
             && op != "escape"
             && !(op == "native"
-                && ["downloadCancel", "downloadReveal", "downloadOpen"]
+                && ["downloadCancel", "downloadPause", "downloadResume", "downloadReveal", "downloadOpen"]
                     .contains(&text(&request, "action")))
         {
             return self.response(vec![]);
@@ -965,6 +965,8 @@ impl Shell {
                     let action = text(&request, "action");
                     if [
                         "downloadCancel",
+                        "downloadPause",
+                        "downloadResume",
                         "downloadReveal",
                         "downloadOpen",
                         "removeBookmark",

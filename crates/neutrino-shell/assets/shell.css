@@ -2162,7 +2162,8 @@ li.done .guide-check {
   margin: 12px 0;
   color: var(--accent);
 }
-.resource-metric progress {
+.resource-metric progress,
+.download-progress {
   display: block;
   width: 100%;
   height: 4px;
@@ -2170,11 +2171,16 @@ li.done .guide-check {
   accent-color: var(--accent);
   margin: 12px 0;
 }
-.resource-metric progress::-webkit-progress-bar {
+.download-progress {
+  margin: 2px 0 0;
+}
+.resource-metric progress::-webkit-progress-bar,
+.download-progress::-webkit-progress-bar {
   background: var(--selected);
   border-radius: calc(4px * var(--sq));
 }
-.resource-metric progress::-webkit-progress-value {
+.resource-metric progress::-webkit-progress-value,
+.download-progress::-webkit-progress-value {
   background: var(--accent);
   border-radius: calc(4px * var(--sq));
 }
