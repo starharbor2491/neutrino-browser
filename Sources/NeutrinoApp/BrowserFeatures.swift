@@ -924,6 +924,10 @@ final class BrowserFeatures {
         case "clearHistoryOnQuit": preferences.clearHistoryOnQuit = value as? Bool == true ? true : nil
         case "clearCookiesOnQuit": preferences.clearCookiesOnQuit = value as? Bool == true ? true : nil
         case "clearCacheOnQuit": preferences.clearCacheOnQuit = value as? Bool == true ? true : nil
+        case "blockCamera": preferences.blockCamera = value as? Bool == true ? true : nil
+        case "blockMicrophone": preferences.blockMicrophone = value as? Bool == true ? true : nil
+        case "blockLocation": preferences.blockLocation = value as? Bool == true ? true : nil
+        case "blockNotifications": preferences.blockNotifications = value as? Bool == true ? true : nil
         case "liveWallpaper": preferences.liveWallpaper = text()
         case "blockThirdPartyCookies": preferences.blockThirdPartyCookies = value as? Bool
         case "httpsUpgrade": preferences.httpsUpgrade = value as? Bool
@@ -961,7 +965,7 @@ final class BrowserFeatures {
         default: return false
         }
         app.library.preferences = preferences
-        if ["httpsUpgrade", "stripTracking", "blockThirdPartyCookies", "hideLocalIP"].contains(key) {
+        if ["httpsUpgrade", "stripTracking", "blockThirdPartyCookies", "hideLocalIP", "blockCamera", "blockMicrophone", "blockLocation", "blockNotifications"].contains(key) {
             for window in app.windows.values { window.model?.updatePagePolicies() }
         }
         if key == "networkLimitKBps" {

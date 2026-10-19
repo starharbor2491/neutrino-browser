@@ -312,6 +312,11 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var clearHistoryOnQuit: Bool?
     public var clearCookiesOnQuit: Bool?
     public var clearCacheOnQuit: Bool?
+    /// Refuse every request for a permission unless the site was allowed in its own settings.
+    public var blockCamera: Bool?
+    public var blockMicrophone: Bool?
+    public var blockLocation: Bool?
+    public var blockNotifications: Bool?
     public var filterLists: [FilterList]?
     /// RSS and Atom feeds in the Feeds panel.
     public var feeds: [FeedSubscription]?

@@ -248,8 +248,11 @@ final class BrowserModel: ObservableObject {
         tab.stripsTracking = preferences.stripTracking != false
         tab.scriptsBlocked = { [weak self] site in self?.app.library.preferences.siteSettings?[site]?.blockScripts == true }
         tab.sitePermission = { [weak self] site, kind in
-            let settings = self?.app.library.preferences.siteSettings?[site]
-            return kind == "camera" ? settings?.camera : settings?.microphone
+            guard let preferences = self?.app.library.preferences else { return nil }
+            let settings = preferences.siteSettings?[site]
+            // The site's own decision first, then the default in Privacy > Permission defaults.
+            let blocked = kind == "camera" ? preferences.blockCamera == true : preferences.blockMicrophone == true
+            return (kind == "camera" ? settings?.camera : settings?.microphone) ?? (blocked ? "block" : nil)
         }
         tab.onSitePermission = { [weak self] site, kind, decision in
             guard let self, !self.isPrivate else { return }
@@ -266,6 +269,9 @@ final class BrowserModel: ObservableObject {
             PeekWindow.show(url, model: self); return true
         }
         tab.setPrivacyPreferences(httpsOnly: preferences.httpsUpgrade != false, blockThirdPartyCookies: preferences.blockThirdPartyCookies != false, hideLocalIP: preferences.hideLocalIP != false)
+        tab.setPermissionDefaults(blocked: Set([("camera", preferences.blockCamera), ("microphone", preferences.blockMicrophone),
+                                                ("location", preferences.blockLocation), ("notifications", preferences.blockNotifications)]
+            .filter { $0.1 == true }.map(\.0)))
         if app.feature("fingerprinting"), let script = FingerprintProtection.script(exceptions: preferences.shieldsDown ?? []) { tab.installFingerprintProtection(script) }
     }
     func updatePagePolicies() { webTabs.values.forEach(applyPagePolicy); webTabs.values.forEach { $0.applyScriptPolicy() } }

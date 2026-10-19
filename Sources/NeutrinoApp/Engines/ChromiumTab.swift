@@ -370,12 +370,25 @@ final class ChromiumTab: BrowserEngineTab {
             } catch { self.credentialCaptureInstalled = false }
         }
     }
+    private var permissionDefaults: Set<String>?
+    override func setPermissionDefaults(blocked: Set<String>) {
+        permissionDefaults = blocked
+        if activeContentKnown && !loading { sendPrivacyPreferences() }
+    }
     private func sendPrivacyPreferences() {
-        guard let privacy else { return }
-        self.privacy = nil
-        command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: privacy.httpsOnly ? 1 : 0)
-        command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: privacy.cookies ? 1 : 0)
-        command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: privacy.localIP ? 1 : 0)
+        if let privacy {
+            self.privacy = nil
+            command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: privacy.httpsOnly ? 1 : 0)
+            command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: privacy.cookies ? 1 : 0)
+            command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: privacy.localIP ? 1 : 0)
+        }
+        if let blocked = permissionDefaults {
+            permissionDefaults = nil
+            // Chrome's content settings: 2 blocks every request, 3 asks.
+            for (kind, name) in [("camera", "media_stream_camera"), ("microphone", "media_stream_mic"), ("location", "geolocation"), ("notifications", "notifications")] {
+                command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.default_content_setting_values." + name, value: blocked.contains(kind) ? 2 : 3)
+            }
+        }
     }
     /// Cookies and cached files of this tab's Chromium profile, for all time.
     override func clearWebsiteData(cookies: Bool, cache: Bool, hosts: [String] = [], since: Date = .distantPast) async {

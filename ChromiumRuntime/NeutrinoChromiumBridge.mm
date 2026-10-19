@@ -1604,12 +1604,17 @@ void Command(void* opaque,int command,const char* text,double value) {
     }
     case NEUTRINO_CEF_PREFERENCE: {
       const std::string name=text ? text : "";
-      if (name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode" && name!="webrtc.ip_handling_policy") break;
-      if (!std::isfinite(value) || value<0 || value>2) break;
+      // Default permission for a kind of request: 2 blocks every request, 3 asks.
+      const bool permission=name=="profile.default_content_setting_values.media_stream_camera" ||
+          name=="profile.default_content_setting_values.media_stream_mic" ||
+          name=="profile.default_content_setting_values.geolocation" ||
+          name=="profile.default_content_setting_values.notifications";
+      if (!permission && name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode" && name!="webrtc.ip_handling_policy") break;
+      if (!std::isfinite(value) || value<0 || value>(permission ? 3 : 2) || (permission && value<2)) break;
       auto context=host->GetRequestContext();
       if (!context || !context->CanSetPreference(name)) break;
       auto preference=CefValue::Create();
-      if (name=="profile.cookie_controls_mode") preference->SetInt(static_cast<int>(value));
+      if (permission || name=="profile.cookie_controls_mode") preference->SetInt(static_cast<int>(value));
       // Keep the local network address out of WebRTC unless a proxy carries the call.
       else if (name=="webrtc.ip_handling_policy") preference->SetString(value!=0 ? "disable_non_proxied_udp" : "default");
       else preference->SetBool(value!=0);

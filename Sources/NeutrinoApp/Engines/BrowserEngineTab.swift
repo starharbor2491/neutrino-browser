@@ -113,6 +113,9 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func setNetworkLimit(bytesPerSecond: Int) {}
     /// WebKit already hides local addresses from WebRTC with mDNS candidates.
     func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool, hideLocalIP: Bool) {}
+    /// Permissions ("camera", "microphone", "location", "notifications") refused by default.
+    /// WebKit decides through `sitePermission`; Chromium sets its profile's defaults.
+    func setPermissionDefaults(blocked: Set<String>) {}
     /// Clears cookies and cache; with cookies, also the storage of `hosts` and of every site with cookies.
     /// `since` limits cookies to those set after it; `.distantPast` clears them all.
     func clearWebsiteData(cookies: Bool, cache: Bool, hosts: [String] = [], since: Date = .distantPast) async {}

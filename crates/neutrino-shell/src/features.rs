@@ -567,7 +567,8 @@ fn valid_setting(key: &str, v: &Value) -> bool {
         "autoArchiveDays" => [0, 1, 7, 14, 30].contains(&v.as_i64().unwrap_or(-1)),
         "batterySaver" | "hideCookieBanners" | "blockThirdPartyCookies" | "httpsUpgrade" | "stripTracking" | "hideLocalIP"
         | "littleArc" | "peek" | "tabIslands" | "keyboardSounds" | "backgroundMusic" | "askWhereToSave" | "mouseGestures"
-        | "interfaceSounds" | "clearHistoryOnQuit" | "clearCookiesOnQuit" | "clearCacheOnQuit" => v.is_boolean(),
+        | "interfaceSounds" | "clearHistoryOnQuit" | "clearCookiesOnQuit" | "clearCacheOnQuit"
+        | "blockCamera" | "blockMicrophone" | "blockLocation" | "blockNotifications" => v.is_boolean(),
         "musicVolume" => v.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)),
         "defaultSearchID" => v.as_str().is_some_and(|id| id.len() <= 64),
         "interfaceCSS" => v.as_str().is_some_and(|css| css.len() <= 65_536 && !css.contains('<')),

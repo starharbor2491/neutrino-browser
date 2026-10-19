@@ -917,6 +917,7 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             (module_toggle(s, "cookie-banners", "Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer."))
         }
         (filter_lists(s))
+        (permission_defaults(s))
         (site_settings_list(s))
         details class="credential-disclosure"{summary{"Custom blocking rules"@if rules > 0 {" ("(rules)")"}}form data-form="custom-rules"{
             p class="field-help"{"Paste domains, hosts-file lines, rules like ||ads.example.com^ or element rules like example.com##.banner."}
@@ -1029,6 +1030,18 @@ fn site_choice(host: &str, label: &str, key: &str, selected: &str, items: &[(&st
         div class="segments" role="group" aria-label=(format!("{label} for {host}")) style=(format!("--count:{};--index:{}", items.len(), index)) data-selected="true"{
             @for (value, name) in items {button class=(if *value == selected {"selected"} else {""}) data-op="site-setting" data-host=(host) data-key=(key) data-value=(value) data-type=[boolean.then_some("bool")] aria-pressed=((*value == selected).to_string()){(name)}}
         }
+    }}
+}
+/// What sites get when they ask for a permission and the person hasn't decided for that site.
+fn permission_defaults(s: &Shell) -> Markup {
+    let p = prefs(s);
+    let blocked = ["blockCamera", "blockMicrophone", "blockLocation", "blockNotifications"].iter().filter(|k| flag(p, k)).count();
+    html! {details class="credential-disclosure"{summary{"Permission defaults"@if blocked > 0 {" ("(blocked)" blocked)"}}
+        p class="field-help"{"Sites ask before using these. Turn one on to refuse every request; a site you allowed in its own settings keeps access."}
+        (setting_toggle("Block camera requests", "", "blockCamera", flag(p, "blockCamera")))
+        (setting_toggle("Block microphone requests", "", "blockMicrophone", flag(p, "blockMicrophone")))
+        (setting_toggle("Block location requests", "Chromium tabs. WebKit tabs never share your location.", "blockLocation", flag(p, "blockLocation")))
+        (setting_toggle("Block notification requests", "Chromium tabs. WebKit tabs can’t show site notifications.", "blockNotifications", flag(p, "blockNotifications")))
     }}
 }
 fn site_settings_list(s: &Shell) -> Markup {

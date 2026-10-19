@@ -479,6 +479,17 @@ fn named_themes_bring_their_window_colors() {
     assert_eq!(s.draft.as_ref().unwrap()["theme"]["themePack"], "Vivaldi");
 }
 #[test]
+fn permission_defaults_can_refuse_every_request() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"setting","key":"blockLocation","value":true}));
+    assert_eq!(commands(&r)[0], json!({"op":"preference","key":"blockLocation","value":true}));
+    assert!(commands(&s.dispatch(json!({"op":"setting","key":"blockLocation","value":"yes"}))).is_empty());
+    s.snapshot["preferences"]["blockCamera"] = json!(true);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = s.dispatch(json!({"op":"screen","value":"settings","section":"privacy"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Permission defaults (1 blocked)") && html.contains("Block notification requests"));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026
