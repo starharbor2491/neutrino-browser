@@ -125,8 +125,11 @@ final class AppState: ObservableObject {
                 // one the person later removes stays removed.
                 var seen = Set(library.preferences.seededFeatures ?? [])
                 let present = Set(try repo.installed().map(\.id))
+                let preset = library.preferences.configuration.theme.preset ?? "neutrino"
                 for manifest in catalog where manifest.capability == .feature && !seen.contains(manifest.id) {
-                    if !present.contains(manifest.id) { try repo.install(manifest, enabled: true) }
+                    // A module added by an update starts as setup would offer it for this layout.
+                    let enabled = (try? RustCore.request(["op": "moduleDefault", "id": manifest.id, "preset": preset]) as? Bool) ?? true
+                    if !present.contains(manifest.id) { try repo.install(manifest, enabled: enabled) }
                     seen.insert(manifest.id)
                 }
                 if seen != Set(library.preferences.seededFeatures ?? []) { library.preferences.seededFeatures = seen.sorted() }

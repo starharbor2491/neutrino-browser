@@ -225,6 +225,8 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         "parseBlockRules" => json!(crate::features::parse_rules(text(&r, "value"))),
         "parseCosmeticRules" => json!(crate::features::parse_cosmetic(text(&r, "value"))),
         "parseFeed" => crate::feeds::parse(text(&r, "value"))?,
+        // Whether a built-in feature module starts on for a layout, as setup's Modules step offers it.
+        "moduleDefault" => json!(crate::features::module_default(text(&r, "id").trim_start_matches("org.neutrino."), text(&r, "preset"))),
         // A subscribed list: domain rules and element rules, bounded.
         "parseFilterList" => {
             let source = text(&r, "value");

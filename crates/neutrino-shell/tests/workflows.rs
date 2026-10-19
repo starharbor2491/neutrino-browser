@@ -391,6 +391,14 @@ fn boards_hold_page_captures() {
     assert!(commands(&s.dispatch(json!({"op":"board","value":"add-capture","board":"missing"}))).is_empty());
 }
 #[test]
+fn modules_added_by_updates_follow_the_layout_defaults() {
+    let default = |id: &str, preset: &str| neutrino_shell::core_request(json!({"op":"moduleDefault","id":id,"preset":preset})).unwrap();
+    assert_eq!(default("org.neutrino.fingerprinting", "brave"), json!(true));
+    assert_eq!(default("org.neutrino.fingerprinting", "neutrino"), json!(false));
+    assert_eq!(default("org.neutrino.fake-history", "gx"), json!(true));
+    assert_eq!(default("org.neutrino.tab-sleep", "arc"), json!(true));
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));
