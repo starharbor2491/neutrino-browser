@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
 import IOKit.ps
+import MediaPlayer
 import NeutrinoCore
 import UniformTypeIdentifiers
 @preconcurrency import WebKit
@@ -70,7 +71,7 @@ final class BrowserFeatures {
             }
         }
     }
-    func stop() { loop?.cancel(); loop = nil }
+    func stop() { loop?.cancel(); loop = nil; NowPlaying.clear(self) }
 
     private func openStartupPages(_ model: BrowserModel) {
         let preferences = app.library.preferences
@@ -172,6 +173,19 @@ final class BrowserFeatures {
         if playing != audible || current?.id != media?.id || current?.playing != media?.playing {
             audible = playing; media = current; refresh()
         }
+        publishNowPlaying(model)
+    }
+    /// The playing WebKit page appears in Now Playing and answers the media keys.
+    /// Chromium pages use Chromium's own media session support.
+    private func publishNowPlaying(_ model: BrowserModel) {
+        guard app.feature("media-controls"), !model.isPrivate, let media, model.liveEngineTab(media.id)?.engineID == .webkit,
+              let tab = model.session.tabs.first(where: { $0.id == media.id }) else { NowPlaying.clear(self); return }
+        NowPlaying.show(self, title: tab.customTitle ?? tab.title, site: tab.url?.host ?? "", playing: media.playing)
+    }
+    /// A media key: toggles the page that is playing or was last paused.
+    fileprivate func mediaKey(play: Bool?) {
+        guard let media, play == nil || play != media.playing else { return }
+        _ = perform("mediaToggle", ["id": media.id.uuidString])
     }
     private var limitsEnabled: Bool {
         app.feature("limiter") && ((app.library.preferences.memoryLimitMB ?? 0) > 0 || (app.library.preferences.cpuLimit ?? 0) > 0)
@@ -1151,5 +1165,38 @@ final class TabPreviewPanel {
     func hide() {
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
+    }
+}
+
+/// Now Playing and the media keys for one window's page at a time.
+@MainActor
+private enum NowPlaying {
+    private static weak var owner: BrowserFeatures?
+    private static var installed = false
+    static func show(_ features: BrowserFeatures, title: String, site: String, playing: Bool) {
+        install()
+        owner = features
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = [MPMediaItemPropertyTitle: String(title.prefix(200)), MPMediaItemPropertyArtist: site]
+        center.playbackState = playing ? .playing : .paused
+    }
+    static func clear(_ features: BrowserFeatures) {
+        guard owner === features else { return }
+        owner = nil
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
+    }
+    private static func install() {
+        guard !installed else { return }
+        installed = true
+        let commands = MPRemoteCommandCenter.shared()
+        let routes: [(MPRemoteCommand, Bool?)] = [(commands.togglePlayPauseCommand, nil), (commands.playCommand, true), (commands.pauseCommand, false)]
+        for (command, play) in routes {
+            command.isEnabled = true
+            command.addTarget { @Sendable _ in
+                Task { @MainActor in owner?.mediaKey(play: play) }
+                return .success
+            }
+        }
     }
 }
