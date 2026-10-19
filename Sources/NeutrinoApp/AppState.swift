@@ -666,6 +666,25 @@ final class AppState: ObservableObject {
         }
         return true
     }
+    /// Clears what the person chose to clear on quit, before the final save.
+    func clearDataOnQuit() async {
+        let preferences = library.preferences
+        if preferences.clearHistoryOnQuit == true, !library.history.isEmpty { library.history.removeAll() }
+        let cookies = preferences.clearCookiesOnQuit == true, cache = preferences.clearCacheOnQuit == true
+        guard cookies || cache else { return }
+        let cacheTypes: Set<String> = [WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeOfflineWebApplicationCache]
+        var types = Set<String>()
+        if cookies { types.formUnion(WKWebsiteDataStore.allWebsiteDataTypes().subtracting(cacheTypes)) }
+        if cache { types.formUnion(cacheTypes) }
+        for store in webKitDataStores.values { await store.removeData(ofTypes: types, modifiedSince: .distantPast) }
+        // Chromium clears through a live page of each Profile.
+        var cleared = Set<UUID>()
+        for model in windows.values.compactMap(\.model) where !model.isPrivate && !cleared.contains(model.session.profileID) {
+            guard let page = model.liveEngineTabs.map(\.page).first(where: { $0.engineID == .chromium }) else { continue }
+            cleared.insert(model.session.profileID)
+            await page.clearWebsiteData(cookies: cookies, cache: cache)
+        }
+    }
     func freezeQuitData() {
         windows.values.compactMap(\.model).forEach { $0.captureChromiumSessions() }
         ChromiumRuntime.shared.setFinalQuitFrozen(true)
@@ -794,6 +813,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DistributionManager.shared.cancelledQuit()
                 sender.reply(toApplicationShouldTerminate: false); return
             }
+            await state.clearDataOnQuit()
             self.smokeTrace("Flushing application data before termination")
             let saved = await state.flush()
             self.smokeTrace("Termination flush completed: \(saved)")

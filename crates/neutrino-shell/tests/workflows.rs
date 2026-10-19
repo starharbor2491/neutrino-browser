@@ -251,6 +251,17 @@ fn feeds_subscribe_from_the_page_and_open_entries() {
     assert!(commands(&s.dispatch(json!({"op":"feed","value":"refresh"}))).is_empty());
 }
 #[test]
+fn clearing_on_quit_is_chosen_per_kind_of_data() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"setting","key":"clearCookiesOnQuit","value":true}));
+    assert_eq!(commands(&r)[0], json!({"op":"preference","key":"clearCookiesOnQuit","value":true}));
+    assert!(commands(&s.dispatch(json!({"op":"setting","key":"clearCookiesOnQuit","value":"yes"}))).is_empty());
+    s.snapshot["preferences"]["clearCookiesOnQuit"] = json!(true);
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"privacy"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Clear when Neutrino quits (1 on)"));
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

@@ -304,6 +304,10 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var liveWallpaper: String?
     /// Keep the local network address out of WebRTC (Chromium's IP handling policy).
     public var hideLocalIP: Bool?
+    /// What goes when Neutrino quits, as Brave's and Vivaldi's "clear on exit" choices.
+    public var clearHistoryOnQuit: Bool?
+    public var clearCookiesOnQuit: Bool?
+    public var clearCacheOnQuit: Bool?
     public var filterLists: [FilterList]?
     /// RSS and Atom feeds in the Feeds panel.
     public var feeds: [FeedSubscription]?

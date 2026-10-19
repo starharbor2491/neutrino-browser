@@ -806,6 +806,9 @@ final class BrowserFeatures {
         case "batterySaver": preferences.batterySaver = value as? Bool
         case "hideCookieBanners": preferences.hideCookieBanners = value as? Bool
         case "hideLocalIP": preferences.hideLocalIP = value as? Bool
+        case "clearHistoryOnQuit": preferences.clearHistoryOnQuit = value as? Bool == true ? true : nil
+        case "clearCookiesOnQuit": preferences.clearCookiesOnQuit = value as? Bool == true ? true : nil
+        case "clearCacheOnQuit": preferences.clearCacheOnQuit = value as? Bool == true ? true : nil
         case "liveWallpaper": preferences.liveWallpaper = text()
         case "blockThirdPartyCookies": preferences.blockThirdPartyCookies = value as? Bool
         case "httpsUpgrade": preferences.httpsUpgrade = value as? Bool

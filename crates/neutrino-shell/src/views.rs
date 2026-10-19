@@ -820,6 +820,7 @@ pub fn pretty(binding: &str) -> String {
 pub fn privacy_extra(s: &Shell) -> Markup {
     let p = prefs(s);
     let rules = array(&p["customBlockList"]).len() + array(&p["customCosmetic"]).len();
+    let quit_clears = ["clearHistoryOnQuit", "clearCookiesOnQuit", "clearCacheOnQuit"].iter().filter(|k| flag(p, k)).count();
     html! {
         div class="settings-group"{
             (setting_toggle("Upgrade connections to HTTPS", "Load the secure version of sites when one exists.", "httpsUpgrade", p["httpsUpgrade"].as_bool().unwrap_or(true)))
@@ -835,6 +836,13 @@ pub fn privacy_extra(s: &Shell) -> Markup {
         }}
         div class="settings-group"{
             div class="list-row"{div{strong{"Clear browsing data"}small{"History, cookies, cache and the download list."}}button class="button" data-op="menu" data-value="clear-data"{"Clear…"}}
+            @if !s.private() {
+                details class="credential-disclosure"{summary{"Clear when Neutrino quits"@if quit_clears > 0 {" ("(quit_clears)" on)"}}
+                    (setting_toggle("History", "Every Profile’s browsing history.", "clearHistoryOnQuit", flag(p, "clearHistoryOnQuit")))
+                    (setting_toggle("Cookies and site data", "Signs you out of websites.", "clearCookiesOnQuit", flag(p, "clearCookiesOnQuit")))
+                    (setting_toggle("Cache", "Saved copies of pages and images.", "clearCacheOnQuit", flag(p, "clearCacheOnQuit")))
+                }
+            }
             div class="list-row"{div{strong{"Site data"}small{"See and remove what each site stores on this Mac."}}button class="button" data-op="site-data" data-value="load"{"Show sites"}}
             @if let Some(list) = s.snapshot["siteData"].as_array() {
                 @if list.is_empty() {p class="field-help"{"No sites have stored data."}}
