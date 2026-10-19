@@ -1007,7 +1007,7 @@ extension BrowserFeatures {
         let matches = ((try? SecureVault.accounts(service: service)) ?? []).filter { $0.hasPrefix(origin + "\n") }
         guard matches.count == 1, let data = try? SecureVault.get(account: matches[0], service: service),
               let credential = try? JSONDecoder().decode(LocalCredential.self, from: data) else { return }
-        Task { try? await tab.fillCredential(credential) }
+        Task { try? await tab.fillCredentialOnUse(credential) }
     }
 }
 

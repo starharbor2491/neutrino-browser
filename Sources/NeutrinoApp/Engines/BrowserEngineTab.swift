@@ -87,6 +87,8 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func pageText() async throws -> String { throw ValidationError("This engine cannot read page text.") }
     func selectedText() async throws -> String { throw ValidationError("This engine cannot read selected text.") }
     func fillCredential(_ credential: LocalCredential) async throws { throw ValidationError("Autofill is unavailable in this engine.") }
+    /// Fills the login once the person uses the form, rather than as the page loads.
+    func fillCredentialOnUse(_ credential: LocalCredential) async throws { throw ValidationError("Autofill is unavailable in this engine.") }
     func focus() { if !interfaceEditing { nativeView.window?.makeFirstResponder(nativeView) } }
     func find(_ text: String, backwards: Bool = false) { preconditionFailure("An engine must implement find") }
     func pageHTML() async throws -> String { throw ValidationError("This engine cannot capture page HTML.") }

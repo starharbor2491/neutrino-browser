@@ -194,6 +194,9 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     override func fillCredential(_ credential: LocalCredential) async throws {
         _ = try await webView.callAsyncJavaScript(credential.autofillScript, arguments: [:], in: nil, contentWorld: .defaultClient)
     }
+    override func fillCredentialOnUse(_ credential: LocalCredential) async throws {
+        _ = try await webView.callAsyncJavaScript(credential.autofillOnUseScript, arguments: [:], in: nil, contentWorld: .defaultClient)
+    }
     override func reload() {
         if let failedNavigationURL { load(failedNavigationURL) }
         else { errorMessage = nil; webView.reload() }
