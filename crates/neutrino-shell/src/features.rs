@@ -1387,24 +1387,38 @@ pub fn suggestions(s: &Shell) -> Vec<Value> {
 }
 
 /// Common consent-banner containers, hidden when the person turns that on.
+/// Covers the widely used consent managers; Fanboy's Annoyance list adds more.
 const COOKIE_BANNERS: &[&str] = &[
     "#onetrust-consent-sdk", "#onetrust-banner-sdk", "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay",
-    ".qc-cmp2-container", "#qc-cmp2-container", "#didomi-host", "#usercentrics-root", ".fc-consent-root",
-    "#cmpbox", "#cmpwrapper", ".cc-window", ".cc-banner", "#cookie-law-info-bar", "#cookie-notice",
-    "#cookie-banner", ".cookie-banner", "#gdpr-cookie-message", "#truste-consent-track", ".truste_box_overlay",
-    ".truste_overlay", "[id^='sp_message_container_']", "#BorlabsCookieBox", "#iubenda-cs-banner",
-    ".osano-cm-window", "#termly-code-snippet-support", "#_evidon_banner", ".evidon-banner", "#consent_blackbar",
+    ".qc-cmp2-container", "#qc-cmp2-container", "#didomi-host", "#usercentrics-root", ".fc-consent-root", "#cmpbox",
+    "#cmpwrapper", ".cc-window", ".cc-banner", "#cookie-law-info-bar", "#cookie-notice", "#cookie-banner",
+    ".cookie-banner", "#gdpr-cookie-message", "#truste-consent-track", ".truste_box_overlay", ".truste_overlay",
+    "[id^='sp_message_container_']", "#BorlabsCookieBox", "#iubenda-cs-banner", ".osano-cm-window",
+    "#termly-code-snippet-support", "#_evidon_banner", ".evidon-banner", "#consent_blackbar",
     "#cookiescript_injected", "#hs-eu-cookie-confirmation", "#axeptio_overlay", "#tarteaucitronRoot",
-    "#cookie-consent-banner", "[aria-label='cookieconsent']", ".cookie-consent-banner",
-    "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay", "#usercentrics-root", "#uc-banner-modal", ".qc-cmp2-container",
-    "#qc-cmp2-container", "#didomi-host", ".didomi-popup-open .didomi-popup-backdrop", "#onetrust-consent-sdk", "#cmpbox", "#cmpbox2",
-    ".cmp-root", "#cookie-law-info-bar", "#cliSettingsPopup", ".cky-consent-container", ".cky-overlay", "#moove_gdpr_cookie_info_bar",
-    ".gdpr-cookie-notice", "#gdpr-cookie-message", "#cookieNotice", "#cookie-notice", ".cookie-notice", "#cookiebanner", ".cookiebanner",
-    "#cookie-bar", ".cookie-bar", "#cookies-banner", ".cookies-banner", "#cookieConsent", ".cookieConsent", "#cookie-popup", ".cookie-popup",
-    ".cc-window", ".cc-banner", "#cc-main", ".cm-wrapper", "#klaro", ".klaro .cookie-notice", "#iubenda-cs-banner", ".iubenda-cs-container",
-    "#truste-consent-track", "#consent-banner", ".consent-banner", "#js-consent-banner", ".fc-consent-root", ".sp-message-open #sp_message_container",
-    "#hs-eu-cookie-confirmation", "#ccc", "#ccc-overlay", ".osano-cm-dialog", "#termly-code-snippet-support", ".t-consentPrompt",
-    "#coiOverlay", "#CookieReportsBanner", ".cookie-banner", "#cookie-banner", "[data-testid='cookie-banner']", "[id^='cookie-consent']",
+    "#cookie-consent-banner", "[aria-label='cookieconsent']", ".cookie-consent-banner", "#uc-banner-modal",
+    ".didomi-popup-open .didomi-popup-backdrop", "#cmpbox2", ".cmp-root", "#cliSettingsPopup",
+    ".cky-consent-container", ".cky-overlay", "#moove_gdpr_cookie_info_bar", ".gdpr-cookie-notice", "#cookieNotice",
+    ".cookie-notice", "#cookiebanner", ".cookiebanner", "#cookie-bar", ".cookie-bar", "#cookies-banner",
+    ".cookies-banner", "#cookieConsent", ".cookieConsent", "#cookie-popup", ".cookie-popup", "#cc-main",
+    ".cm-wrapper", "#klaro", ".klaro .cookie-notice", ".iubenda-cs-container", "#consent-banner", ".consent-banner",
+    "#js-consent-banner", ".sp-message-open #sp_message_container", "#ccc", "#ccc-overlay", ".osano-cm-dialog",
+    ".t-consentPrompt", "#coiOverlay", "#CookieReportsBanner", "[data-testid='cookie-banner']",
+    "[id^='cookie-consent']", "#onetrust-pc-sdk", ".onetrust-pc-dark-filter", ".optanon-alert-box-wrapper",
+    "#usercentrics-cmp-ui", "#uc-center-container", ".cmplz-cookiebanner", "#cmplz-cookiebanner-container",
+    "#cookiefirst-root", ".ch2-container", "#cookie-information-template-wrapper", ".cookieconsent-com---nb",
+    "#fides-overlay", ".fides-banner", "#lanyard_root", "#transcend-consent-manager", ".ppms_cm_popup_overlay",
+    "#ppms_cm_popup_overlay", "#__tealiumGDPRecModal", "#tc-privacy-wrapper", "#footer_tc_privacy", "#sd-cmp",
+    "#appconsent", ".cmpboxBG", "#sliding-popup", ".eu-cookie-compliance-banner", "#cookieChoiceInfo",
+    "#shopify-pc__banner", "#pandectes-banner", "#consent-tracking", ".cookie-law-info-bar", "#catapult-cookie-bar",
+    "#cn-notice-text", ".cn-notice-container", "#cookie-notice-container", "#gdpr-consent-tool-wrapper",
+    ".js-cookie-consent", "#cookie-notification", ".cookie-notification", "#cookieWall", "#didomi-notice",
+    "#gdpr-banner", ".gdpr-banner",
+];
+/// Classes consent managers put on the page to stop it scrolling while their banner shows.
+const COOKIE_SCROLL_LOCKS: &[&str] = &[
+    "html.sp-message-open", "body.didomi-popup-open", "body.qc-cmp-showing", "body.cmp-pop-open", "html.cmplz-blocked",
+    "body.cky-modal-open", "body.uc-banner-active", "html.ppms_cm_popup_overlay_open", "body.ch2-scroll-lock", "body.cookiefirst-scroll-lock",
 ];
 
 /// Scripts the host runs in an isolated world on a page. Each returns a string.
@@ -1437,6 +1451,9 @@ pub fn page_script(r: &Value) -> Option<String> {
             if flag(r, "cookieBanners") {
                 for selector in COOKIE_BANNERS {
                     css.push_str(&format!("{selector}{{display:none!important}}"));
+                }
+                for selector in COOKIE_SCROLL_LOCKS {
+                    css.push_str(&format!("{selector}{{overflow:auto!important}}"));
                 }
             }
             for selector in cosmetic_for(array(&r["cosmetic"]), text(r, "site")) {
