@@ -483,6 +483,7 @@ final class BrowserFeatures {
             case "month": Date().addingTimeInterval(-2_419_200)
             default: .distantPast
             }
+            let visitedHosts = Array(Set(app.library.history.filter { $0.profileID == profileID && $0.visitedAt >= since }.compactMap { $0.url.host?.lowercased() }))
             if command["history"] as? Bool == true { app.library.history.removeAll { $0.profileID == profileID && $0.visitedAt >= since } }
             if command["downloads"] as? Bool == true { model.downloads.removeFinished() }
             let cookies = command["cookies"] as? Bool == true, cache = command["cache"] as? Bool == true
@@ -492,7 +493,7 @@ final class BrowserFeatures {
             guard !types.isEmpty, regular else { break }
             app.webKitDataStore(profileID: profileID).removeData(ofTypes: types, modifiedSince: since) {}
             let chromium = model.liveEngineTabs.map(\.page).first { $0.engineID == .chromium }
-            if let chromium { Task { await chromium.clearWebsiteData(cookies: cookies, cache: cache) } }
+            if let chromium { Task { await chromium.clearWebsiteData(cookies: cookies, cache: cache, hosts: visitedHosts) } }
             else if model.session.tabs.contains(where: { $0.engineID == .chromium && $0.url != nil }) {
                 app.notice = "WebKit data was cleared. Open a Chromium tab, then clear again to include Chromium’s cookies and cache."
             }

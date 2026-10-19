@@ -111,7 +111,8 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func setNetworkLimit(bytesPerSecond: Int) {}
     /// WebKit already hides local addresses from WebRTC with mDNS candidates.
     func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool, hideLocalIP: Bool) {}
-    func clearWebsiteData(cookies: Bool, cache: Bool) async {}
+    /// Clears cookies and cache; with cookies, also the storage of `hosts` and of every site with cookies.
+    func clearWebsiteData(cookies: Bool, cache: Bool, hosts: [String] = []) async {}
     func clearSiteData(host: String) async {}
     func cookieDomains() async -> [String] { [] }
     /// Requests blocked on the current page, when the engine counts them.

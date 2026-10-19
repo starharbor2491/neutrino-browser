@@ -366,8 +366,19 @@ final class ChromiumTab: BrowserEngineTab {
         command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: privacy.localIP ? 1 : 0)
     }
     /// Cookies and cached files of this tab's Chromium profile, for all time.
-    override func clearWebsiteData(cookies: Bool, cache: Bool) async {
-        if cookies { _ = try? await request("Network.clearBrowserCookies", parameters: [:]) }
+    override func clearWebsiteData(cookies: Bool, cache: Bool, hosts: [String] = []) async {
+        if cookies {
+            // Chromium's DevTools clears local storage, IndexedDB and service workers per origin.
+            var sites = Set(await cookieDomains())
+            for host in hosts { sites.insert(host.hasPrefix("www.") ? String(host.dropFirst(4)) : host) }
+            let list = Array(sites.sorted().prefix(300))
+            for start in stride(from: 0, to: list.count, by: 20) {
+                await withTaskGroup(of: Void.self) { group in
+                    for host in list[start..<min(start + 20, list.count)] { group.addTask { await self.clearSiteData(host: host) } }
+                }
+            }
+            _ = try? await request("Network.clearBrowserCookies", parameters: [:])
+        }
         if cache { _ = try? await request("Network.clearBrowserCache", parameters: [:]) }
     }
     override func clearSiteData(host: String) async {

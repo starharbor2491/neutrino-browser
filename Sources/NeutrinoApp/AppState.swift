@@ -669,6 +669,7 @@ final class AppState: ObservableObject {
     /// Clears what the person chose to clear on quit, before the final save.
     func clearDataOnQuit() async {
         let preferences = library.preferences
+        let visitedHosts = Dictionary(grouping: library.history, by: \.profileID).mapValues { Array(Set($0.compactMap { $0.url.host?.lowercased() })) }
         if preferences.clearHistoryOnQuit == true, !library.history.isEmpty { library.history.removeAll() }
         let cookies = preferences.clearCookiesOnQuit == true, cache = preferences.clearCacheOnQuit == true
         guard cookies || cache else { return }
@@ -682,7 +683,7 @@ final class AppState: ObservableObject {
         for model in windows.values.compactMap(\.model) where !model.isPrivate && !cleared.contains(model.session.profileID) {
             guard let page = model.liveEngineTabs.map(\.page).first(where: { $0.engineID == .chromium }) else { continue }
             cleared.insert(model.session.profileID)
-            await page.clearWebsiteData(cookies: cookies, cache: cache)
+            await page.clearWebsiteData(cookies: cookies, cache: cache, hosts: visitedHosts[model.session.profileID] ?? [])
         }
     }
     func freezeQuitData() {
