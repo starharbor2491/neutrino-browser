@@ -1186,6 +1186,16 @@ extension BrowserModel {
             }
         }
         if app.feature("mouse-gestures"), let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
+        // Brave's De-AMP: an AMP page opens the publisher's own version of the article.
+        if preferences.stripTracking != false, !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? []),
+           let url = tab.url, let script = PageScript.source("deAmp") {
+            Task { [weak self] in
+                guard let value = try? await tab.runPageScript(script), let canonical = URL(string: value),
+                      AddressResolver.isWebURL(canonical), let self, tab.url == url, self.deAmped[id] != canonical else { return }
+                self.deAmped[id] = url
+                tab.load(canonical)
+            }
+        }
     }
     /// Remembers the zoom chosen for the active page's site.
     func rememberZoom(_ value: Double) {

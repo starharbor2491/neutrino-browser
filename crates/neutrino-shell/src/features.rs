@@ -1471,6 +1471,8 @@ pub fn page_script(r: &Value) -> Option<String> {
         // Third-party hosts the page loads resources from, with how many each: {host: count}.
         "resourceHosts" => "(()=>{const out={};const seen=new Set();for(const e of document.querySelectorAll('script[src],img[src],iframe[src],link[href][rel~=stylesheet],embed[src],source[src],video[src],audio[src]')){try{const x=new URL(e.getAttribute('src')||e.getAttribute('href'),location.href);if(x.hostname===location.hostname||seen.has(x.href))continue;seen.add(x.href);const h=x.hostname.toLowerCase();if(!(h in out)&&Object.keys(out).length>=500)continue;out[h]=(out[h]||0)+1}catch(_){}}return JSON.stringify(out)})()".into(),
         // The RSS or Atom feed a page advertises in its head, or "".
+        // Brave's De-AMP: an AMP page's own canonical article, when it names one elsewhere.
+        "deAmp" => "(()=>{const h=document.documentElement;if(!h||!(h.hasAttribute('amp')||h.hasAttribute('\\u26a1')))return '';const l=document.querySelector('link[rel~=canonical][href]');if(!l)return '';const c=new URL(l.href,location.href);return /^https?:$/.test(c.protocol)&&c.href!==location.href?c.href:''})()".into(),
         "feedLink" => "(()=>{const l=document.querySelector('link[rel~=alternate][href][type=\"application/rss+xml\"],link[rel~=alternate][href][type=\"application/atom+xml\"]');return l&&/^https?:/.test(l.href)?l.href:''})()".into(),
         // Vivaldi's Fast Forward: the next page in a series, or "".
         "nextPage" => "(()=>{const a=document.querySelector('link[rel~=next][href],a[rel~=next][href]');if(a)return a.href;const words=/^(next|next page|older|older posts|more|weiter|suivant|siguiente|›|»|>|→)$/i;for(const e of document.querySelectorAll('a[href]')){const t=(e.innerText||e.getAttribute('aria-label')||'').trim();if(t.length<20&&words.test(t)&&!e.href.startsWith('javascript:'))return e.href}return ''})()".into(),
@@ -1593,6 +1595,7 @@ mod tests {
         let style = page_script(&json!({"kind":"style","settings":{"filter":"dark","hide":[".ad","bad{"]},"cookieBanners":true})).unwrap();
         assert!(style.contains(".ad{display:none!important}") && !style.contains("bad{{") && style.contains("onetrust"));
         assert!(page_script(&json!({"kind":"unknown"})).is_none());
+        assert!(page_script(&json!({"kind":"deAmp"})).unwrap().contains("link[rel~=canonical]"));
     }
 
     #[test]
