@@ -867,6 +867,9 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             "read" | "unread" | "remove" if array(&s.snapshot["preferences"]["readingList"]).iter().any(|i| i["id"] == id) => {
                 commands.push(json!({"op":"readingItem","id":id,"value":value}));
             }
+            // Brave's Playlist plays its items one after another in one tab.
+            "play-all" if regular => commands.push(json!({"op":"playlist","value":"start"})),
+            "play-next" | "play-stop" if s.snapshot["playlist"].is_object() => commands.push(json!({"op":"playlist","value":if value == "play-next" {"next"} else {"stop"}})),
             _ => {}
         },
         "session" => match value {
@@ -1540,7 +1543,7 @@ const timer=setTimeout(()=>end(''),100000)}})",
                 quote(label)
             )
         }
-        "mediaState" =>"(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended&&m.readyState>2);return JSON.stringify({audible:!!p&&!p.muted&&p.volume>0,playing:!!p,media:ms.length>0,title:(navigator.mediaSession&&navigator.mediaSession.metadata&&navigator.mediaSession.metadata.title)||''})})()".into(),
+        "mediaState" =>"(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended&&m.readyState>2);return JSON.stringify({audible:!!p&&!p.muted&&p.volume>0,playing:!!p,media:ms.length>0,ended:!p&&ms.some(m=>m.ended&&m.duration>20),title:(navigator.mediaSession&&navigator.mediaSession.metadata&&navigator.mediaSession.metadata.title)||''})})()".into(),
         "mediaToggle" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended);if(p){p.pause();return 'paused'}const q=ms.find(m=>m.currentTime>0&&!m.ended)||ms[0];if(q){q.play();return 'playing'}return 'none'})()".into(),
         // Hold Option and drag: left goes back, right forward, up then down reloads,
         // up or down scrolls to the top or bottom.

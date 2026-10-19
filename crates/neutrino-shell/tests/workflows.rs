@@ -557,6 +557,23 @@ fn chrome_toolbar_has_extensions_and_a_side_panel() {
     assert!(!html.contains("extensions-menu") && !html.contains("Show side panel"));
 }
 #[test]
+fn playlist_plays_unread_items_in_turn() {
+    let mut s = shell();
+    s.snapshot["features"] = json!({"reading-list": true});
+    s.snapshot["preferences"]["readingList"] = json!([{"id":"r1","profileID":"p1","title":"Talk","url":"https://video.example/1","media":true,"read":false}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"library","section":"reading"}));
+    let html = s.dispatch(json!({"op":"library-filter","value":"playlist"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Play all"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"reading","value":"play-all"})))[0], json!({"op":"playlist","value":"start"}));
+    // Next and Stop only while a queue plays.
+    assert!(commands(&s.dispatch(json!({"op":"reading","value":"play-next"}))).is_empty());
+    s.snapshot["playlist"] = json!({"position":1,"count":2,"title":"Talk"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Playing 1 of 2"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"reading","value":"play-next"})))[0], json!({"op":"playlist","value":"next"}));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

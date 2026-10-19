@@ -49,6 +49,8 @@ final class BrowserFeatures {
     private var loop: Task<Void, Never>?
     private var cpu: [UUID: (seconds: Double, at: Date)] = [:]
     private var blockedSeen: [UUID: Int] = [:]
+    /// Brave's Playlist: the tab playing it, the reading items in order, and the one playing.
+    private var playlist: (tab: UUID, items: [UUID], position: Int, since: Date)?
     private var firstSeen: [UUID: Date] = [:]
     private var overLimit = 0
     /// Background Chromium pages slowed by the CPU limit.
@@ -121,6 +123,9 @@ final class BrowserFeatures {
         if let prompt = passwordPrompt, prompt.profileID == model.session.profileID {
             snapshot["passwordPrompt"] = ["origin": prompt.credential.origin, "username": prompt.credential.username, "update": prompt.update]
         }
+        if let queue = playlist, !model.isPrivate, let item = app.library.preferences.readingList?.first(where: { $0.id == queue.items[queue.position] }) {
+            snapshot["playlist"] = ["position": queue.position + 1, "count": queue.items.count, "title": item.title]
+        }
         if throttled.remove(model.session.selectedTabID) != nil { model.liveEngineTab(model.session.selectedTabID)?.setProcessorThrottle(1) }
         let counted = model.liveEngineTabs.compactMap { $0.page.blockedTotal }
         let lifetime = model.isPrivate ? 0 : app.library.preferences.blockedLifetime ?? 0
@@ -179,6 +184,8 @@ final class BrowserFeatures {
             guard let raw = try? await page.runPageScript(script), let data = raw.data(using: .utf8),
                   let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if state["audible"] as? Bool == true { playing.insert(id) }
+            // The page just left can still report its ended video for a moment.
+            if let queue = playlist, queue.tab == id, state["ended"] as? Bool == true, Date().timeIntervalSince(queue.since) > 8 { advancePlaylist(model) }
             if state["playing"] as? Bool == true { current = (id, true) }
             else if current?.id == id { current = state["media"] as? Bool == true ? (id, false) : nil }
         }
@@ -194,6 +201,21 @@ final class BrowserFeatures {
         guard app.feature("media-controls"), !model.isPrivate, let media, model.liveEngineTab(media.id) != nil,
               let tab = model.session.tabs.first(where: { $0.id == media.id }) else { NowPlaying.clear(self); return }
         NowPlaying.show(self, title: tab.customTitle ?? tab.title, site: tab.url?.host ?? "", playing: media.playing)
+    }
+    /// Marks the playing Playlist item read and opens the next one in the same tab.
+    private func advancePlaylist(_ model: BrowserModel) {
+        guard var queue = playlist, var list = app.library.preferences.readingList else { playlist = nil; return }
+        if let index = list.firstIndex(where: { $0.id == queue.items[queue.position] }) { list[index].read = true }
+        app.library.preferences.readingList = list
+        queue.position += 1; queue.since = Date()
+        guard queue.position < queue.items.count, let next = list.first(where: { $0.id == queue.items[queue.position] }),
+              model.session.tabs.contains(where: { $0.id == queue.tab }) else {
+            playlist = nil; app.notice = "Playlist finished."; refresh(); return
+        }
+        playlist = queue
+        if model.session.selectedTabID != queue.tab { model.selectTab(queue.tab) }
+        model.liveEngineTab(queue.tab)?.load(next.url)
+        refresh()
     }
     /// Brave's start page counts every tracker and ad blocked, not only those in open tabs.
     private func countBlocked(_ model: BrowserModel) {
@@ -599,6 +621,17 @@ final class BrowserFeatures {
             list.removeAll { $0.url == url && $0.profileID == profileID }
             list.insert(ReadingItem(profileID: profileID, title: String((command["title"] as? String ?? url.host ?? "Page").prefix(512)), url: url, media: command["media"] as? Bool == true), at: 0)
             app.library.preferences.readingList = Array(list.prefix(1000))
+        case "playlist":
+            guard regular, let model else { break }
+            switch command["value"] as? String {
+            case "start":
+                let items = (app.library.preferences.readingList ?? []).filter { $0.profileID == profileID && $0.media == true && !$0.read }
+                guard let first = items.first else { app.notice = "Your Playlist has nothing unread to play."; break }
+                model.newTab(url: first.url)
+                playlist = (model.session.selectedTabID, items.map(\.id), 0, Date())
+            case "next": advancePlaylist(model)
+            default: playlist = nil
+            }
         case "readingItem":
             guard let id, var list = app.library.preferences.readingList, let index = list.firstIndex(where: { $0.id == id }) else { break }
             switch command["value"] as? String {

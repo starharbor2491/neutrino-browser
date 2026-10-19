@@ -724,6 +724,17 @@ pub fn reading(s: &Shell) -> Markup {
     let items: Vec<&Value> = profile_items(s, "readingList").into_iter().filter(|i| match filter { "unread" => !flag(i, "read"), "playlist" => flag(i, "media"), _ => true }).collect();
     html! {
         div class="filter-chips" role="group" aria-label="Show"{@for (value,label) in [("","All"),("unread","Unread"),("playlist","Playlist")] {button class=(if filter==value {"chip selected"}else{"chip"}) data-op="library-filter" data-value=(value){(label)}}span class="spacer"{}button class="button" data-op="reading" data-value="add" disabled[text(s.active(),"url").is_empty() || s.private()]{(icon("plus"))"Add current page"}}
+        @if filter == "playlist" && !s.private() {
+            @let queue = &s.snapshot["playlist"];
+            @if queue.is_object() {
+                div class="list-row playlist-now"{(icon("play"))div{strong{"Playing "(queue["position"].as_u64().unwrap_or(1))" of "(queue["count"].as_u64().unwrap_or(1))}small{(text(queue, "title"))}}
+                    button class="button quiet" data-op="reading" data-value="play-next" disabled[queue["position"] == queue["count"]]{"Next"}
+                    button class="button quiet" data-op="reading" data-value="play-stop"{"Stop"}}
+            } @else if items.iter().any(|i| !flag(i, "read")) {
+                button class="button primary playlist-play" data-op="reading" data-value="play-all"{(icon("play"))"Play all"}
+                p class="field-help"{"Unread items play in one tab, each after the last one ends, and are marked read."}
+            }
+        }
         @if items.is_empty() {(crate::render::empty("Nothing to read yet","Save pages to read later with ⇧⌘D. Pages with video or music can go in your Playlist from the page menu.","book"))}
         @for i in items {div class=(if flag(i,"read") {"list-row read"} else {"list-row"}){
             button class="bookmark-link" data-op="navigate" data-value=(text(i,"url")){(site(i))span{strong{(text(i,"title"))}small{(host(text(i,"url")))@if flag(i,"media"){" · Playlist"}}}}
