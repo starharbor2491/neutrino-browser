@@ -1127,7 +1127,7 @@ pub fn limiter_controls(s: &Shell) -> Markup {
     html! {
         label class="control-label"{"Memory limit"}(choice("memoryLimitMB", p["memoryLimitMB"].as_i64().unwrap_or(0), &[(0,"Off"),(1024,"1 GB"),(2048,"2 GB"),(4096,"4 GB"),(8192,"8 GB")]))
         label class="control-label"{"CPU limit"}(choice("cpuLimit", p["cpuLimit"].as_i64().unwrap_or(0), &[(0,"Off"),(25,"25%"),(50,"50%"),(75,"75%")]))
-        p class="field-help"{"Above a limit, the least recently used background tabs go to sleep until usage drops."}
+        p class="field-help"{"Above the CPU limit, background Chromium tabs slow down. If usage stays above a limit, the least recently used background tabs go to sleep."}
         label class="control-label"{"Network limit for Chromium tabs"}(choice("networkLimitKBps", p["networkLimitKBps"].as_i64().unwrap_or(0), &[(0,"Off"),(256,"256 KB/s"),(1024,"1 MB/s"),(5120,"5 MB/s"),(10240,"10 MB/s")]))
     }
 }

@@ -124,6 +124,8 @@ class BrowserEngineTab: NSObject, ObservableObject {
     var blockedTotal: Int? { nil }
     /// Memory in megabytes and processor time in seconds, when the engine reports them.
     func resourceUsage() async -> (memoryMB: Double, cpuSeconds: Double)? { nil }
+    /// Runs the page's work `rate` times slower (1 is full speed), when the engine can.
+    func setProcessorThrottle(_ rate: Double) {}
     var hasActiveDownloads: Bool { false }
     func requestClose() { onClose?() }
     func dispose() { faviconTask?.cancel(); faviconTask = nil; onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil; onPageLoaded = nil; onPeek = nil; onSitePermission = nil; sitePermission = nil; scriptsBlocked = nil }

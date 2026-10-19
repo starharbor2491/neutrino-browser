@@ -426,6 +426,9 @@ final class ChromiumTab: BrowserEngineTab {
         let value = { (name: String) in metrics.first { $0["name"] as? String == name }?["value"] as? Double ?? 0 }
         return (value("JSHeapTotalSize") / 1_048_576, value("TaskDuration"))
     }
+    override func setProcessorThrottle(_ rate: Double) {
+        Task { _ = try? await request("Emulation.setCPUThrottlingRate", parameters: ["rate": max(1, min(20, rate))], timeout: .seconds(3)) }
+    }
     override func performNativeTabCommand(_ command: NativeTabCommand) -> Bool {
         guard !disposing, let page, let api = runtime.api,
               hasNativeNavigationChrome || (isAuxiliary && chromeWindow?.isVisible == true) else { return false }

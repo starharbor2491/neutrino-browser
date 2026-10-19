@@ -49,6 +49,8 @@ final class BrowserFeatures {
     private var blockedSeen: [UUID: Int] = [:]
     private var firstSeen: [UUID: Date] = [:]
     private var overLimit = 0
+    /// Background Chromium pages slowed by the CPU limit.
+    private var throttled = Set<UUID>()
     private var breakMuted = Set<UUID>()
     private var wallpaper: (path: String, modified: Date, value: String)?
     private static var openedStartupPages = false
@@ -71,6 +73,7 @@ final class BrowserFeatures {
                 if tick % 200 == 0 { self.archiveIdleTabs(model) }
                 if tick % 600 == 0, self.app.feature("feeds"), !model.isPrivate { await self.app.refreshFeeds(force: false) }
                 if self.sampleResources || self.limitsEnabled { await self.sampleUsage(model) }
+                else if !self.throttled.isEmpty { self.releaseThrottles(model) }
                 tick += 1
             }
         }
@@ -115,6 +118,7 @@ final class BrowserFeatures {
         if let prompt = passwordPrompt, prompt.profileID == model.session.profileID {
             snapshot["passwordPrompt"] = ["origin": prompt.credential.origin, "username": prompt.credential.username, "update": prompt.update]
         }
+        if throttled.remove(model.session.selectedTabID) != nil { model.liveEngineTab(model.session.selectedTabID)?.setProcessorThrottle(1) }
         let counted = model.liveEngineTabs.compactMap { $0.page.blockedTotal }
         let lifetime = model.isPrivate ? 0 : app.library.preferences.blockedLifetime ?? 0
         if !counted.isEmpty || lifetime > 0 { snapshot["shieldsStats"] = ["blocked": counted.reduce(0, +), "lifetime": lifetime] }
@@ -235,14 +239,29 @@ final class BrowserFeatures {
     /// recently used background tab goes to sleep.
     private func enforceLimits(_ model: BrowserModel, memory: Double, processor: Double) {
         let preferences = app.library.preferences
-        guard app.feature("limiter") else { overLimit = 0; return }
+        guard app.feature("limiter") else { overLimit = 0; releaseThrottles(model); return }
         let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
         let memoryLimit = Double(preferences.memoryLimitMB ?? 0), processorLimit = Double(preferences.cpuLimit ?? 0)
-        let over = (memoryLimit > 0 && memory > memoryLimit) || (processorLimit > 0 && processor / cores > processorLimit)
-        overLimit = over ? overLimit + 1 : 0
-        guard overLimit >= 2 else { return }
+        let share = processor / cores
         let candidates = model.liveEngineTabs.map(\.id).filter { $0 != model.session.selectedTabID && !audible.contains($0) && model.session.split?.contains($0) != true }
-        if let oldest = candidates.min(by: { lastUsed($0, model) < lastUsed($1, model) }) { model.sleepTab(oldest); overLimit = 0 }
+        // CPU limit: background Chromium pages first run at a quarter of their speed, and
+        // return to full speed once usage is well below the limit.
+        if processorLimit > 0 && share > processorLimit {
+            for (id, page) in model.liveEngineTabs where page.engineID == .chromium && candidates.contains(id) && !throttled.contains(id) {
+                page.setProcessorThrottle(4); throttled.insert(id)
+            }
+        } else if processorLimit == 0 || share < processorLimit * 0.6 {
+            releaseThrottles(model)
+        }
+        let over = (memoryLimit > 0 && memory > memoryLimit) || (processorLimit > 0 && share > processorLimit)
+        overLimit = over ? overLimit + 1 : 0
+        // Still over after slowing pages down: the least recently used background tab sleeps.
+        guard overLimit >= 3 else { return }
+        if let oldest = candidates.min(by: { lastUsed($0, model) < lastUsed($1, model) }) { model.sleepTab(oldest); throttled.remove(oldest); overLimit = 0 }
+    }
+    private func releaseThrottles(_ model: BrowserModel) {
+        for id in throttled { model.liveEngineTab(id)?.setProcessorThrottle(1) }
+        throttled.removeAll()
     }
     private func sleepIdleTabs(_ model: BrowserModel) {
         let preferences = app.library.preferences
