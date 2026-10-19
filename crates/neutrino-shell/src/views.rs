@@ -272,6 +272,7 @@ pub fn tab_menu(s: &Shell, t: &Value) -> Markup {
             button class="menu-item" data-op="tab-action" data-id=(id) data-value="bookmark" disabled[!has_page || s.private()]{(icon("bookmark"))span{"Add to bookmarks"}}
             @if style(s) == "arc" && features::on(s, "favorites") {button class="menu-item" data-op="tab-action" data-id=(id) data-value="favorite" disabled[!has_page || s.private()]{(icon("star"))span{"Add to Favorites"}}}
             @if !active && has_page {button class="menu-item" data-op="tab-action" data-id=(id) data-value="split"{(icon("split"))span{"Split with current tab"}}}
+            @if !s.private() && s.tabs().len() > 1 {button class="menu-item" data-op="tab-action" data-id=(id) data-value="new-window"{(icon("window"))span{"Move to new window"}}}
         }
         div class="menu-separator"{}
         div class="menu-group"{
@@ -361,14 +362,17 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
             html! {form data-form="edit-bookmark" data-id=(id){
                 label class="field"{span{"Name"}input name="title" value=(text(&b,"title")) maxlength="512";}
                 label class="field"{span{"Address"}input name="url" value=(text(&b,"url")) maxlength="8192" spellcheck="false";}
-                label class="field"{span{"Folder"}input name="folder" value=(text(&b,"folder")) list="bookmark-folders" maxlength="80" placeholder="None";}
+                label class="field"{span{"Folder"}input name="folder" value=(text(&b,"folder")) list="bookmark-folders" maxlength="160" placeholder="None, or Work/Projects";}
                 datalist id="bookmark-folders"{@for f in bookmark_folders(s) {option value=(f);}option value="Speed Dial";option value="Bookmarks bar";}
                 div class="button-row"{button class="button" type="button" data-op="native" data-action="removeBookmark" data-id=(id){"Delete"}button class="button primary" type="submit"{"Save"}}
             }}
         }
         m if m.starts_with("bm-folder:") => {
             let folder = &m[10..];
-            html! {@for b in array(&s.snapshot["bookmarkIndex"]).iter().filter(|b| text(b,"folder")==folder).take(40) {button class="menu-item" data-op="navigate" data-value=(text(b,"url")){(site(b))span{(text(b,"title"))}}}}
+            html! {
+                @for f in folder_children(s, folder) {button class="menu-item" data-op="menu" data-value=(format!("bm-folder:{f}")){(icon("folder"))span{(folder_name(&f))}}}
+                @for b in array(&s.snapshot["bookmarkIndex"]).iter().filter(|b| text(b,"folder")==folder).take(40) {button class="menu-item" data-op="navigate" data-value=(text(b,"url")){(site(b))span{(text(b,"title"))}}}
+            }
         }
         "new-board" => html! {label class="field"{span{"Board name"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Moodboard, Trip, Research…" maxlength="80" autocomplete="off";}button class="button primary" data-op="board" data-value="create" disabled[s.name.trim().is_empty()]{"Create board"}},
         m if m.starts_with("board-note:") => html! {label class="field"{span{"Note"}input id="name-input" data-name="true" value=(s.name.as_str()) maxlength="2000" autocomplete="off";}button class="button primary" data-op="board" data-value="add-note" data-board=(id) disabled[s.name.trim().is_empty()]{"Add note"}},
@@ -393,6 +397,28 @@ pub fn menu_title(m: &str) -> Option<&'static str> {
     })
 }
 
+/// Folder paths directly inside `parent` ("" for the top level). Folders nest with "/".
+fn folder_children(s: &Shell, parent: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for f in bookmark_folders(s) {
+        let rest = if parent.is_empty() { Some(f.as_str()) } else { f.strip_prefix(parent).and_then(|r| r.strip_prefix('/')) };
+        if let Some(rest) = rest.filter(|r| !r.is_empty()) {
+            let child = match rest.split_once('/') {
+                Some((first, _)) if parent.is_empty() => first.to_string(),
+                Some((first, _)) => format!("{parent}/{first}"),
+                None if parent.is_empty() => rest.to_string(),
+                None => format!("{parent}/{rest}"),
+            };
+            if !out.contains(&child) {
+                out.push(child);
+            }
+        }
+    }
+    out
+}
+fn folder_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
 fn bookmark_folders(s: &Shell) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     for b in array(&s.snapshot["bookmarkIndex"]) {
@@ -408,7 +434,7 @@ fn bookmark_folders(s: &Shell) -> Vec<String> {
 pub fn bookmarks_bar(s: &Shell) -> Markup {
     let index = array(&s.snapshot["bookmarkIndex"]);
     let loose: Vec<&Value> = index.iter().filter(|b| ["", "Bookmarks bar"].contains(&text(b, "folder"))).take(24).collect();
-    let folders: Vec<String> = bookmark_folders(s).into_iter().filter(|f| f != "Bookmarks bar").collect();
+    let folders: Vec<String> = folder_children(s, "").into_iter().filter(|f| f != "Bookmarks bar").collect();
     html! {nav class="bookmarks-bar" aria-label="Bookmarks bar"{
         @if loose.is_empty() && folders.is_empty() {span class="bar-empty"{"Press ⌘D to bookmark a page and it appears here."}button class="button quiet" data-op="importBookmarks"{"Import bookmarks"}}
         @for b in loose {button class="bar-item" data-op="navigate" data-value=(text(b,"url")) title=(text(b,"url")){(site(b))span{(text(b,"title"))}}}
@@ -565,16 +591,23 @@ pub fn history(s: &Shell) -> Markup {
 pub fn bookmarks(s: &Shell) -> Markup {
     let items = array(&s.snapshot["bookmarks"]);
     let query = text(&s.snapshot, "bookmarkQuery");
-    let folders = bookmark_folders(s);
     let filter = s.library_filter.as_str();
+    let folders = folder_children(s, filter);
+    let index = array(&s.snapshot["bookmarkIndex"]);
+    let shown: Vec<&Value> = if filter.is_empty() { items.iter().collect() } else { index.iter().filter(|b| text(b, "folder") == filter).collect() };
+    let mut trail: Vec<String> = vec![];
+    for part in filter.split('/').filter(|p| !p.is_empty()) {
+        trail.push(match trail.last() { Some(last) => format!("{last}/{part}"), None => part.to_string() });
+    }
     html! {
         div class="library-actions"{input class="library-search" type="search" data-library-query="bookmarks" value=(query) placeholder="Search bookmarks" maxlength="160" aria-label="Search bookmarks";span class="spacer"{}button class="button" data-op="importBookmarks"{"Import…"}button class="button" data-op="exportBookmarks"{"Export…"}}
-        @if !folders.is_empty() {div class="filter-chips" role="group" aria-label="Folders"{
-            button class=(if filter.is_empty(){"chip selected"}else{"chip"}) data-op="library-filter" data-value=""{"All"}
-            @for f in &folders {button class=(if filter==f {"chip selected"}else{"chip"}) data-op="library-filter" data-value=(f){(icon("folder"))(f)}}
+        @if !folders.is_empty() || !filter.is_empty() {div class="filter-chips" role="group" aria-label="Folders"{
+            button class=(if filter.is_empty(){"chip selected"}else{"chip"}) data-op="library-filter" data-value="" data-bookmark-folder=""{"All"}
+            @for path in &trail {button class=(if filter==path {"chip selected"}else{"chip"}) data-op="library-filter" data-value=(path) data-bookmark-folder=(path){(folder_name(path))}}
+            @for f in &folders {button class="chip" data-op="library-filter" data-value=(f) data-bookmark-folder=(f){(icon("folder"))(folder_name(f))}}
         }}
         @if items.is_empty() {div class="empty-state"{(icon("bookmark"))h3{(if query.is_empty(){"No bookmarks yet"}else{"No matching bookmarks"})}p{"Press ⌘D on any page to bookmark it, or bring bookmarks over from another browser."}@if query.is_empty(){button class="button primary" data-op="importBookmarks"{"Import bookmarks…"}}}}
-        @for b in items.iter().filter(|b| filter.is_empty() || text(b,"folder")==filter) {div class="list-row"{
+        @for b in shown {div class="list-row" draggable=((!s.private()).to_string()) data-bookmark=(text(b,"id")){
             button class="bookmark-link" data-op="navigate" data-value=(text(b,"url")){(site(b))span{strong{(text(b,"title"))}small{(host(text(b,"url")))@if !text(b,"folder").is_empty(){" · "(text(b,"folder"))}}}}
             button class="icon-button" data-op="menu" data-value=(format!("edit-bookmark:{}",text(b,"id"))) aria-label=(format!("Edit {}",text(b,"title"))){(icon("edit"))}
             button class="icon-button" data-op="native" data-action="removeBookmark" data-id=(text(b,"id")) aria-label=(format!("Remove {}",text(b,"title"))){(icon("close"))}

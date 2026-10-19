@@ -114,7 +114,7 @@ public struct Bookmark: Identifiable, Codable, Equatable, Sendable {
     public var title: String
     public var url: URL
     public var createdAt: Date
-    /// A one-level folder name; "Speed Dial" and "Bookmarks bar" are shown specially.
+    /// A folder path, nested with "/"; "Speed Dial" and "Bookmarks bar" are shown specially.
     public var folder: String?
     public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, createdAt: Date = Date(), folder: String? = nil) {
         self.id = id; self.profileID = profileID; self.title = title; self.url = url; self.createdAt = createdAt; self.folder = folder

@@ -474,7 +474,17 @@ final class BrowserFeatures {
             let folder = (command["folder"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             app.library.bookmarks[index].title = String((command["title"] as? String ?? url.host ?? "Website").prefix(512))
             app.library.bookmarks[index].url = url
-            app.library.bookmarks[index].folder = folder.isEmpty ? nil : String(folder.prefix(80))
+            let path = folder.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "/")
+            app.library.bookmarks[index].folder = path.isEmpty ? nil : String(path.prefix(160))
+        case "moveBookmark":
+            guard regular, let id, let from = app.library.bookmarks.firstIndex(where: { $0.id == id && $0.profileID == profileID }) else { break }
+            var bookmark = app.library.bookmarks.remove(at: from)
+            if let folder = command["folder"] as? String { bookmark.folder = folder.isEmpty ? nil : String(folder.prefix(160)) }
+            let before = (command["before"] as? String).flatMap(UUID.init(uuidString:))
+            if let before, let target = app.library.bookmarks.firstIndex(where: { $0.id == before }) {
+                if command["folder"] == nil || command["folder"] is NSNull { bookmark.folder = app.library.bookmarks[target].folder }
+                app.library.bookmarks.insert(bookmark, at: target)
+            } else { app.library.bookmarks.append(bookmark) }
         case "addReadingItem":
             guard regular, let raw = command["url"] as? String, let url = URL(string: raw), AddressResolver.isWebURL(url) else { break }
             var list = app.library.preferences.readingList ?? []

@@ -107,6 +107,11 @@ final class BrowserModel: ObservableObject {
         }
         address = selectedTab.url?.absoluteString ?? ""
         app.registerWindow(self)
+        if !isPrivate, let pending = app.pendingWindowTab {
+            app.pendingWindowTab = nil
+            if session.spaceID != pending.spaceID { switchSpace(pending.spaceID) }
+            if session.tabs.contains(where: { $0.id == pending.tabID }) { selectTab(pending.tabID); moveLiveTabHere(pending.tabID) }
+        }
     }
     func webTab(_ id: UUID) -> BrowserEngineTab {
         if app.deletingProfileIDs.contains(session.profileID) { return UnavailableEngineTab(engine: selectedTab.engineID ?? .chromium, reason: "This profile is being deleted.") }

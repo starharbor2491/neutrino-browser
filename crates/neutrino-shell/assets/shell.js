@@ -1347,7 +1347,38 @@
     clearTargets();
     scheduleGeometry();
   }
-  document.addEventListener("dragend", cleanupDrag);
+  // Bookmarks: drop a row on another to reorder, or on a folder chip to move it there.
+  let bookmarkDrag = null;
+  document.addEventListener("dragstart", (e) => {
+    const row = e.target.closest && e.target.closest("[data-bookmark]");
+    if (!row) return;
+    bookmarkDrag = row.dataset.bookmark;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", "");
+  });
+  document.addEventListener("dragover", (e) => {
+    if (bookmarkDrag && e.target.closest && e.target.closest("[data-bookmark],[data-bookmark-folder]")) e.preventDefault();
+  });
+  document.addEventListener("drop", (e) => {
+    if (!bookmarkDrag) return;
+    const row = e.target.closest("[data-bookmark]"), chip = e.target.closest("[data-bookmark-folder]");
+    if (row && row.dataset.bookmark !== bookmarkDrag) {
+      e.preventDefault();
+      send({ op: "move-bookmark", id: bookmarkDrag, before: row.dataset.bookmark });
+    } else if (chip) {
+      e.preventDefault();
+      send({ op: "move-bookmark", id: bookmarkDrag, folder: chip.dataset.bookmarkFolder });
+    }
+    bookmarkDrag = null;
+  });
+  document.addEventListener("dragend", () => { bookmarkDrag = null; });
+  // A tab dropped outside the window opens in a new window, as in Chrome and Arc.
+  document.addEventListener("dragend", (e) => {
+    const outside = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth || e.clientY >= innerHeight;
+    if (drag && drag.kind === "tab" && e.dataTransfer && e.dataTransfer.dropEffect === "none" && outside)
+      send({ op: "tab-action", id: drag.id, value: "new-window" });
+    cleanupDrag();
+  });
   document.addEventListener("pointerdown", (e) => {
     const popup = root.querySelector(".anchored-menu .popover-menu");
     if (

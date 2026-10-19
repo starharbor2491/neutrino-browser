@@ -468,6 +468,8 @@ final class AppState: ObservableObject {
             }
         }
     }
+    /// A tab the next regular window opens on, set when a tab moves to a new window.
+    var pendingWindowTab: (spaceID: UUID, tabID: UUID)?
     func claimSession(privateBrowsing: Bool) -> WindowSession {
         library.normalizeSpaces()
         if !privateBrowsing, let saved = library.sessions.first(where: { !claimedSessions.contains($0.id) }) {

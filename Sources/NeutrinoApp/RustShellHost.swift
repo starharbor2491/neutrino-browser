@@ -868,6 +868,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "restartUpdate": DistributionManager.shared.requestRestart()
         case "cancelUpdate": DistributionManager.shared.cancel()
         case "newWindow": openWindow?(false)
+        case "tabToNewWindow":
+            // The new window shows this Space with the tab selected; its live page moves there.
+            guard let model, !model.isPrivate, let id, let spaceID = model.session.spaceID, model.session.tabs.count > 1 else { return }
+            if model.session.selectedTabID == id, let other = model.session.tabs.first(where: { $0.id != id }) { model.selectTab(other.id) }
+            app.pendingWindowTab = (spaceID, id)
+            openWindow?(false)
         case "privateWindow": openWindow?(true)
         case "downloadCancel", "downloadReveal", "downloadOpen":
             guard let center = downloadCenter ?? model?.downloads, let item = center.items.first(where: { $0.id == id }) else { return }

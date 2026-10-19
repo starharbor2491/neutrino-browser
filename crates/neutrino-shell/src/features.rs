@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -587,6 +587,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 "reset-pinned" if !text(&t, "pinnedURL").is_empty() => commands.push(json!({"op":"resetPinnedTab","id":id})),
                 "favorite" if !url.is_empty() && regular => commands.push(json!({"op":"addFavorite","id":id})),
                 "split" if !url.is_empty() && id != s.active()["id"] => commands.push(json!({"op":"splitWith","id":id})),
+                "new-window" if regular && s.tabs().len() > 1 => commands.push(json!({"op":"tabToNewWindow","id":id})),
                 "rename" => {
                     s.menu = format!("rename-tab:{}", text(&t, "id"));
                     s.name = text(&t, "customTitle").to_string();
@@ -1066,6 +1067,14 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             if regular && (p["siteSettings"][host].is_object() || p["siteZoom"][host].is_number()) {
                 commands.push(json!({"op":"siteReset","host":host}));
                 s.notice = format!("{host} uses your standard settings again.");
+            }
+        }
+        "move-bookmark" => {
+            let index = array(&s.snapshot["bookmarkIndex"]);
+            let known = |key: &str| index.iter().any(|b| text(b, "id") == text(r, key));
+            if regular && known("id") && (r["before"].is_null() || known("before")) {
+                let folder = r["folder"].as_str().map(|f| f.trim().trim_matches('/')).filter(|f| f.len() <= 160);
+                commands.push(json!({"op":"moveBookmark","id":r["id"],"before":r["before"],"folder":folder}));
             }
         }
         "password-prompt" => {
