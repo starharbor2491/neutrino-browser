@@ -313,9 +313,10 @@ final class ChromiumTab: BrowserEngineTab {
             _ = try? await self?.request("Network.emulateNetworkConditions", parameters: ["offline": false, "latency": 0, "downloadThroughput": rate, "uploadThroughput": rate])
         }
     }
-    override func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool) {
+    override func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool, hideLocalIP: Bool) {
         command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: httpsOnly ? 1 : 0)
         command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: blockThirdPartyCookies ? 1 : 0)
+        command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: hideLocalIP ? 1 : 0)
     }
     /// Cookies and cached files of this tab's Chromium profile, for all time.
     override func clearWebsiteData(cookies: Bool, cache: Bool) async {

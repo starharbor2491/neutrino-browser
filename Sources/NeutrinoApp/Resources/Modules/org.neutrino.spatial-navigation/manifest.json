@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.spatial-navigation",
+  "name": "Spatial Navigation",
+  "version": 1,
+  "summary": "Hold Shift and use the arrow keys to move between links on a page.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

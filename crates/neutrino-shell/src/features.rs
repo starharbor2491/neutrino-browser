@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -32,6 +32,8 @@ pub const MODULES: &[(&str, &str, &[&str])] = &[
     ("link-routes", "Links", &["arc"]),
     ("mouse-gestures", "Links", &["vivaldi", "gx"]),
     ("command-chains", "Links", &["vivaldi"]),
+    ("spatial-navigation", "Links", &["vivaldi"]),
+    ("fast-forward", "Links", &["vivaldi"]),
     ("page-styles", "Pages", &["vivaldi", "gx"]),
     ("boosts", "Pages", &["arc"]),
     ("cookie-banners", "Pages", &["brave", "vivaldi", "gx", "neutrino"]),
@@ -67,6 +69,7 @@ pub fn action_on(s: &Shell, id: &str) -> bool {
         "sessions" | "save-session" => on(s, "sessions"),
         "boards" => on(s, "boards"),
         "break" => on(s, "break-mode"),
+        "fast-forward" | "rewind" => on(s, "fast-forward"),
         "panic" => on(s, "panic"),
         _ => true,
     }
@@ -82,7 +85,7 @@ pub fn module_default(key: &str, preset: &str) -> bool {
 /// identifier, label, glyph, default shortcut.
 pub const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("new-tab", "New tab", "plus", "cmd+t"),
-    ("new-window", "New window", "plus", "cmd+n"),
+    ("new-window", "New window", "window", "cmd+n"),
     ("private-window", "New private window", "shield", "shift+cmd+n"),
     ("reopen-tab", "Reopen closed tab", "undo", "shift+cmd+t"),
     ("close-tab", "Close tab", "close", "cmd+w"),
@@ -94,12 +97,12 @@ pub const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("sleep-tab", "Put tab to sleep", "moon", ""),
     ("split", "Split view", "split", ""),
     ("find", "Find on page", "search", "cmd+f"),
-    ("reader", "Reader view", "book", ""),
+    ("reader", "Reader view", "reader", ""),
     ("print", "Print", "print", "cmd+p"),
     ("save-pdf", "Save as PDF", "download", ""),
     ("save-page", "Save page as", "download", "cmd+s"),
     ("view-source", "View page source", "code", "alt+cmd+u"),
-    ("dev-tools", "Developer tools", "code", "alt+cmd+i"),
+    ("dev-tools", "Developer tools", "terminal", "alt+cmd+i"),
     ("copy-url", "Copy page address", "copy", "shift+cmd+c"),
     ("share", "Share page", "external", ""),
     ("pip", "Picture in picture", "pip", ""),
@@ -126,6 +129,8 @@ pub const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("home", "Start page", "home", "shift+cmd+h"),
     ("save-session", "Save tabs as a session", "folder", ""),
     ("break", "Take a break", "pause", ""),
+    ("fast-forward", "Fast Forward to the next page", "forward", "alt+cmd+]"),
+    ("rewind", "Rewind to the site’s first page", "back", "alt+cmd+["),
     ("panic", "Panic button", "shield", "ctrl+alt+cmd+p"),
     ("summarize", "Summarize page", "spark", ""),
     ("palette", "Command bar", "search", "cmd+k"),
@@ -136,19 +141,20 @@ pub fn action_label(id: &str) -> &'static str {
 }
 
 /// Shortcut bindings: defaults, then the person's own additions.
+/// A custom binding replaces an action's standard one; "none" removes it.
 pub fn shortcuts(s: &Shell) -> Vec<(String, String)> {
+    let custom = s.snapshot["preferences"]["shortcuts"].as_object();
+    let replaced = |action: &str| custom.is_some_and(|c| c.get(action).and_then(Value::as_str).is_some_and(|b| b == "none" || valid_binding(b)));
     let mut out: Vec<(String, String)> = ACTIONS
         .iter()
-        .filter(|a| !a.3.is_empty())
+        .filter(|a| !a.3.is_empty() && !replaced(a.0))
         .map(|a| (a.3.to_string(), a.0.to_string()))
         .collect();
-    if let Some(custom) = s.snapshot["preferences"]["shortcuts"].as_object() {
-        for (action, binding) in custom {
-            if let Some(binding) = binding.as_str().filter(|b| valid_binding(b)) {
-                if ACTIONS.iter().any(|a| a.0 == action) {
-                    out.retain(|(b, _)| b != binding);
-                    out.push((binding.to_string(), action.clone()));
-                }
+    for (action, binding) in custom.into_iter().flatten() {
+        if let Some(binding) = binding.as_str().filter(|b| valid_binding(b)) {
+            if ACTIONS.iter().any(|a| a.0 == action) {
+                out.retain(|(b, _)| b != binding);
+                out.push((binding.to_string(), action.clone()));
             }
         }
     }
@@ -193,7 +199,7 @@ pub fn action_request(s: &Shell, id: &str) -> Option<Value> {
         "split" => json!({"op":"menu","value":"split-choose"}),
         "find" => json!({"op":"find-open"}),
         "reader" => json!({"op":"reader"}),
-        "print" | "save-pdf" | "save-page" | "view-source" | "dev-tools" | "copy-url" | "share" | "pip" | "panic" => {
+        "print" | "save-pdf" | "save-page" | "view-source" | "dev-tools" | "copy-url" | "share" | "pip" | "panic" | "fast-forward" | "rewind" => {
             json!({"op":"page-command","value":id})
         }
         "break" => json!({"op":"page-command","value":"break"}),
@@ -231,6 +237,9 @@ pub const TRACKING_PARAMETERS: &[&str] = &[
 
 /// The address without click and campaign identifiers, when any were removed.
 pub fn strip_tracking(address: &str) -> Option<String> {
+    if let Some(canonical) = de_amp(address) {
+        return Some(strip_tracking(&canonical).unwrap_or(canonical));
+    }
     let mut url = Url::parse(address).ok()?;
     if !["http", "https"].contains(&url.scheme()) || url.query().is_none() {
         return None;
@@ -251,6 +260,26 @@ pub fn strip_tracking(address: &str) -> Option<String> {
         url.query_pairs_mut().clear().extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     }
     Some(url.to_string())
+}
+
+/// The publisher's address behind a Google AMP cache link, as Brave's De-AMP does.
+fn de_amp(address: &str) -> Option<String> {
+    let url = Url::parse(address).ok()?;
+    let host = url.host_str()?;
+    let path = url.path();
+    let rest = if (host == "www.google.com" || host == "google.com") && path.starts_with("/amp/s/") {
+        &path["/amp/s/".len()..]
+    } else if host.ends_with(".cdn.ampproject.org") {
+        path.strip_prefix("/c/s/").or_else(|| path.strip_prefix("/v/s/"))?
+    } else {
+        return None;
+    };
+    let target = Url::parse(&format!("https://{rest}")).ok()?;
+    let mut target = target;
+    if let Some(query) = url.query() {
+        target.set_query(Some(query));
+    }
+    (target.host_str().is_some_and(|h| h.contains('.'))).then(|| target.to_string())
 }
 
 /// Element-hiding rules from filter text, as `example.com,~shop.example.com##.ad`
@@ -427,7 +456,7 @@ fn valid_setting(key: &str, v: &Value) -> bool {
         "cpuLimit" => [0, 25, 50, 75].contains(&v.as_i64().unwrap_or(-1)),
         "networkLimitKBps" => [0, 256, 1024, 5120, 10240].contains(&v.as_i64().unwrap_or(-1)),
         "autoArchiveDays" => [0, 1, 7, 14, 30].contains(&v.as_i64().unwrap_or(-1)),
-        "batterySaver" | "hideCookieBanners" | "blockThirdPartyCookies" | "httpsUpgrade" | "stripTracking"
+        "batterySaver" | "hideCookieBanners" | "blockThirdPartyCookies" | "httpsUpgrade" | "stripTracking" | "hideLocalIP"
         | "littleArc" | "peek" | "tabIslands" | "keyboardSounds" | "backgroundMusic" | "askWhereToSave" | "mouseGestures"
         | "interfaceSounds" => v.is_boolean(),
         "musicVolume" => v.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)),
@@ -446,6 +475,7 @@ fn valid_setting(key: &str, v: &Value) -> bool {
                 && ["serif", "sans"].contains(&o.get("font").and_then(Value::as_str).unwrap_or(""))
         }),
         "downloadFolder" => v.is_null(),
+        "liveWallpaper" => ["", "aurora", "waves", "embers"].contains(&v.as_str().unwrap_or("-")),
         _ => int(i64::MIN, i64::MIN),
     }
 }
@@ -468,6 +498,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "address-book" => "autofill",
         "page-command" if value == "panic" => "panic",
         "page-command" if value == "break" => "break-mode",
+        "page-command" if value == "fast-forward" || value == "rewind" => "fast-forward",
         "tab-action" if value == "sleep" => "tab-sleep",
         "tab-action" if value == "favorite" => "favorites",
         "site-setting" if text(r, "key") == "filter" => "page-styles",
@@ -619,7 +650,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         }
         "page-command" => {
             let blank = text(s.active(), "url").is_empty();
-            let page_only = ["print", "save-pdf", "save-page", "view-source", "dev-tools", "copy-url", "share", "pip", "pick-element"];
+            let page_only = ["print", "save-pdf", "save-page", "view-source", "dev-tools", "copy-url", "share", "pip", "pick-element", "fast-forward", "rewind"];
             if page_only.contains(&value) && blank {
                 s.notice = "Open a page first.".into();
                 return;
@@ -643,6 +674,8 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 "pip" => "pip",
                 "pick-element" if !regular => return,
                 "pick-element" => "pickElement",
+                "fast-forward" => "fastForward",
+                "rewind" => "rewind",
                 "media" => "mediaToggle",
                 "break" => "breakMode",
                 "panic" => "panic",
@@ -915,7 +948,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             if ACTIONS.iter().any(|a| a.0 == action) {
                 if value.is_empty() {
                     commands.push(json!({"op":"setShortcut","action":action,"value":Value::Null}));
-                } else if valid_binding(value) {
+                } else if value == "none" || valid_binding(value) {
                     commands.push(json!({"op":"setShortcut","action":action,"value":value}));
                 } else {
                     s.notice = "Use at least one of ⌃ ⌥ ⇧ ⌘ with a key, or a function key.".into();
@@ -962,18 +995,28 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "boost" => {
             let Some(site) = site_of_active(s) else { return };
             let css = text(r, "css");
+            let js = text(r, "js");
+            let hue = r["hue"].as_str().and_then(|h| h.parse::<i64>().ok()).or_else(|| r["hue"].as_i64()).unwrap_or(0).clamp(0, 359);
             let hide: Vec<String> = text(r, "hide").lines().map(str::trim).filter(|l| !l.is_empty()).take(50).map(str::to_string).collect();
             let safe = |v: &str| !v.contains('<') && !v.contains('{') && !v.contains('}') && v.len() <= 200;
             if !regular {
                 return;
             }
-            if css.len() > 20_000 || css.contains('<') || !hide.iter().all(|h| safe(h)) {
+            if css.len() > 20_000 || js.len() > 20_000 || css.contains('<') || !hide.iter().all(|h| safe(h)) {
                 s.notice = "Site styles can’t contain “<”, and each hidden element needs a plain CSS selector.".into();
                 return;
             }
-            commands.push(json!({"op":"siteBoost","host":site,"css":css,"hide":hide}));
+            commands.push(json!({"op":"siteBoost","host":site,"css":css,"hide":hide,"js":js,"hue":hue}));
             s.menu.clear();
             s.notice = format!("Styles saved for {site}.");
+        }
+        "site-reset" => {
+            let host = text(r, "host");
+            let p = &s.snapshot["preferences"];
+            if regular && (p["siteSettings"][host].is_object() || p["siteZoom"][host].is_number()) {
+                commands.push(json!({"op":"siteReset","host":host}));
+                s.notice = format!("{host} uses your standard settings again.");
+            }
         }
         "link-route" => {
             let mut routes: Vec<Value> = array(&s.snapshot["preferences"]["linkRoutes"]).to_vec();
@@ -1061,6 +1104,15 @@ const COOKIE_BANNERS: &[&str] = &[
     ".osano-cm-window", "#termly-code-snippet-support", "#_evidon_banner", ".evidon-banner", "#consent_blackbar",
     "#cookiescript_injected", "#hs-eu-cookie-confirmation", "#axeptio_overlay", "#tarteaucitronRoot",
     "#cookie-consent-banner", "[aria-label='cookieconsent']", ".cookie-consent-banner",
+    "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay", "#usercentrics-root", "#uc-banner-modal", ".qc-cmp2-container",
+    "#qc-cmp2-container", "#didomi-host", ".didomi-popup-open .didomi-popup-backdrop", "#onetrust-consent-sdk", "#cmpbox", "#cmpbox2",
+    ".cmp-root", "#cookie-law-info-bar", "#cliSettingsPopup", ".cky-consent-container", ".cky-overlay", "#moove_gdpr_cookie_info_bar",
+    ".gdpr-cookie-notice", "#gdpr-cookie-message", "#cookieNotice", "#cookie-notice", ".cookie-notice", "#cookiebanner", ".cookiebanner",
+    "#cookie-bar", ".cookie-bar", "#cookies-banner", ".cookies-banner", "#cookieConsent", ".cookieConsent", "#cookie-popup", ".cookie-popup",
+    ".cc-window", ".cc-banner", "#cc-main", ".cm-wrapper", "#klaro", ".klaro .cookie-notice", "#iubenda-cs-banner", ".iubenda-cs-container",
+    "#truste-consent-track", "#consent-banner", ".consent-banner", "#js-consent-banner", ".fc-consent-root", ".sp-message-open #sp_message_container",
+    "#hs-eu-cookie-confirmation", "#ccc", "#ccc-overlay", ".osano-cm-dialog", "#termly-code-snippet-support", ".t-consentPrompt",
+    "#coiOverlay", "#CookieReportsBanner", ".cookie-banner", "#cookie-banner", "[data-testid='cookie-banner']", "[id^='cookie-consent']",
 ];
 
 /// Scripts the host runs in an isolated world on a page. Each returns a string.
@@ -1083,6 +1135,9 @@ pub fn page_script(r: &Value) -> Option<String> {
                     css.push_str(&format!("{selector}{{display:none!important}}"));
                 }
             }
+            if let Some(hue) = settings["hue"].as_i64().filter(|h| (1..360).contains(h)) {
+                css.push_str(&format!("body{{filter:hue-rotate({hue}deg)!important}}"));
+            }
             let custom = text(settings, "css");
             if custom.len() <= 20_000 && !custom.contains('<') {
                 css.push_str(custom);
@@ -1098,6 +1153,16 @@ pub fn page_script(r: &Value) -> Option<String> {
             format!("(()=>{{const id='neutrino-page-style';let s=document.getElementById(id);const css={};if(!css){{s?.remove();return 'none'}}if(!s){{s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s)}}if(s.textContent!==css)s.textContent=css;return 'applied'}})()", quote(&css))
         }
         "mute" => format!("(()=>{{const m={};window.__neutrinoMuted=m;const all=()=>document.querySelectorAll('video,audio').forEach(e=>{{if(m)e.muted=true;else if(e.dataset.neutrinoMuted)e.muted=false;if(m)e.dataset.neutrinoMuted='1';else delete e.dataset.neutrinoMuted}});all();if(!window.__neutrinoMuteObserver){{window.__neutrinoMuteObserver=true;document.addEventListener('play',e=>{{if(window.__neutrinoMuted&&e.target instanceof HTMLMediaElement){{e.target.muted=true;e.target.dataset.neutrinoMuted='1'}}}},true)}}return String(m)}})()", flag(r, "value")),
+        // WebKit content rules don't report matches, so count the page's
+        // third-party resources from blocked domains: an estimate of what was blocked.
+        "blockedCount" => {
+            let domains: Vec<&str> = array(&r["domains"]).iter().filter_map(Value::as_str).filter(|d| d.len() <= 253 && d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')).take(20_000).collect();
+            format!("(()=>{{const d=new Set({});const hit=h=>{{for(let p=h.toLowerCase();p;){{if(d.has(p))return true;const i=p.indexOf('.');if(i<0)return false;p=p.slice(i+1)}}return false}};const seen=new Set();for(const e of document.querySelectorAll('script[src],img[src],iframe[src],link[href][rel~=stylesheet],embed[src],source[src],video[src],audio[src]')){{try{{const x=new URL(e.getAttribute('src')||e.getAttribute('href'),location.href);if(x.hostname!==location.hostname&&hit(x.hostname))seen.add(x.href)}}catch(_){{}}}}return String(seen.size)}})()", serde_json::to_string(&domains).unwrap_or_else(|_| "[]".into()))
+        }
+        // Vivaldi's Fast Forward: the next page in a series, or "".
+        "nextPage" => "(()=>{const a=document.querySelector('link[rel~=next][href],a[rel~=next][href]');if(a)return a.href;const words=/^(next|next page|older|older posts|more|weiter|suivant|siguiente|›|»|>|→)$/i;for(const e of document.querySelectorAll('a[href]')){const t=(e.innerText||e.getAttribute('aria-label')||'').trim();if(t.length<20&&words.test(t)&&!e.href.startsWith('javascript:'))return e.href}return ''})()".into(),
+        // Vivaldi's spatial navigation: Shift with an arrow key moves between links.
+        "spatialNavigation" => "(()=>{if(window.__neutrinoSpatial)return 'on';window.__neutrinoSpatial=true;addEventListener('keydown',e=>{if(!e.shiftKey||e.metaKey||e.ctrlKey||e.altKey)return;const dir={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];if(!dir)return;const t=e.target;if(t&&(t.isContentEditable||/^(input|textarea|select)$/i.test(t.tagName)))return;const all=[...document.querySelectorAll('a[href],button,[tabindex]:not([tabindex=\"-1\"])')].filter(n=>{const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight});const cur=document.activeElement&&document.activeElement!==document.body?document.activeElement.getBoundingClientRect():{left:innerWidth/2,top:innerHeight/2,width:0,height:0};const cx=cur.left+cur.width/2,cy=cur.top+cur.height/2;let best=null,score=1e9;for(const n of all){if(n===document.activeElement)continue;const r=n.getBoundingClientRect(),x=r.left+r.width/2-cx,y=r.top+r.height/2-cy;const along=x*dir[0]+y*dir[1];if(along<=1)continue;const across=Math.abs(x*dir[1]+y*dir[0]);const d=along+across*2;if(d<score){score=d;best=n}}if(best){e.preventDefault();best.focus({preventScroll:false});best.scrollIntoView({block:'nearest',inline:'nearest'})}},true);return 'on'})()".into(),
         // Resolves with a selector for the element the person clicks, or "" on Escape.
         "pick" => {
             let label = match text(r, "label") {
@@ -1175,6 +1240,8 @@ mod tests {
         assert_eq!(strip_tracking("https://example.com/?gclid=1").as_deref(), Some("https://example.com/"));
         assert_eq!(strip_tracking("https://example.com/?q=rust"), None);
         assert_eq!(strip_tracking("https://youtu.be/abc?si=share").as_deref(), Some("https://youtu.be/abc"));
+        assert_eq!(strip_tracking("https://www.google.com/amp/s/news.example.com/story.amp.html").as_deref(), Some("https://news.example.com/story.amp.html"));
+        assert_eq!(strip_tracking("https://news-example-com.cdn.ampproject.org/c/s/news.example.com/a?utm_source=x").as_deref(), Some("https://news.example.com/a"));
     }
 
     #[test]

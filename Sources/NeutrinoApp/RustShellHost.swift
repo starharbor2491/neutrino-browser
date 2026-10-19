@@ -225,13 +225,13 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 // Cocoa's default Command-W closes the whole window before WK
                 // receives a DOM key event. Own tab closing on the browser window,
                 // including the address palette and the empty new-tab surface.
-                if closeTab, self.ready, let model = self.model, !model.isClosed {
+                if closeTab, self.ready, let model = self.model, !model.isClosed, self.shortcutMap.isEmpty || self.shortcutMap["cmd+w"] == "close-tab" {
                     self.sendAction(["op":"closeCurrent"])
                     return true
                 }
                 if let binding, self.ready, let model = self.model, !model.isClosed, NSApp.modalWindow == nil, window.attachedSheet == nil,
                    let request = self.shortcutRequest(binding) {
-                    self.sendAction(request)
+                    if request["op"] as? String != "noop" { self.sendAction(request) }
                     return true
                 }
                 if typed, self.app.feature("sounds"), self.app.library.preferences.keyboardSounds == true {
@@ -323,7 +323,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         if parts.count == 2, parts[0] == "cmd", let digit = Int(parts[1]), (1...9).contains(digit) { return ["op": "select-index", "value": digit] }
         if findOpen, binding == "cmd+g" || binding == "shift+cmd+g" { return ["op": "find-step", "value": binding.hasPrefix("shift") ? -1 : 1] }
         if binding == "shift+cmd+=" { return ["op": "run-action", "value": "zoom-in"] }
-        guard let action = shortcutMap[binding], Self.menuShortcuts[action] != binding else { return nil }
+        guard let action = shortcutMap[binding] else {
+            // A standard menu shortcut the person removed or gave to another action does nothing.
+            return !shortcutMap.isEmpty && Self.menuShortcuts.values.contains(binding) ? ["op": "noop"] : nil
+        }
+        guard Self.menuShortcuts[action] != binding else { return nil }
         return ["op": "run-action", "value": action]
     }
     private func observeDownloads(_ center: DownloadCenter?) {
@@ -1109,6 +1113,14 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         app.library.preferences.blockPopups = values["blockPopups"] as? Bool ?? true
         app.library.preferences.restoreSession = values["restoreSession"] as? Bool ?? true
         app.library.preferences.blockAds = values["blockAds"] as? Bool ?? true
+        if let model, !model.isPrivate {
+            for case let panel as [String: Any] in (values["webPanels"] as? [Any] ?? []).prefix(12) {
+                guard let raw = panel["url"] as? String, let url = URL(string: raw), AddressResolver.isWebURL(url),
+                      !(app.library.preferences.webPanels ?? []).contains(where: { $0.profileID == model.session.profileID && $0.url == url }) else { continue }
+                let title = String((panel["title"] as? String ?? url.host ?? "Panel").prefix(80))
+                app.library.preferences.webPanels = (app.library.preferences.webPanels ?? []) + [WebPanel(profileID: model.session.profileID, title: title, url: url)]
+            }
+        }
         let modules = (values["modules"] as? [String: Any] ?? [:]).compactMapValues { $0 as? Bool }
         app.applySetupModules(modules)
         // A theme, layout, icon set or tab system chosen here restyles the browser after its preset.

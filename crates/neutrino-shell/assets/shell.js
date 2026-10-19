@@ -854,6 +854,10 @@
   }
   document.addEventListener("change", (e) => {
     const el = e.target;
+    if (el.dataset.zoomSlider) {
+      send({ op: "zoom-set", value: Number(el.value) });
+      return;
+    }
     if (el.dataset.editorColor) {
       send({ op: "editor-value", key: el.dataset.editorColor, value: el.value.replace("#", "") });
       return;
@@ -896,7 +900,7 @@
       if (form.querySelector("#address-input") && root.querySelector('.popover-menu[data-menu="suggest"]')) send({ op: "suggest-accept" });
       else if (value?.trim()) send({ op: "navigate", value });
     } else if (form.dataset.form === "boost")
-      send({ op: "boost", css: f.get("css"), hide: f.get("hide") });
+      send({ op: "boost", css: f.get("css"), hide: f.get("hide"), js: f.get("js"), hue: Number(f.get("hue") || 0) });
     else if (form.dataset.form === "clear-data")
       send({ op: "clear-data", range: f.get("range"), items: f.getAll("items") });
     else if (form.dataset.form === "edit-bookmark")

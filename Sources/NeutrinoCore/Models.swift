@@ -300,6 +300,10 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var httpsUpgrade: Bool?
     public var stripTracking: Bool?
     public var customBlockList: [String]?
+    /// An animated start-page background: "aurora", "waves" or "embers".
+    public var liveWallpaper: String?
+    /// Keep the local network address out of WebRTC (Chromium's IP handling policy).
+    public var hideLocalIP: Bool?
     /// Element-hiding rules such as "example.com##.banner" or "##.banner".
     public var customCosmetic: [String]?
     public var startupPages: [String]?
@@ -346,6 +350,9 @@ public struct SiteSettings: Codable, Equatable, Sendable {
     /// "dark", "grayscale", "sepia", "invert", "contrast" or "noimages".
     public var filter: String?
     public var css: String?
+    /// A Boost's own script, run in an isolated world after load, and its hue shift in degrees.
+    public var js: String?
+    public var hue: Int?
     public var hide: [String]?
     /// Clear the site's data when its last tab closes.
     public var forget: Bool?

@@ -252,7 +252,7 @@ final class BrowserModel: ObservableObject {
             guard let self, self.app.feature("peek") else { return false }
             PeekWindow.show(url, model: self); return true
         }
-        tab.setPrivacyPreferences(httpsOnly: preferences.httpsUpgrade != false, blockThirdPartyCookies: preferences.blockThirdPartyCookies != false)
+        tab.setPrivacyPreferences(httpsOnly: preferences.httpsUpgrade != false, blockThirdPartyCookies: preferences.blockThirdPartyCookies != false, hideLocalIP: preferences.hideLocalIP != false)
     }
     func updatePagePolicies() { webTabs.values.forEach(applyPagePolicy); webTabs.values.forEach { $0.applyScriptPolicy() } }
 

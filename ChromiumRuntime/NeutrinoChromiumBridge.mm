@@ -1542,12 +1542,14 @@ void Command(void* opaque,int command,const char* text,double value) {
     }
     case NEUTRINO_CEF_PREFERENCE: {
       const std::string name=text ? text : "";
-      if (name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode") break;
+      if (name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode" && name!="webrtc.ip_handling_policy") break;
       if (!std::isfinite(value) || value<0 || value>2) break;
       auto context=host->GetRequestContext();
       if (!context || !context->CanSetPreference(name)) break;
       auto preference=CefValue::Create();
       if (name=="profile.cookie_controls_mode") preference->SetInt(static_cast<int>(value));
+      // Keep the local network address out of WebRTC unless a proxy carries the call.
+      else if (name=="webrtc.ip_handling_policy") preference->SetString(value!=0 ? "disable_non_proxied_udp" : "default");
       else preference->SetBool(value!=0);
       CefString error;
       context->SetPreference(name,preference,error);

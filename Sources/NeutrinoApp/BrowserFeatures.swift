@@ -52,6 +52,7 @@ final class BrowserFeatures {
                 guard let self, let model = self.model, !model.isClosed else { return }
                 await self.sampleMedia(model)
                 if tick % 10 == 0 { self.sleepIdleTabs(model) }
+                if tick % 200 == 0 { self.archiveIdleTabs(model) }
                 if self.sampleResources || self.limitsEnabled { await self.sampleUsage(model) }
                 tick += 1
             }
@@ -194,6 +195,22 @@ final class BrowserFeatures {
         let cutoff = now.addingTimeInterval(-Double(minutes) * 60)
         for id in model.liveEngineTabs.map(\.id) where !audible.contains(id) && lastUsed(id, model) < cutoff { model.sleepTab(id) }
     }
+    /// Arc archives tabs left unused for the chosen number of days, as it does at launch.
+    private func archiveIdleTabs(_ model: BrowserModel) {
+        guard let days = app.library.preferences.autoArchiveDays, days > 0, !model.isPrivate,
+              let spaceID = model.session.spaceID, let index = app.library.spaces?.firstIndex(where: { $0.id == spaceID }) else { return }
+        let cutoff = Date().addingTimeInterval(-Double(min(days, 365)) * 86400)
+        let idle = model.session.tabs.filter { tab in
+            !tab.pinned && tab.folderID == nil && tab.url != nil && tab.id != model.session.selectedTabID
+                && model.session.split?.contains(tab.id) != true && !audible.contains(tab.id)
+                && model.liveEngineTab(tab.id)?.hasActiveDownloads != true && lastUsed(tab.id, model) < cutoff
+        }
+        for tab in idle.prefix(20) {
+            app.library.spaces?[index].archivedTabs.insert(tab, at: 0)
+            model.closeTab(tab.id)
+        }
+        if let count = app.library.spaces?[index].archivedTabs.count, count > 500 { app.library.spaces?[index].archivedTabs.removeLast(count - 500) }
+    }
     static var onBattery: Bool {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }
@@ -274,6 +291,23 @@ final class BrowserFeatures {
                 self?.refresh()
             }
         case "devTools": model?.activeWebTab.showDeveloperTools()
+        case "fastForward":
+            guard let model, let script = PageScript.source("nextPage") else { break }
+            let tab = model.activeWebTab
+            Task { @MainActor [weak self] in
+                if let next = try? await tab.runPageScript(script), let url = URL(string: next), AddressResolver.isWebURL(url) { tab.load(url) }
+                else { self?.app.notice = "This page doesn’t link to a next page." }
+            }
+        case "rewind":
+            guard let model else { break }
+            let tab = model.activeWebTab, site = ContentBlocking.site(tab.url)
+            Task { @MainActor [weak self] in
+                // Go back to the first page of this visit to the site.
+                let entries = await tab.navigationEntries(back: true)
+                let run = entries.prefix { ContentBlocking.site(URL(string: $0["url"] as? String ?? "")) == site }
+                if let offset = run.last?["offset"] as? Int { tab.goToHistory(offset: offset) }
+                else { self?.app.notice = "This is the first page of the site in this tab." }
+            }
         case "pickElement":
             guard regular, let model, let site = ContentBlocking.site(model.activeWebTab.url) else { break }
             let label = model.configuration.theme.preset == "arc" ? "Click an element to zap it. Press Esc to cancel." : "Click an element to hide it on this site. Press Esc to cancel."
@@ -344,6 +378,9 @@ final class BrowserFeatures {
                 settings.css = css.isEmpty ? nil : String(css.prefix(20_000))
                 let hide = (command["hide"] as? [String] ?? []).prefix(50).map { String($0.prefix(200)) }
                 settings.hide = hide.isEmpty ? nil : Array(hide)
+                let js = command["js"] as? String ?? ""
+                settings.js = js.isEmpty ? nil : String(js.prefix(20_000))
+                settings.hue = (command["hue"] as? Int).flatMap { (1..<360).contains($0) ? $0 : nil }
             } else {
                 let on = command["value"] as? Bool == true
                 let choice = (command["value"] as? String).flatMap { ["", "ask"].contains($0) ? nil : $0 }
@@ -363,6 +400,11 @@ final class BrowserFeatures {
             all[host] = settings == SiteSettings() ? nil : settings
             app.library.preferences.siteSettings = all
             applySite(host, reloadWebKit: key == "blockScripts")
+        case "siteReset":
+            guard regular, let host = command["host"] as? String, !host.isEmpty else { break }
+            app.library.preferences.siteSettings?.removeValue(forKey: host)
+            app.library.preferences.siteZoom?.removeValue(forKey: host)
+            applySite(host, reloadWebKit: true)
         case "clearBrowsingData":
             guard let model else { break }
             let since: Date = switch command["range"] as? String {
@@ -658,6 +700,8 @@ final class BrowserFeatures {
         case "autoArchiveDays": preferences.autoArchiveDays = value as? Int
         case "batterySaver": preferences.batterySaver = value as? Bool
         case "hideCookieBanners": preferences.hideCookieBanners = value as? Bool
+        case "hideLocalIP": preferences.hideLocalIP = value as? Bool
+        case "liveWallpaper": preferences.liveWallpaper = text()
         case "blockThirdPartyCookies": preferences.blockThirdPartyCookies = value as? Bool
         case "httpsUpgrade": preferences.httpsUpgrade = value as? Bool
         case "stripTracking": preferences.stripTracking = value as? Bool
@@ -694,7 +738,7 @@ final class BrowserFeatures {
         default: return false
         }
         app.library.preferences = preferences
-        if ["httpsUpgrade", "stripTracking", "blockThirdPartyCookies"].contains(key) {
+        if ["httpsUpgrade", "stripTracking", "blockThirdPartyCookies", "hideLocalIP"].contains(key) {
             for window in app.windows.values { window.model?.updatePagePolicies() }
         }
         if key == "networkLimitKBps" {
@@ -834,12 +878,18 @@ extension BrowserModel {
         if app.feature("page-styles"), let filter = settings?.filter { style["filter"] = filter }
         if let hide = settings?.hide { style["hide"] = hide }
         if app.feature("boosts"), let css = settings?.css { style["css"] = css }
+        if app.feature("boosts"), let hue = settings?.hue { style["hue"] = hue }
         let shields = preferences.blockTrackers != false && !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? [])
         let cosmetic = shields ? preferences.customCosmetic ?? [] : []
         if let script = PageScript.source("style", ["settings": style, "cookieBanners": app.feature("cookie-banners"), "site": site, "cosmetic": cosmetic]) {
             Task { _ = try? await tab.runPageScript(script) }
         }
         if app.feature("limiter"), let limit = preferences.networkLimitKBps, limit > 0, tab.engineID == .chromium { tab.setNetworkLimit(bytesPerSecond: limit * 1024) }
+        if app.feature("boosts"), !isPrivate, let js = settings?.js, !js.isEmpty {
+            // The Boost's script runs once per load in Neutrino's isolated world.
+            Task { _ = try? await tab.runPageScript("(()=>{try{" + js + "\n}catch(e){};return 'ok'})()") }
+        }
+        if app.feature("spatial-navigation"), let script = PageScript.source("spatialNavigation") { Task { _ = try? await tab.runPageScript(script) } }
         if app.feature("mouse-gestures"), let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
     }
     /// Remembers the zoom chosen for the active page's site.

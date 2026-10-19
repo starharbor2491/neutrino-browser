@@ -423,6 +423,7 @@ impl Shell {
                         "notes",
                         "resources",
                         "tabs",
+                        "safari",
                     ]
                     .contains(&value)
                     {
@@ -432,7 +433,9 @@ impl Shell {
                             } else {
                                 value.into()
                             };
-                        if !["resources", "tabs", "closed"].contains(&self.panel.as_str()) && !self.panel.starts_with("web:") {
+                        if self.panel == "safari" {
+                            commands.push(json!({"op":"projectLibrary","section":"bookmarks"}));
+                        } else if !["resources", "tabs", "closed"].contains(&self.panel.as_str()) && !self.panel.starts_with("web:") {
                             self.section = self.panel.clone();
                             commands.push(json!({"op":"projectLibrary","section":self.panel}));
                         }
@@ -453,6 +456,12 @@ impl Shell {
                     let next = if step == 0. { 1. } else { ((current + step * 0.1) * 10.).round() / 10. };
                     if !text(self.active(), "url").is_empty() {
                         commands.push(json!({"op":"setZoom","value":next.clamp(0.5, 3.)}));
+                    }
+                }
+                "zoom-set" => {
+                    let percent = request["value"].as_f64().or_else(|| text(&request, "value").parse().ok()).unwrap_or(100.);
+                    if !text(self.active(), "url").is_empty() && percent.is_finite() {
+                        commands.push(json!({"op":"setZoom","value":(percent / 100.).clamp(0.5, 3.)}));
                     }
                 }
                 "addSite" => {
@@ -758,6 +767,7 @@ impl Shell {
                     {
                         let mut setup = self.setup.clone();
                         setup["modules"] = crate::onboarding::module_choices(self);
+                        setup["webPanels"] = json!(crate::appearance::setup_web_panels(&self.setup).iter().map(|(title, url)| json!({"title":title,"url":url})).collect::<Vec<_>>());
                         commands.push(json!({"op":"finishSetup","setup":setup,"configuration":crate::appearance::setup_configuration(&self.setup)}));
                         self.setup_busy = true;
                     }
@@ -1078,7 +1088,7 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"moduleSettingsID":if self.screen=="modules"{self.selected_module.as_str()}else{""},"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu() || self.capture_select || self.rail_peek || flag(&self.snapshot,"breakMode"),"shortcuts":crate::features::shortcuts(self).into_iter().map(|(b,a)|json!([b,a])).collect::<Vec<_>>(),"findOpen":self.find_open,"performanceVisible":self.screen=="settings" && self.section=="performance","focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"moduleSettingsID":if self.screen=="modules"{self.selected_module.as_str()}else{""},"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu() || self.capture_select || self.rail_peek || flag(&self.snapshot,"breakMode"),"shortcuts":crate::features::shortcuts(self).into_iter().map(|(b,a)|json!([b,a])).collect::<Vec<_>>(),"findOpen":self.find_open,"performanceVisible":self.screen=="settings" && self.section=="performance" || self.visible_panel_key()=="resources","focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
     }
     pub fn visible_panel_key(&self) -> &str {
         if ["browse", "editor"].contains(&self.screen.as_str()) {

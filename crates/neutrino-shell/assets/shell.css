@@ -4453,13 +4453,20 @@ details.start-guide > .guide-keys {
   padding: 4px 6px 0;
   background: var(--accent);
 }
-.style-vivaldi .horizontal-group .tab-row {
+.style-vivaldi .horizontal-group .tab-row,
+.style-vivaldi .horizontal-tabs > .stack-tab {
   width: 200px;
   min-height: 30px;
   border-radius: calc(5px * var(--sq)) calc(5px * var(--sq)) 0 0;
-  background: color-mix(in oklab, var(--accent) 70%, #000);
-  color: #ffffffd9;
+  /* Dark enough that white labels stay above 4.5:1 on light accents too. */
+  background: color-mix(in oklab, var(--accent) 55%, #000);
+  color: #fff;
 }
+.style-vivaldi .horizontal-tabs .horizontal-group-label,
+.style-vivaldi .horizontal-tabs .new-tab {
+  color: #fff;
+}
+.style-vivaldi .horizontal-tabs > .stack-tab.active,
 .style-vivaldi .horizontal-group .tab-row.active {
   background: var(--bg);
   color: var(--ink);
@@ -5503,6 +5510,14 @@ input[type="color"] {
     opacity: 0;
   }
 }
+/* Peeking beats the hidden state, which otherwise keeps the rail transparent. */
+.browser-shell.rail-hidden.rail-peek > .workspace-rail {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--t-med) var(--ease-out),
+    visibility 0s;
+}
 /* A Space's own colors, as in Arc */
 .style-arc.browser-shell[data-gradient] {
   background: linear-gradient(170deg, var(--space-from), var(--space-to));
@@ -5521,7 +5536,7 @@ input[type="color"] {
   padding-right: 0;
 }
 .compact-rail .workspace-rail .location,
-.compact-rail .space-heading,
+.compact-rail .space-heading strong,
 .compact-rail .group-label,
 .compact-rail .rail-drag-fill,
 .compact-rail .tab-select > span:not(.site-icon),
@@ -5538,6 +5553,12 @@ input[type="color"] {
 .compact-rail .workspace-widget,
 .compact-rail .folder-empty {
   display: none;
+}
+/* The Space menu stays reachable: only the name is hidden. */
+.compact-rail .space-heading {
+  justify-content: center;
+  padding: 0;
+  margin: 0 0 4px;
 }
 .compact-rail .rail-top {
   flex-direction: column;
@@ -6413,4 +6434,184 @@ input[type="color"] {
 }
 .module-group-title:first-of-type {
   margin-top: 4px;
+}
+
+/* Safari sidebar */
+.style-safari .safari-sidebar {
+  order: -1;
+  width: 240px;
+  border-left: 0;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+  gap: 2px;
+}
+.safari-sidebar-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: auto;
+}
+.safari-sidebar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 12px 8px 4px;
+}
+.safari-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: calc(6px * var(--sq));
+  text-align: left;
+  font-size: 13px;
+}
+.safari-row:hover {
+  background: var(--hover);
+}
+.safari-row.selected {
+  background: var(--selected, var(--hover));
+  font-weight: 500;
+}
+.safari-row.quiet {
+  color: var(--muted);
+}
+.safari-row span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.safari-count {
+  flex: 0 0 auto !important;
+  font-size: 11px;
+  color: var(--muted);
+}
+.safari-sidebar-footer {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.status-count {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.zoom-slider {
+  width: 84px;
+  accent-color: var(--accent);
+}
+.gx-control {
+  padding: 0 12px 16px;
+}
+.gx-control h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 16px 0 6px;
+}
+.safari-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.safari-reading-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: calc(8px * var(--sq));
+  text-align: left;
+}
+.safari-reading-item:hover {
+  background: var(--hover);
+}
+.safari-reading-item span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.safari-reading-item small {
+  color: var(--muted);
+}
+
+/* Live wallpapers (Opera GX), drawn with gradients so no media files ship */
+.live-wallpaper {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.live-wallpaper::before,
+.live-wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+}
+.live-aurora {
+  background: #0b0f1a;
+}
+.live-aurora::before {
+  background:
+    radial-gradient(40% 35% at 30% 40%, color-mix(in oklab, var(--accent) 70%, #2fd3a5) 0%, transparent 70%),
+    radial-gradient(35% 30% at 70% 55%, #6b5cff 0%, transparent 70%);
+  filter: blur(40px);
+  opacity: 0.7;
+  animation: aurora-drift 18s ease-in-out infinite alternate;
+}
+.live-waves {
+  background: linear-gradient(180deg, #08131f, #0e2236);
+}
+.live-waves::before {
+  background: repeating-radial-gradient(circle at 50% 120%, transparent 0 38px, color-mix(in oklab, var(--accent) 40%, transparent) 39px 40px);
+  opacity: 0.35;
+  animation: waves-rise 14s linear infinite;
+}
+.live-embers {
+  background: radial-gradient(120% 90% at 50% 110%, #2a0d0d, #0b0707 70%);
+}
+.live-embers::before {
+  background-image:
+    radial-gradient(2px 2px at 20% 80%, #ff7a3d 50%, transparent 51%),
+    radial-gradient(2px 2px at 60% 90%, #ffb04a 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 80% 70%, #ff5a36 50%, transparent 51%),
+    radial-gradient(2px 2px at 40% 60%, #ff9440 50%, transparent 51%);
+  background-size: 300px 300px;
+  animation: embers-float 12s linear infinite;
+}
+.live-wallpaper .start-page {
+  background: transparent;
+}
+@keyframes aurora-drift {
+  to {
+    transform: translate(6%, -4%) rotate(8deg) scale(1.1);
+  }
+}
+@keyframes waves-rise {
+  to {
+    transform: translateY(-80px);
+  }
+}
+@keyframes embers-float {
+  to {
+    background-position: 0 -300px;
+  }
+}
+[data-reduced-motion="true"] .live-wallpaper::before {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-wallpaper::before {
+    animation: none;
+  }
 }

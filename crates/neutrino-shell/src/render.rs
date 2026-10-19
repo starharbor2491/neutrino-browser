@@ -274,6 +274,11 @@ pub(crate) fn host(url: &str) -> String {
 fn vacant(s: &Shell) -> Markup {
     let wallpaper = crate::views::wallpaper_style(s);
     let page = vacant_page(s);
+    let live = text(&s.snapshot["preferences"], "liveWallpaper");
+    let live = (crate::features::on(s, "wallpapers") && wallpaper.is_empty() && ["aurora", "waves", "embers"].contains(&live) && crate::views::start_option(s, "wallpaper")).then_some(live);
+    if let Some(live) = live {
+        return html! {div class=(format!("wallpaper-start live-wallpaper live-{live}")){(page)}};
+    }
     if wallpaper.is_empty() {
         return page;
     }
@@ -308,14 +313,17 @@ fn vacant_page(s: &Shell) -> Markup {
             @if sites {(shortcut_grid(s, 11, "dial"))}
         }}},
         "safari" => {
-            let sites = top_sites(s, 12);
-            let favorites: Vec<(String, String)> = array(&s.snapshot["bookmarks"]).iter().take(12).map(|b| (text(b, "title").to_string(), text(b, "url").to_string())).collect();
+            let shown = crate::views::start_option(s, "sites");
+            let sites = if shown { top_sites(s, 12) } else { vec![] };
+            let favorites: Vec<(String, String)> = if shown { array(&s.snapshot["bookmarks"]).iter().take(12).map(|b| (text(b, "title").to_string(), text(b, "url").to_string())).collect() } else { vec![] };
+            let reading: Vec<&Value> = if crate::features::on(s, "reading-list") && crate::views::start_option(s, "reading") { array(&s.snapshot["preferences"]["readingList"]).iter().filter(|i| i["profileID"] == s.snapshot["session"]["profileID"] && !flag(i, "read")).take(4).collect() } else { vec![] };
             html! {section class="start-page safari-start" aria-label="Start page"{div class="start-inner"{
                 (private_note(s))
                 @if !favorites.is_empty() {section class="start-section"{h2{"Favorites"}div class="safari-grid"{@for (title, url) in &favorites {(site_tile(title, url, "favorite"))}}}}
                 @if !sites.is_empty() {section class="start-section"{h2{"Frequently Visited"}div class="safari-grid"{@for (title, url) in &sites {(site_tile(title, url, "favorite"))}}}}
-                section class="start-section"{h2{"Privacy Report"}div class="privacy-report"{(icon("shield"))p{(if flag(&s.snapshot["preferences"],"blockTrackers"){"Known trackers are blocked on the sites you visit."}else{"Tracker blocking is off. Turn it on in Settings → Privacy."})}}}
-                @if favorites.is_empty() && sites.is_empty() {p class="start-empty"{"Sites you bookmark and visit often will appear here."}}
+                @if crate::views::start_option(s, "stats") {section class="start-section"{h2{"Privacy Report"}div class="privacy-report"{(icon("shield"))p{(if flag(&s.snapshot["preferences"],"blockTrackers"){"Known trackers are blocked on the sites you visit."}else{"Tracker blocking is off. Turn it on in Settings → Privacy."})}}}}
+                @if !reading.is_empty() {section class="start-section"{h2{"Reading List"}div class="safari-reading"{@for i in &reading {button class="safari-reading-item" data-op="navigate" data-value=(text(i,"url")){(site(i))span{strong{(text(i,"title"))}small{(host(text(i,"url")))}}}}}}}
+                @if shown && favorites.is_empty() && sites.is_empty() {p class="start-empty"{"Sites you bookmark and visit often will appear here."}}
             }}}
         }
         _ => {
@@ -403,11 +411,14 @@ fn workspace_panel(s: &Shell, key: &str) -> Markup {
         }
         return crate::views::web_panel(s, key);
     }
+    if key == "safari" {
+        return safari_sidebar(s);
+    }
     let mut copy = s.clone();
     copy.section = key.into();
     copy.panel = key.into();
     html! {aside class="workspace-panel" aria-label=(key) {header{h2{(match key{"notes"=>"Notes","history"=>"History","downloads"=>"Downloads","resources"=>if style(s)=="gx"{"Resource control"}else{"Resources"},"tabs"=>"Window",_=>"Bookmarks"})}button class="icon-button" data-op="panel" data-value="" aria-label="Close panel"{(icon("close"))}}
-        @if key=="resources" {(resources(s))}@else if key=="tabs" {div class="tabs-scroll window-panel"{(tab_groups(s,false))}}@else{(library(&copy))}
+        @if key=="resources" {(resources(s))@if style(s)=="gx" {(crate::views::gx_control(s))}}@else if key=="tabs" {div class="tabs-scroll window-panel"{(tab_groups(s,false))}}@else{(library(&copy))}
     }}
 }
 
@@ -430,9 +441,36 @@ fn page_actions(s: &Shell, style: &str) -> Markup {
         @if style == "vivaldi" {button class="icon-button" data-op="menu" data-value="browser" title="Vivaldi-style menu" aria-label="Browser menu"{(icon("menu"))}}
     }}
 }
+/// Safari's sidebar: Tab Groups (Spaces), then Bookmarks and Reading List,
+/// with the rest of the browser one click away.
+fn safari_sidebar(s: &Shell) -> Markup {
+    let spaces: Vec<&Value> = array(&s.snapshot["spaces"]).iter().filter(|v| v["profileID"] == s.snapshot["session"]["profileID"]).collect();
+    let reading = crate::features::on(s, "reading-list");
+    html! {aside class="workspace-panel safari-sidebar" aria-label="Sidebar" {
+        nav class="safari-sidebar-list" {
+            @if !s.private() {
+                div class="safari-sidebar-label"{"Tab Groups"}
+                @for space in &spaces {
+                    @let current = space["id"] == s.snapshot["session"]["spaceID"];
+                    button class=(if current {"safari-row selected"} else {"safari-row"}) data-op="switchSpace" data-id=(text(space, "id")) aria-pressed=(current.to_string()){(icon("folder"))span{(text(space, "name"))}@if current {span class="safari-count"{(s.tabs().len())}}}
+                }
+                button class="safari-row quiet" data-op="menu" data-value="new-space"{(icon("plus"))span{"New Tab Group"}}
+            }
+            div class="safari-sidebar-label"{"Library"}
+            button class="safari-row" data-op="screen" data-value="library" data-section="bookmarks"{(icon("bookmark"))span{"Bookmarks"}}
+            @if reading {button class="safari-row" data-op="screen" data-value="library" data-section="reading"{(icon("book"))span{"Reading List"}}}
+            button class="safari-row" data-op="screen" data-value="library" data-section="history"{(icon("history"))span{"History"}}
+            button class="safari-row" data-op="screen" data-value="library" data-section="downloads"{(icon("download"))span{"Downloads"}}
+        }
+        footer class="safari-sidebar-footer"{
+            button class="safari-row" data-op="menu" data-value="browser"{(icon("menu"))span{"More…"}}
+            button class="safari-row" data-op="screen" data-value="settings"{(icon("settings"))span{"Settings"}}
+        }
+    }}
+}
 /// Optional toolbar buttons chosen in Customize.
 pub(crate) const TOOLBAR_ITEMS: &[(&str, &str, &str)] = &[
-    ("home", "Start page", "home"), ("reader", "Reader view", "book"), ("capture", "Capture", "camera"),
+    ("home", "Start page", "home"), ("reader", "Reader view", "reader"), ("capture", "Capture", "camera"),
     ("split", "Split view", "split"), ("downloads", "Downloads", "download"), ("history", "History", "history"),
     ("bookmarks", "Bookmarks", "bookmark"), ("reading", "Reading List", "book"), ("share", "Share", "external"),
     ("print", "Print", "print"), ("pip", "Picture in picture", "pip"), ("extensions", "Extensions", "plug"),
@@ -482,7 +520,11 @@ fn toolbar(s: &Shell, style: &str, horizontal: bool, panel: bool) -> Markup {
     let lead = horizontal && (style == "safari" || text(&s.config()["layout"], "tabs") == "bottom");
     html! {header class="page-toolbar" {
         @if lead {div class="traffic-clearance" data-window-drag="true"{}}
-        @if horizontal && ["safari", "vivaldi"].contains(&style) {(button(if style == "vivaldi" {"Panel"} else {"Show sidebar"}, if style == "vivaldi" {"panel-toggle"} else {"sidebar"}, "sidebar"))}
+        @if horizontal && style == "vivaldi" {(button("Panel", "panel-toggle", "sidebar"))}
+        @if horizontal && style == "safari" {
+            @let open = s.visible_panel_key() == "safari";
+            button class=(if open {"icon-button selected"} else {"icon-button"}) data-op="panel" data-value="safari" title=(if open {"Hide sidebar"} else {"Show sidebar"}) aria-label=(if open {"Hide sidebar"} else {"Show sidebar"}) aria-pressed=(open.to_string()){(icon("sidebar"))}
+        }
         div class="toolbar-controls"{(rail_navigation(s))@if style == "vivaldi" {(button("Start page","home","home"))}}
         @if !horizontal && (s.sidebar_hidden || panel) { (button(if panel{"Return to tabs"}else{"Show sidebar"},if panel{"reveal-workspace"}else{"sidebar"},"sidebar")) }
         span class="toolbar-drag" data-window-drag="true"{}
@@ -543,11 +585,14 @@ fn status_bar(s: &Shell) -> Markup {
         (button("Toggle panel", "panel-toggle", "sidebar"))
         span class="status-text"{(if blank {"New Tab".to_string()} else {readable(text(s.active(), "url"))})}
         span class="spacer"{}
+        span class="status-count" title="Tabs in this window"{(s.tabs().len())(if s.tabs().len() == 1 {" tab"} else {" tabs"})}
+        @if crate::features::on(s, "page-styles") {button class="status-button" data-op="menu" data-value="page-style" disabled[blank] title="Page actions"{(icon("appearance"))}}
         button class="status-button" data-op="menu" data-value="split-choose" disabled[blank] title="Tile tabs"{(icon("split"))}
         button class="status-button" data-op="capture" disabled[blank] title="Capture page"{(icon("camera"))}
-        button class="status-button" data-op="reader" disabled[blank] title="Reader view"{(icon("book"))}
+        button class="status-button" data-op="reader" disabled[blank] title="Reader view"{(icon("reader"))}
         div class="zoom-control" role="group" aria-label="Page zoom" {
             button class="status-button" data-op="zoom-step" data-value="-1" disabled[blank] aria-label="Zoom out"{"−"}
+            input class="zoom-slider" type="range" min="50" max="300" step="10" value=(zoom) disabled[blank] aria-label="Page zoom" data-zoom-slider="true";
             button class="status-zoom" data-op="zoom-step" data-value="0" disabled[blank] title="Reset zoom"{(zoom)"%"}
             button class="status-button" data-op="zoom-step" data-value="1" disabled[blank] aria-label="Zoom in"{"+"}
         }
@@ -1203,7 +1248,7 @@ fn menu(s: &Shell) -> Markup {
             "split-choose"=>{div class="menu-label"{"Open beside this page"}@for t in s.tabs().iter().filter(|t|t["id"]!=s.active()["id"] && !text(t,"url").is_empty()){button class="menu-item" data-op="split-with" data-id=(text(t,"id")){(site(t))span{(text(t,"title"))}}}@if s.tabs().iter().filter(|t|!text(t,"url").is_empty()).count()<2{p class="field-help"{"Open a second page, then choose it here."}}}
             "space"=>{div class="menu-group"{(menu_item("New folder","menu","new-folder","folder"))@if crate::features::on(s, "sessions") {(menu_item("Save tabs as session…","menu","save-session","download"))}button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))span{"Archived tabs"}}}
                 @if crate::features::on(s, "tidy-tabs") {div class="menu-separator"{}
-                button class="menu-item" data-op="tidy-tabs" disabled[s.private()]{(icon("spark"))span{"Tidy tabs into folders"}}}
+                button class="menu-item menu-item-detail" data-op="tidy-tabs" disabled[s.private()]{(icon("spark"))span{"Tidy tabs into folders"small{"Sends tab titles and sites to your AI provider"}}}}
                 div class="menu-separator"{}
                 div class="menu-group"{(menu_item("Rename Space","menu","rename-space","edit"))(menu_item("Icon and colors…","menu","space-style","appearance"))(menu_item("Edit layout","screen","editor","sidebar"))(menu_item("New Space","menu","new-space","plus"))}
                 div class="menu-separator"{}

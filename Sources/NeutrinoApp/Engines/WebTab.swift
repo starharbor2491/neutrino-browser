@@ -178,7 +178,7 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         onChange?(finished)
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        failedNavigationURL = nil
+        failedNavigationURL = nil; estimatedBlocked = nil
         didStartNavigation()
         imageSnapshots.values.forEach { $0.cancel() }; imageSnapshots.removeAll()
         pageSnapshots.values.forEach { $0.cancel() }; pageSnapshots.removeAll()
@@ -190,7 +190,22 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         if webView.url != startPageURL { showingStartPage = false }
         refresh(false)
     }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; refresh(true); onPageLoaded?() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; refresh(true); onPageLoaded?(); estimateBlocked() }
+    /// Resources from blocked domains still named on the finished page: WebKit's rule lists don't report what they block.
+    private var estimatedBlocked: Int?
+    private var estimatedBlockedTotal = 0
+    override var blockedOnPage: Int? { estimatedBlocked }
+    override var blockedTotal: Int? { blockingEnabled ? estimatedBlockedTotal : nil }
+    private func estimateBlocked() {
+        estimatedBlocked = nil
+        guard blockingEnabled, !ContentBlocking.isException(url?.host, in: blockingExceptions),
+              let script = PageScript.source("blockedCount", ["domains": ContentBlocking.domains(ads: blockAds, custom: blockingCustom)]) else { return }
+        let page = url
+        Task { @MainActor [weak self] in
+            guard let value = try? await self?.runPageScript(script), let count = Int(value), let self, self.url == page else { return }
+            self.estimatedBlocked = count; self.estimatedBlockedTotal += count; self.onChange?(false)
+        }
+    }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let failure = error as NSError

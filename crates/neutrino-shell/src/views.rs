@@ -188,7 +188,7 @@ pub fn page_menu(s: &Shell) -> Markup {
         div class="menu-separator"{}
         div class="menu-group"{
             button class="menu-item" data-op="menu" data-value="split-choose" disabled[blank]{(icon("split"))span{"Split view"}}
-            @if enabled("reader"){button class="menu-item" data-op="reader" disabled[blank]{(icon("book"))span{"Reader view"}}}
+            @if enabled("reader"){button class="menu-item" data-op="reader" disabled[blank]{(icon("reader"))span{"Reader view"}}}
             button class="menu-item" data-op="page-command" data-value="pip" disabled[blank]{(icon("pip"))span{"Picture in picture"}}
             @if features::on(s, "page-styles") {button class="menu-item" data-op="menu" data-value="page-style" disabled[blank]{(icon("appearance"))span{(if gx {"Page shaders"} else {"Page style"})}}}
             @if features::on(s, "boosts") {button class="menu-item" data-op="menu" data-value="boost" disabled[blank || s.private()]{(icon("edit"))span{(if arc {"Boost this site"} else {"Site CSS"})}}
@@ -211,7 +211,7 @@ pub fn page_menu(s: &Shell) -> Markup {
             button class="menu-item" data-op="page-command" data-value="save-pdf" disabled[blank]{(icon("download"))span{"Save as PDF…"}}
             button class="menu-item" data-op="page-command" data-value="save-page" disabled[blank]{(icon("download"))span{"Save page as…"}kbd{"⌘S"}}
             button class="menu-item" data-op="page-command" data-value="view-source" disabled[blank]{(icon("code"))span{"View source"}kbd{"⌥⌘U"}}
-            button class="menu-item" data-op="page-command" data-value="dev-tools" disabled[blank]{(icon("code"))span{"Developer tools"}kbd{"⌥⌘I"}}
+            button class="menu-item" data-op="page-command" data-value="dev-tools" disabled[blank]{(icon("terminal"))span{"Developer tools"}kbd{"⌥⌘I"}}
         }
     }
 }
@@ -222,7 +222,7 @@ pub fn browser_menu(s: &Shell) -> Markup {
     html! {
         div class="menu-group"{
             button class="menu-item" data-op="newTab"{(icon("plus"))span{"New tab"}kbd{"⌘T"}}
-            button class="menu-item" data-op="newWindow"{(icon("sidebar"))span{"New window"}kbd{"⌘N"}}
+            button class="menu-item" data-op="newWindow"{(icon("window"))span{"New window"}kbd{"⌘N"}}
             button class="menu-item" data-op="privateWindow"{(icon("shield"))span{"New private window"}kbd{"⇧⌘N"}}
         }
         div class="menu-separator"{}
@@ -309,7 +309,10 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
             html! {form class="boost-form" data-form="boost"{
                 p class="field-help"{"Styles apply to "(site)" in every tab, after each page loads."}
                 label class="field"{span{"Hide elements (CSS selectors, one per line)"}textarea name="hide" rows="3" maxlength="4000" spellcheck="false" placeholder=".cookie-banner\n#sidebar-ads"{(array(&settings["hide"]).iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"))}}
+                label class="field"{span{"Color"}input type="range" name="hue" min="0" max="359" step="1" value=(settings["hue"].as_i64().unwrap_or(0)) aria-label="Page hue";}
                 label class="field"{span{"Custom CSS"}textarea name="css" rows="5" maxlength="20000" spellcheck="false" placeholder="body { font-family: Georgia, serif; }"{(text(settings,"css"))}}
+                label class="field"{span{"Custom JavaScript"}textarea name="js" rows="4" maxlength="20000" spellcheck="false" placeholder="document.querySelector('.promo')?.remove();"{(text(settings,"js"))}}
+                p class="field-help"{"JavaScript runs after each page on this site loads, separate from the site’s own scripts."}
                 div class="button-row"{button class="button primary" type="submit"{"Apply"}}
             }}
         }
@@ -438,6 +441,25 @@ pub fn wallpaper_style(s: &Shell) -> String {
 }
 pub fn start_option(s: &Shell, key: &str) -> bool {
     prefs(s)["startPage"][key].as_bool().unwrap_or(true)
+}
+
+/// The start-page parts a style's new tab page actually has.
+pub fn start_options(s: &Shell) -> Vec<(&'static str, &'static str)> {
+    let mut out: Vec<(&str, &str)> = match style(s) {
+        "arc" => vec![],
+        "chrome" => vec![("search", "Search box"), ("sites", "Shortcuts")],
+        "brave" => vec![("search", "Search box"), ("sites", "Top sites"), ("clock", "Clock"), ("stats", "Shields stats")],
+        "vivaldi" | "gx" => vec![("search", "Search box"), ("sites", "Speed Dial"), ("clock", "Clock")],
+        "safari" => vec![("sites", "Favorites and Frequently Visited"), ("stats", "Privacy Report"), ("reading", "Reading List")],
+        _ => vec![("search", "Search box")],
+    };
+    if features::on(s, "wallpapers") {
+        out.push(("wallpaper", "Background image"));
+    }
+    if !features::on(s, "reading-list") {
+        out.retain(|o| o.0 != "reading");
+    }
+    out
 }
 
 /// A strip of panel buttons for web panels the person added.
@@ -670,7 +692,8 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
                     label class="field"{span{"Address, with %s for the search terms"}input name="url" type="url" placeholder="https://github.com/search?q=%s" required;}
                     button class="button primary" type="submit"{"Add engine"}
                 }}
-                (setting_toggle("Remove tracking from links", "Strip click and campaign identifiers such as utm_source and fbclid from addresses.", "stripTracking", p["stripTracking"].as_bool().unwrap_or(true)))
+                (setting_toggle("Remove tracking from links", "Strip click and campaign identifiers such as utm_source and fbclid from addresses, and open AMP pages from the publisher.", "stripTracking", p["stripTracking"].as_bool().unwrap_or(true)))
+                (setting_toggle("Hide your local IP address", "WebRTC calls won’t reveal your network address. WebKit tabs always do this.", "hideLocalIP", p["hideLocalIP"].as_bool().unwrap_or(true)))
             }
         }
         "autofill" => html! {h2{"Autofill"}p class="section-description"{"Addresses are saved on this Mac. Fill a form from the page menu → Fill address."}
@@ -690,12 +713,7 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
                 div class="settings-group"{(module_toggle(s, "tab-sleep", "Sleeping tabs", "Sleeping tabs keep their place and reload when you select them. Tabs playing sound never sleep."))}
                 @if features::on(s, "tab-sleep") {label class="control-label"{"Put inactive tabs to sleep after"}(choice("sleepAfterMinutes", p["sleepAfterMinutes"].as_i64().unwrap_or(60), &[(0,"Never"),(15,"15 min"),(30,"30 min"),(60,"1 hour"),(120,"2 hours"),(240,"4 hours")]))}
                 div class="settings-group"{(module_toggle(s, "limiter", if style(s) == "gx" {"GX Control"} else {"Resource limits"}, "Put background tabs to sleep when memory or processor use passes a limit."))}
-                @if features::on(s, "limiter") {
-                label class="control-label"{"Memory limit"}(choice("memoryLimitMB", p["memoryLimitMB"].as_i64().unwrap_or(0), &[(0,"Off"),(1024,"1 GB"),(2048,"2 GB"),(4096,"4 GB"),(8192,"8 GB")]))
-                label class="control-label"{"CPU limit"}(choice("cpuLimit", p["cpuLimit"].as_i64().unwrap_or(0), &[(0,"Off"),(25,"25%"),(50,"50%"),(75,"75%")]))
-                p class="field-help"{"Above a limit, the least recently used background tabs go to sleep until usage drops."}
-                label class="control-label"{"Network limit for Chromium tabs"}(choice("networkLimitKBps", p["networkLimitKBps"].as_i64().unwrap_or(0), &[(0,"Off"),(256,"256 KB/s"),(1024,"1 MB/s"),(5120,"5 MB/s"),(10240,"10 MB/s")]))
-                }
+                @if features::on(s, "limiter") {(limiter_controls(s))}
                 (setting_toggle("Battery saver", "On battery power, background tabs sleep after 5 minutes and background music stops.", "batterySaver", flag(p,"batterySaver")))
                 h3{"Tabs by resource use"}
                 @if rows.is_empty() {p class="field-help"{"Measuring open tabs…"}}
@@ -707,14 +725,15 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
         }
         "shortcuts" => {
             let map = features::shortcuts(s);
-            html! {h2{"Keyboard shortcuts"}p class="section-description"{"Add your own shortcut to any action. Custom shortcuts work alongside the standard ones, in pages and in the browser."}
+            html! {h2{"Keyboard shortcuts"}p class="section-description"{"Change or remove the shortcut for any action. Shortcuts work in pages and in the browser."}
                 div class="settings-group shortcut-list"{@for (id, label, glyph, _) in ACTIONS.iter().filter(|a| features::action_on(s, a.0)) {
                     @let keys: Vec<&String> = map.iter().filter(|(_, a)| a == id).map(|(b, _)| b).collect();
                     div class="list-row"{(icon(glyph))div{strong{(label)}}
                         span class="shortcut-keys"{@for k in &keys {kbd{(pretty(k))}}}
                         @if s.recording == *id {button class="button primary recording" data-op="record-shortcut" data-value="" data-recording=(id){"Press keys… (Esc cancels)"}}
-                        @else {button class="button quiet" data-op="record-shortcut" data-value=(id){"Add"}}
-                        @if p["shortcuts"][*id].is_string() {button class="icon-button" data-op="shortcut" data-action=(id) data-value="" aria-label=(format!("Remove custom shortcut for {label}")){(icon("close"))}}
+                        @else {button class="button quiet" data-op="record-shortcut" data-value=(id){(if keys.is_empty() {"Set"} else {"Change"})}}
+                        @if p["shortcuts"][*id].is_string() {button class="button quiet" data-op="shortcut" data-action=(id) data-value="" title="Use the standard shortcut"{"Reset"}}
+                        @if !keys.is_empty() {button class="icon-button" data-op="shortcut" data-action=(id) data-value="none" aria-label=(format!("Remove the shortcut for {label}")){(icon("close"))}}
                     }
                 }}
                 h3{"Command chains"}
@@ -760,6 +779,7 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             (setting_toggle("Block third-party cookies", "Sites can’t follow you with cookies set by other sites.", "blockThirdPartyCookies", p["blockThirdPartyCookies"].as_bool().unwrap_or(true)))
             (module_toggle(s, "cookie-banners", "Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer."))
         }
+        (site_settings_list(s))
         details class="credential-disclosure"{summary{"Custom blocking rules"@if rules > 0 {" ("(rules)")"}}form data-form="custom-rules"{
             p class="field-help"{"Paste domains, hosts-file lines, rules like ||ads.example.com^ or element rules like example.com##.banner."}
             textarea name="rules" rows="5" spellcheck="false" placeholder="||ads.example.com^\nexample.com##.banner"{(array(&p["customBlockList"]).iter().chain(array(&p["customCosmetic"])).filter_map(Value::as_str).take(400).collect::<Vec<_>>().join("\n"))}
@@ -776,6 +796,38 @@ pub fn privacy_extra(s: &Shell) -> Markup {
     }
 }
 
+/// Every site with its own settings: permissions, scripts, styles, zoom.
+fn site_settings_list(s: &Shell) -> Markup {
+    let p = prefs(s);
+    let mut hosts: Vec<&String> = p["siteSettings"].as_object().map(|o| o.keys().collect()).unwrap_or_default();
+    for host in p["siteZoom"].as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default() {
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    hosts.sort();
+    let summary = |host: &str| {
+        let v = &p["siteSettings"][host];
+        let mut parts: Vec<String> = vec![];
+        if flag(v, "blockScripts") { parts.push("JavaScript off".into()); }
+        if flag(v, "allowPopups") { parts.push("Pop-ups allowed".into()); }
+        if flag(v, "muted") { parts.push("Muted".into()); }
+        for (key, label) in [("camera", "Camera"), ("microphone", "Microphone")] {
+            if !text(v, key).is_empty() { parts.push(format!("{label}: {}", if text(v, key) == "allow" {"allowed"} else {"blocked"})); }
+        }
+        if !text(v, "filter").is_empty() { parts.push("Page filter".into()); }
+        if !text(v, "css").is_empty() || !array(&v["hide"]).is_empty() { parts.push("Custom styles".into()); }
+        if flag(v, "forget") { parts.push("Forgotten on close".into()); }
+        if let Some(zoom) = p["siteZoom"][host].as_f64() { parts.push(format!("Zoom {:.0}%", zoom * 100.)); }
+        parts.join(" · ")
+    };
+    html! {@if !hosts.is_empty() {
+        details class="credential-disclosure"{summary{"Site settings ("(hosts.len())")"}
+            div class="settings-group"{@for host in &hosts {div class="list-row"{(icon("globe"))div{strong{(host)}small{(summary(host))}}button class="button quiet" data-op="site-reset" data-host=(host){"Reset"}}}}
+        }
+    }}
+}
+
 pub fn general_extra(s: &Shell) -> Markup {
     let p = prefs(s);
     let mode = if !array(&p["startupPages"]).is_empty() && !flag(p, "restoreSession") { "pages" } else if flag(p, "restoreSession") { "restore" } else { "start" };
@@ -783,6 +835,8 @@ pub fn general_extra(s: &Shell) -> Markup {
         label class="control-label"{"On startup"}
         (segments("setting", "startupMode", mode, &[("restore","Reopen tabs"),("start","Start page"),("pages","Specific pages")]))
         @if mode == "pages" {form data-form="startup-pages"{label class="field"{span{"Pages, one per line"}textarea name="pages" rows="3" spellcheck="false"{(array(&p["startupPages"]).iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"))}}button class="button" type="submit"{"Save pages"}}}
+        label class="control-label"{"Archive unused tabs after"}
+        (choice("autoArchiveDays", p["autoArchiveDays"].as_i64().unwrap_or(0), &[(0,"Never"),(1,"1 day"),(7,"7 days"),(14,"14 days"),(30,"30 days")]))
         div class="settings-group"{
             div class="list-row"{div{strong{"Downloads"}small{(if text(p,"downloadFolder").is_empty(){"Ask where to save each file".to_string()}else{format!("Save to {}", text(p,"downloadFolder"))})}}button class="button" data-op="native" data-action="chooseDownloadFolder"{"Choose folder…"}@if !text(p,"downloadFolder").is_empty(){button class="button quiet" data-op="native" data-action="clearDownloadFolder"{"Always ask"}}}
             @if style(s) == "arc" {(module_toggle(s, "little-arc", "Little Arc", "Open links from other apps in a small window. Keep it as a tab or close it."))}
@@ -818,6 +872,30 @@ fn link_routes(s: &Shell) -> Markup {
     }
 }
 
+/// Memory, processor and network limits, shown in Settings and in Opera GX's Control panel.
+pub fn limiter_controls(s: &Shell) -> Markup {
+    let p = prefs(s);
+    html! {
+        label class="control-label"{"Memory limit"}(choice("memoryLimitMB", p["memoryLimitMB"].as_i64().unwrap_or(0), &[(0,"Off"),(1024,"1 GB"),(2048,"2 GB"),(4096,"4 GB"),(8192,"8 GB")]))
+        label class="control-label"{"CPU limit"}(choice("cpuLimit", p["cpuLimit"].as_i64().unwrap_or(0), &[(0,"Off"),(25,"25%"),(50,"50%"),(75,"75%")]))
+        p class="field-help"{"Above a limit, the least recently used background tabs go to sleep until usage drops."}
+        label class="control-label"{"Network limit for Chromium tabs"}(choice("networkLimitKBps", p["networkLimitKBps"].as_i64().unwrap_or(0), &[(0,"Off"),(256,"256 KB/s"),(1024,"1 MB/s"),(5120,"5 MB/s"),(10240,"10 MB/s")]))
+    }
+}
+
+/// Opera GX's Control panel: limiters, the tabs using the most, and the cleaner.
+pub fn gx_control(s: &Shell) -> Markup {
+    let rows: Vec<&Value> = array(&s.snapshot["tabResources"]).iter().take(3).collect();
+    html! {div class="gx-control"{
+        @if features::on(s, "limiter") {h3{"Limiters"}(limiter_controls(s))}
+        h3{"Hot tabs"}
+        @if rows.is_empty() {p class="field-help"{"Measuring open tabs…"}}
+        @for r in rows {div class="list-row"{div{strong{(text(r,"title"))}small{(format!("{:.0} MB · {:.0}% CPU", r["memory"].as_f64().unwrap_or(0.), r["cpu"].as_f64().unwrap_or(0.)))}}button class="button quiet" data-op="tab-action" data-id=(text(r,"id")) data-value="sleep"{"Sleep"}}}
+        h3{"GX Cleaner"}
+        div class="list-row"{div{strong{"Clean browsing data"}small{"Cache, cookies, history and downloads, by time range."}}button class="button" data-op="menu" data-value="clear-data"{"Clean…"}}
+    }}
+}
+
 pub fn appearance_extra(s: &Shell) -> Markup {
     let p = prefs(s);
     let schedule = &p["themeSchedule"];
@@ -825,11 +903,16 @@ pub fn appearance_extra(s: &Shell) -> Markup {
     html! {
         h3{"Start page"}
         div class="settings-group"{
-            @for (key, label) in [("search","Search box"),("sites","Sites"),("clock","Clock"),("stats","Privacy stats"),("wallpaper","Background image")].into_iter().filter(|(k, _)| *k != "wallpaper" || features::on(s, "wallpapers")) {
+            @if start_options(s).is_empty() {p class="field-help"{"This layout opens new tabs from the command bar, without a start page."}}
+            @for (key, label) in start_options(s) {
                 @let on = start_option(s, key);
                 button class="toggle-row" data-op="setting" data-key="startPage" data-json=(start_page_with(p, key, !on)) role="switch" aria-checked=(on.to_string()){span{strong{(label)}}span class=(if on{"switch on"}else{"switch"}){span{}}}
             }
             (module_toggle(s, "wallpapers", "Wallpapers", "Use your own picture behind the start page."))
+            @if features::on(s, "wallpapers") {
+                div class="list-row"{div{strong{"Live wallpaper"}small{"Animated, for when no picture is chosen. Follows Reduce motion."}}}
+                (crate::render::segments("setting", "liveWallpaper", text(p, "liveWallpaper"), &[("", "Off"), ("aurora", "Aurora"), ("waves", "Waves"), ("embers", "Embers")]))
+            }
             @if features::on(s, "wallpapers") {div class="list-row"{div{strong{"Background image"}small{(if text(&s.snapshot,"wallpaper").is_empty(){"None"}else{"Chosen"})}}button class="button" data-op="native" data-action="chooseWallpaper"{"Choose image…"}@if !text(&s.snapshot,"wallpaper").is_empty(){button class="button quiet" data-op="native" data-action="removeWallpaper"{"Remove"}}}}
         }
         h3{"Light and dark schedule"}

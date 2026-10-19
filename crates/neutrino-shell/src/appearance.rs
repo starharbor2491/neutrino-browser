@@ -59,6 +59,18 @@ pub const SIDEBAR_TOOLS: &[(&str, &str)] = &[
     ("notes", "Notes"),
     ("player", "Media player"),
 ];
+/// Web panels a GX setup adds for its Messengers and Player choices: (title, address).
+pub fn setup_web_panels(setup: &Value) -> Vec<(&'static str, &'static str)> {
+    let chosen = |tool: &str| setup["preset"] == "gx" && setup["sidebarTools"].as_array().is_some_and(|l| l.iter().any(|v| v == tool));
+    let mut out = vec![];
+    if chosen("messengers") {
+        out.extend([("WhatsApp", "https://web.whatsapp.com/"), ("Telegram", "https://web.telegram.org/"), ("Messenger", "https://www.messenger.com/"), ("Discord", "https://discord.com/app")]);
+    }
+    if chosen("player") {
+        out.extend([("Spotify", "https://open.spotify.com/"), ("YouTube Music", "https://music.youtube.com/")]);
+    }
+    out
+}
 /// Opera GX's named color themes, applied as a custom accent.
 pub const GX_THEMES: &[(&str, &str)] = &[
     ("GX Classic", "fa1e4e"),
@@ -95,6 +107,9 @@ pub fn setup_configuration(setup: &Value) -> Value {
     }
     if id == "gx" {
         c["theme"]["sounds"] = json!(setup["sounds"].as_bool().unwrap_or(true));
+        // The sidebar shows the panels chosen in setup; messengers and the player become web panels.
+        let chosen: Vec<&str> = SIDEBAR_TOOLS.iter().map(|t| t.0).filter(|t| !["messengers", "player"].contains(t) && setup["sidebarTools"].as_array().is_some_and(|l| l.iter().any(|v| v == t))).collect();
+        c["layout"]["panelItems"] = if chosen.is_empty() { json!(["none"]) } else { json!(chosen) };
     }
     if id == "vivaldi" {
         let edition = setup["edition"].as_str().unwrap_or("classic");
