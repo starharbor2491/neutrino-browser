@@ -496,7 +496,7 @@ fn workspace_panel(s: &Shell, key: &str) -> Markup {
     let mut copy = s.clone();
     copy.section = key.into();
     copy.panel = key.into();
-    html! {aside class="workspace-panel" aria-label=(key) {header{h2{(match key{"notes"=>"Notes","history"=>"History","downloads"=>"Downloads","resources"=>if style(s)=="gx"{"Resource control"}else{"Resources"},"tabs"=>"Window",_=>"Bookmarks"})}button class="icon-button" data-op="panel" data-value="" aria-label="Close panel"{(icon("close"))}}
+    html! {aside class="workspace-panel" aria-label=(key) {header{h2{(match key{"notes"=>"Notes","history"=>"History","downloads"=>"Downloads","reading"=>"Reading List","resources"=>if style(s)=="gx"{"Resource control"}else{"Resources"},"tabs"=>"Window",_=>"Bookmarks"})}button class="icon-button" data-op="panel" data-value="" aria-label="Close panel"{(icon("close"))}}
         @if key=="resources" {(resources(s))@if style(s)=="gx" {(crate::views::gx_control(s))}}@else if key=="tabs" {div class="tabs-scroll window-panel"{(tab_groups(s,false))}}@else{(library(&copy))}
     }}
 }
@@ -633,6 +633,7 @@ fn panel_strip(s: &Shell) -> Markup {
                 "notes" => ("notes", "Notes", "edit"),
                 "tabs" => ("tabs", "Window", "sidebar"),
                 "feeds" if crate::features::on(s, "feeds") => ("feeds", "Feeds", "feed"),
+                "reading" if crate::features::on(s, "reading-list") => ("reading", "Reading List", "book"),
                 _ => ("", "", ""),
             };
             @if !key.is_empty() {button class=(if open == key {"strip-button selected"} else {"strip-button"}) data-op="panel" data-value=(if open == key {""} else {key}) data-tip=(label) aria-label=(label) aria-pressed=((open == key).to_string()){(icon(glyph))}}

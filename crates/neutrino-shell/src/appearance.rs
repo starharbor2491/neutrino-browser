@@ -148,6 +148,9 @@ pub fn preset(id: &str) -> Option<Value> {
         }
         "brave" => {
             config["theme"]["accent"] = json!("orange");
+            // Brave's sidebar: bookmarks, reading list and history beside the page.
+            config["layout"]["panelBar"] = json!(true);
+            config["layout"]["panelItems"] = json!(["bookmarks", "reading", "history"]);
         }
         "gx" => {
             config["theme"]["accent"] = json!("pink");

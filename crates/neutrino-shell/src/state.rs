@@ -425,6 +425,7 @@ impl Shell {
                         "tabs",
                         "safari",
                         "feeds",
+                        "reading",
                     ]
                     .contains(&value)
                     {

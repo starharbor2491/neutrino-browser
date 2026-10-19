@@ -1820,12 +1820,23 @@ li.done .guide-check {
   flex: 1;
   min-width: 0;
 }
+.bookmark-link > .site-icon,
+.history-row > .site-icon {
+  flex: none;
+}
+.bookmark-link {
+  min-width: 0;
+}
 .bookmark-link strong,
-.history-row strong {
+.history-row strong,
+.bookmark-link small {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.bookmark-link small {
+  font-weight: inherit;
 }
 .history-row {
   width: 100%;
