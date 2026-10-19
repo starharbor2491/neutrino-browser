@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -365,6 +365,13 @@ pub fn parse_rules(source: &str) -> Vec<String> {
     parse_rules_up_to(source, 5000)
 }
 
+/// Whether a card number passes the Luhn check card issuers use.
+fn luhn(number: &str) -> bool {
+    let digits: Vec<u32> = number.chars().filter_map(|c| c.to_digit(10)).collect();
+    (12..=19).contains(&digits.len())
+        && digits.iter().rev().enumerate().map(|(i, d)| if i % 2 == 1 { let x = d * 2; if x > 9 { x - 9 } else { x } } else { *d }).sum::<u32>() % 10 == 0
+}
+
 /// A host name with at least two labels and a letter-only top-level domain.
 fn hostname(domain: &str) -> bool {
     let labels: Vec<&str> = domain.split('.').collect();
@@ -546,7 +553,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "chain" => "command-chains",
         "link-route" => "link-routes",
         "tidy-tabs" => "tidy-tabs",
-        "address-book" => "autofill",
+        "address-book" | "card" => "autofill",
         "page-command" if value == "panic" => "panic",
         "page-command" if value == "break" => "break-mode",
         "page-command" if value == "fast-forward" || value == "rewind" => "fast-forward",
@@ -1070,6 +1077,34 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 s.notice = format!("{host} uses your standard settings again.");
             }
         }
+        "card" => match value {
+            "save" => {
+                let number: String = text(r, "number").chars().filter(char::is_ascii_digit).collect();
+                let (month, year) = text(r, "expiry").split_once('/').map(|(m, y)| (m.trim().parse::<u32>().unwrap_or(0), y.trim().parse::<u32>().unwrap_or(0))).unwrap_or((0, 0));
+                let year = if year < 100 { year + 2000 } else { year };
+                if !regular {
+                    return;
+                }
+                if !luhn(&number) || !(1..=12).contains(&month) || !(2000..=2100).contains(&year) {
+                    s.notice = "Check the card number and the expiry date (MM/YY).".into();
+                    return;
+                }
+                commands.push(json!({"op":"saveCard","name":bound(text(r, "name"), 80),"number":number,"month":month,"year":year}));
+                s.notice = "Card saved in Keychain.".into();
+            }
+            "remove" => commands.push(json!({"op":"removeCard","id":r["id"]})),
+            "fill" if !text(s.active(), "url").is_empty() => {
+                commands.push(json!({"op":"fillCard","id":r["id"]}));
+                s.menu.clear();
+            }
+            _ => {}
+        },
+        "stack-tabs" => {
+            let loose = |key: &str| s.tabs().iter().any(|t| text(t, "id") == text(r, key) && !flag(t, "pinned") && text(t, "folderID").is_empty());
+            if regular && crate::render::style(s) == "vivaldi" && on(s, "tab-stacks") && text(r, "id") != text(r, "onto") && loose("id") && loose("onto") {
+                commands.push(json!({"op":"stackTabs","id":r["id"],"onto":r["onto"]}));
+            }
+        }
         "tab-preview" => {
             let known = s.tabs().iter().any(|t| t["id"] == id);
             if on(s, "tab-previews") && (known || value == "hide") {
@@ -1256,6 +1291,11 @@ pub fn page_script(r: &Value) -> Option<String> {
             format!("(()=>{{const id='neutrino-page-style';let s=document.getElementById(id);const css={};if(!css){{s?.remove();return 'none'}}if(!s){{s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s)}}if(s.textContent!==css)s.textContent=css;return 'applied'}})()", quote(&css))
         }
         "mute" => format!("(()=>{{const m={};window.__neutrinoMuted=m;const all=()=>document.querySelectorAll('video,audio').forEach(e=>{{if(m)e.muted=true;else if(e.dataset.neutrinoMuted)e.muted=false;if(m)e.dataset.neutrinoMuted='1';else delete e.dataset.neutrinoMuted}});all();if(!window.__neutrinoMuteObserver){{window.__neutrinoMuteObserver=true;document.addEventListener('play',e=>{{if(window.__neutrinoMuted&&e.target instanceof HTMLMediaElement){{e.target.muted=true;e.target.dataset.neutrinoMuted='1'}}}},true)}}return String(m)}})()", flag(r, "value")),
+        // Fills a payment form's name, number and expiry by their autocomplete hints or names.
+        "fillCard" => {
+            let card = &r["card"];
+            format!("(()=>{{const c={};const set=(e,v)=>{{if(!e||!v)return 0;const s=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e),'value').set;s.call(e,v);e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return 1}};const q=(ac,re)=>document.querySelector('[autocomplete~=\"'+ac+'\"]')||[...document.querySelectorAll('input,select')].find(e=>re.test((e.name||'')+' '+(e.id||'')+' '+(e.getAttribute('aria-label')||'')));if(location.protocol!=='https:')return '0';let n=0;n+=set(q('cc-name',/card.?holder|name.?on.?card|cc.?name/i),c.name);n+=set(q('cc-number',/card.?number|cc.?num|cardnumber/i),c.number);const mm=String(c.month).padStart(2,'0'),yy=String(c.year);const exp=q('cc-exp',/exp(iry|iration)?(.?date)?$|mm.?yy/i);if(exp&&exp.tagName!=='SELECT')n+=set(exp,mm+'/'+yy.slice(2));else{{n+=set(q('cc-exp-month',/exp.?month|cc.?month/i),mm);const y=q('cc-exp-year',/exp.?year|cc.?year/i);n+=set(y,y&&y.maxLength===2?yy.slice(2):yy)}}return String(n)}})()", serde_json::to_string(card).unwrap_or_else(|_| "{}".into()))
+        }
         // Reports a submitted sign-in to Neutrino from its own isolated world, so the
         // page can't call the reporter. WebKit uses a message handler, Chromium a binding.
         "credentialCapture" => "(()=>{if(window.__neutrinoCredentials||window.top!==window)return 'off';window.__neutrinoCredentials=true;const send=o=>{try{if(window.webkit&&webkit.messageHandlers&&webkit.messageHandlers.neutrinoCredential)webkit.messageHandlers.neutrinoCredential.postMessage(o);else if(typeof neutrinoCredential==='function')neutrinoCredential(JSON.stringify(o))}catch(_){}};let last='';const capture=form=>{const root=form||document;const pw=[...root.querySelectorAll('input[type=password]')].find(i=>i.value);if(!pw)return;const inputs=[...(pw.form||root).querySelectorAll('input')];let user='';for(let i=inputs.indexOf(pw)-1;i>=0;i--){const t=(inputs[i].type||'text').toLowerCase();if(['text','email','tel'].includes(t)&&inputs[i].value){user=inputs[i].value;break}}if(!user){const u=document.querySelector('input[autocomplete=username],input[type=email]');user=(u&&u.value)||''}const key=user+'\\n'+pw.value;if(key===last)return;last=key;send({origin:location.origin,username:user.slice(0,200),password:pw.value.slice(0,500)})};addEventListener('submit',e=>capture(e.target),true);addEventListener('click',e=>{const b=e.target&&e.target.closest&&e.target.closest('button,input[type=submit],[role=button]');if(b&&(b.form||document).querySelector('input[type=password]'))setTimeout(()=>capture(b.form),0)},true);addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target&&e.target.form&&e.target.form.querySelector('input[type=password]'))capture(e.target.form)},true);return 'on'})()".into(),
@@ -1354,6 +1394,14 @@ mod tests {
     fn reads_domains_from_filter_lists_and_hosts_files() {
         let rules = "! comment\n||ads.example.com^\n0.0.0.0 tracker.example.net\nplain.example.org\n##.banner\n||cdn.example.com^$script\n@@||good.example.com^\nlocalhost\n||pixel.example.io^$third-party\n||shop.example.com^$domain=a.com\n||cdn.example.com/ads.js\n";
         assert_eq!(parse_rules(rules), vec!["ads.example.com", "tracker.example.net", "plain.example.org", "pixel.example.io"]);
+    }
+
+    #[test]
+    fn card_numbers_need_a_valid_check_digit() {
+        assert!(luhn("4242424242424242"));
+        assert!(luhn("5555 5555 5555 4444".replace(' ', "").as_str()));
+        assert!(!luhn("4242424242424241"));
+        assert!(!luhn("1234"));
     }
 
     #[test]

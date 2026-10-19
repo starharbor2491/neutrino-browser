@@ -201,6 +201,7 @@ pub fn page_menu(s: &Shell) -> Markup {
             @if enabled("screenshot"){button class="menu-item" data-op="menu" data-value="capture" disabled[blank]{(icon("camera"))span{"Capture"}kbd{"⇧⌘S"}}}
             @if enabled("notes"){button class="menu-item" data-op="panel" data-value="notes"{(icon("edit"))span{"Notes beside page"}}}
             button class="menu-item" data-op="summarize" disabled[blank]{(icon("spark"))span{"Summarize page"}}
+            @if features::on(s, "autofill") && !array(&s.snapshot["cards"]).is_empty() {button class="menu-item" data-op="menu" data-value="fill-card" disabled[blank]{(icon("key"))span{"Fill card"}}}
             @if features::on(s, "autofill") && (!profile_items(s, "addresses").is_empty() || !array(&prefs(s)["addresses"]).is_empty()) {button class="menu-item" data-op="menu" data-value="fill-address" disabled[blank]{(icon("user"))span{"Fill address"}}}
         }
         div class="menu-separator"{}
@@ -377,6 +378,7 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
         "new-board" => html! {label class="field"{span{"Board name"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Moodboard, Trip, Research…" maxlength="80" autocomplete="off";}button class="button primary" data-op="board" data-value="create" disabled[s.name.trim().is_empty()]{"Create board"}},
         m if m.starts_with("board-note:") => html! {label class="field"{span{"Note"}input id="name-input" data-name="true" value=(s.name.as_str()) maxlength="2000" autocomplete="off";}button class="button primary" data-op="board" data-value="add-note" data-board=(id) disabled[s.name.trim().is_empty()]{"Add note"}},
         m if m.starts_with("board-add:") => html! {div class="menu-label"{"Add this page to"}@for b in profile_items(s, "boards") {button class="menu-item" data-op="board" data-value="add-page" data-board=(text(b,"id")){(icon("grid"))span{(text(b,"name"))}}}(crate::render::menu_item("New board…","menu","new-board","plus"))},
+        "fill-card" => html! {div class="menu-label"{"Fill this page with"}@for c in array(&s.snapshot["cards"]) {button class="menu-item" data-op="card" data-value="fill" data-id=(text(c,"id")){(icon("key"))span{(text(c,"name"))" ····"(text(c,"last4"))}}}},
         "fill-address" => html! {div class="menu-label"{"Fill this page with"}@for a in array(&prefs(s)["addresses"]) {button class="menu-item" data-op="address-book" data-value="fill" data-id=(text(a,"id")){(icon("user"))span{(text(a,"name"))small{(text(a,"street"))}}}}},
         _ => return None,
     })
@@ -738,7 +740,18 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
                 button class="button primary" type="submit"{"Save address"}
             }}
             }
-            p class="field-help"{"Payment cards aren’t stored. Passwords are in Settings → Passwords."}
+            @if features::on(s, "autofill") {
+                h3{"Payment cards"}
+                @for c in array(&s.snapshot["cards"]) {div class="list-row"{(icon("key"))div{strong{(text(c,"name"))" ····"(text(c,"last4"))}small{"Expires "(text(c,"expiry"))}}button class="icon-button" data-op="card" data-value="remove" data-id=(text(c,"id")) aria-label="Remove card"{(icon("close"))}}}
+                @if !s.private() {details class="credential-disclosure"{summary{"Add a card"}form data-form="card"{
+                    label class="field"{span{"Name on card"}input name="name" maxlength="80" autocomplete="off";}
+                    label class="field"{span{"Card number"}input name="number" inputmode="numeric" maxlength="23" autocomplete="off" spellcheck="false";}
+                    label class="field"{span{"Expiry (MM/YY)"}input name="expiry" maxlength="7" placeholder="08/29" autocomplete="off";}
+                    p class="field-help"{"Saved in macOS Keychain. The security code is never stored; you enter it each time."}
+                    button class="button primary" type="submit"{"Save card"}
+                }}}
+            }
+            p class="field-help"{"Passwords are in Settings → Passwords."}
         },
         "performance" => {
             let rows = array(&s.snapshot["tabResources"]);

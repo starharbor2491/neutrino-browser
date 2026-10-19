@@ -18,6 +18,8 @@ final class BrowserFeatures {
     private(set) var navigationList: [String: Any] = [:]
     private(set) var source: [String: Any] = [:]
     private(set) var siteData: [[String: String]]?
+    /// Card summaries for the interface, read from Keychain when they change.
+    private var cards: (profileID: UUID, list: [[String: String]])?
     /// Small pictures of tabs' pages for hover previews, taken while each tab was showing.
     private var thumbnails: [UUID: NSImage] = [:]
     /// The address each Chromium thumbnail shows; Chromium pages are pictured once per page.
@@ -93,6 +95,10 @@ final class BrowserFeatures {
         snapshot["tabResources"] = tabResources
         snapshot["breakMode"] = breakMode
         if let blocked = model.activeWebTab.blockedOnPage { snapshot["blockedCount"] = blocked }
+        if !model.isPrivate {
+            if cards?.profileID != model.session.profileID { cards = (model.session.profileID, LocalCard.list(profile: model.session.profileID).map(\.summary)) }
+            snapshot["cards"] = cards?.list ?? []
+        }
         if let prompt = passwordPrompt, prompt.profileID == model.session.profileID {
             snapshot["passwordPrompt"] = ["origin": prompt.credential.origin, "username": prompt.credential.username, "update": prompt.update]
         }
@@ -678,6 +684,25 @@ final class BrowserFeatures {
             address.country = value("country"); address.email = value("email"); address.phone = value("phone")
             app.library.preferences.addresses = Array(((app.library.preferences.addresses ?? []) + [address]).suffix(20))
         case "removeAddress": if let id { app.library.preferences.addresses?.removeAll { $0.id == id } }
+        case "saveCard":
+            guard regular, let number = command["number"] as? String, let month = command["month"] as? Int, let year = command["year"] as? Int else { break }
+            do {
+                try LocalCard(id: UUID().uuidString, name: command["name"] as? String ?? "", number: number, month: month, year: year).save(profile: profileID)
+                cards = nil
+            } catch { app.notice = error.localizedDescription }
+        case "removeCard":
+            guard regular, let raw = command["id"] as? String, UUID(uuidString: raw) != nil else { break }
+            app.perform { try SecureVault.delete(account: raw, service: LocalCard.service(profileID)) }
+            cards = nil
+        case "fillCard":
+            guard regular, let model, let raw = command["id"] as? String,
+                  let card = LocalCard.list(profile: profileID).first(where: { $0.id == raw }),
+                  let script = PageScript.source("fillCard", ["card": ["name": card.name, "number": card.number, "month": card.month, "year": card.year]]) else { break }
+            let tab = model.activeWebTab
+            Task { @MainActor [weak self] in
+                let filled = Int((try? await tab.runPageScript(script)) ?? "") ?? 0
+                self?.app.notice = filled > 0 ? "Card filled. Enter the security code yourself." : "No card fields were found on this secure page."
+            }
         case "fillAddress":
             guard let model, let address = app.library.preferences.addresses?.first(where: { $0.id == id }),
                   let data = try? JSONEncoder().encode(address), let object = try? JSONSerialization.jsonObject(with: data),

@@ -774,6 +774,15 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
             next.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
             model.session.tabs = next
+        case "stackTabs":
+            // Vivaldi's stacks: the two tabs share a new folder named after the target's site.
+            guard let model, !model.isPrivate, let id, let onto = (command["onto"] as? String).flatMap(UUID.init(uuidString:)), id != onto,
+                  let spaceIndex = app.library.spaces?.firstIndex(where: { $0.id == model.session.spaceID }),
+                  let target = model.session.tabs.first(where: { $0.id == onto }), model.session.tabs.contains(where: { $0.id == id }) else { return }
+            let host = target.url?.host ?? ""
+            app.createFolder(name: host.hasPrefix("www.") ? String(host.dropFirst(4)) : host.isEmpty ? "Stack" : host, spaceID: model.session.spaceID)
+            guard let folder = app.library.spaces?[spaceIndex].folders.last else { return }
+            for i in model.session.tabs.indices where [id, onto].contains(model.session.tabs[i].id) { model.session.tabs[i].folderID = folder.id; model.session.tabs[i].parentID = nil }
         case "createFolder":
             if let name = command["name"] as? String { app.createFolder(name: name, spaceID: model?.session.spaceID) }
         case "createSpace":

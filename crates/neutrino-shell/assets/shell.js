@@ -919,6 +919,8 @@
       send({ op: "setting", key: "themeSchedule", value: { enabled: f.get("enabled") === "on", light: f.get("light"), dark: f.get("dark") } });
     else if (form.dataset.form === "startup-pages")
       send({ op: "startup-pages", value: f.get("pages") });
+    else if (form.dataset.form === "card")
+      send({ op: "card", value: "save", name: f.get("name"), number: f.get("number"), expiry: f.get("expiry") });
     else if (form.dataset.form === "filter-list")
       send({ op: "filter-list", value: "add", url: f.get("url") });
     else if (form.dataset.form === "link-route")
@@ -1291,7 +1293,8 @@
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     target.classList.add(
-      target.dataset.tab || drag.kind === "folder" || drag.kind === "space"
+      stacking(e, target) ? "drop-stack"
+        : target.dataset.tab || drag.kind === "folder" || drag.kind === "space"
         ? "drop-before"
         : "drop-hover",
     );
@@ -1302,11 +1305,23 @@
       else if (e.clientY > r.bottom - 30) scroller.scrollTop += 9;
     }
   });
+  // Vivaldi: a tab dropped on the middle of another loose tab stacks the two.
+  function stacking(e, target) {
+    if (!drag || drag.kind !== "tab" || !target.dataset.tab || target.dataset.tab === drag.id) return false;
+    if (!root.querySelector(".browser-shell.style-vivaldi") || target.closest("[data-folder]")) return false;
+    const r = target.getBoundingClientRect();
+    return e.clientX > r.left + r.width * 0.25 && e.clientX < r.right - r.width * 0.25;
+  }
   document.addEventListener("drop", (e) => {
     if (!drag) return;
     const target = dropTarget(e);
     if (!target) return;
     e.preventDefault();
+    if (stacking(e, target)) {
+      send({ op: "stack-tabs", id: drag.id, onto: target.dataset.tab });
+      cleanupDrag();
+      return;
+    }
     if (drag.kind === "component")
       send({
         op: "dock",
@@ -1342,8 +1357,8 @@
       "dragging-folder",
     );
     root
-      .querySelectorAll(".drag-source,.valid")
-      .forEach((x) => x.classList.remove("drag-source", "valid"));
+      .querySelectorAll(".drag-source,.valid,.drop-stack")
+      .forEach((x) => x.classList.remove("drag-source", "valid", "drop-stack"));
     clearTargets();
     scheduleGeometry();
   }
