@@ -314,6 +314,19 @@ fn passwords_import_from_chromium_family_browsers_only() {
     assert!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"brave"}))).is_empty());
 }
 #[test]
+fn a_shortcut_in_use_moves_only_after_confirmation() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"shortcut","action":"new-window","value":"cmd+t"}));
+    assert!(commands(&r).is_empty());
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("is already the shortcut for New tab") && html.contains("data-confirm=\"true\""));
+    let r = s.dispatch(json!({"op":"shortcut","action":"new-window","value":"cmd+t","confirm":"true"}));
+    assert_eq!(commands(&r), &[json!({"op":"setShortcut","action":"new-tab","value":"none"}), json!({"op":"setShortcut","action":"new-window","value":"cmd+t"})]);
+    assert!(s.menu.is_empty());
+    let r = s.dispatch(json!({"op":"shortcut","action":"new-window","value":"ctrl+alt+k"}));
+    assert_eq!(commands(&r), &[json!({"op":"setShortcut","action":"new-window","value":"ctrl+alt+k"})]);
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

@@ -1028,7 +1028,20 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 if value.is_empty() {
                     commands.push(json!({"op":"setShortcut","action":action,"value":Value::Null}));
                 } else if value == "none" || valid_binding(value) {
+                    // A key another action uses moves only after the person confirms it.
+                    let taken = shortcuts(s).into_iter().find(|(b, a)| b == value && a != action).map(|(_, a)| a);
+                    let confirmed = flag(r, "confirm") || text(r, "confirm") == "true";
+                    match taken {
+                        Some(other) if !confirmed => {
+                            s.recording.clear();
+                            s.menu = format!("shortcut-conflict:{action}\t{other}\t{value}");
+                            return;
+                        }
+                        Some(other) => commands.push(json!({"op":"setShortcut","action":other,"value":"none"})),
+                        None => {}
+                    }
                     commands.push(json!({"op":"setShortcut","action":action,"value":value}));
+                    s.menu.clear();
                 } else {
                     s.notice = "Use at least one of ⌃ ⌥ ⇧ ⌘ with a key, or a function key.".into();
                 }

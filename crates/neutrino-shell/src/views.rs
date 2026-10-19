@@ -396,6 +396,7 @@ pub fn menu_title(m: &str) -> Option<&'static str> {
         m if m.starts_with("rename-tab:") => "Rename tab",
         m if m.starts_with("edit-bookmark:") => "Edit bookmark",
         m if m.starts_with("board-note:") => "Add a note",
+        m if m.starts_with("shortcut-conflict:") => "Shortcut in use",
         _ => return None,
     })
 }
@@ -733,8 +734,6 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
                     label class="field"{span{"Address, with %s for the search terms"}input name="url" type="url" placeholder="https://github.com/search?q=%s" required;}
                     button class="button primary" type="submit"{"Add engine"}
                 }}
-                (setting_toggle("Remove tracking from links", "Strip click and campaign identifiers such as utm_source and fbclid from addresses, and open AMP pages from the publisher.", "stripTracking", p["stripTracking"].as_bool().unwrap_or(true)))
-                (setting_toggle("Hide your local IP address", "WebRTC calls won’t reveal your network address. WebKit tabs always do this.", "hideLocalIP", p["hideLocalIP"].as_bool().unwrap_or(true)))
             }
         }
         "autofill" => html! {h2{"Autofill"}p class="section-description"{"Addresses are saved on this Mac. Fill a form from the page menu → Fill address."}
@@ -804,6 +803,20 @@ pub fn settings_section(s: &Shell) -> Option<Markup> {
     })
 }
 
+/// Asks before a shortcut moves from the action that has it.
+pub fn shortcut_conflict(menu: &str) -> Markup {
+    let parts: Vec<&str> = menu.trim_start_matches("shortcut-conflict:").split('\t').collect();
+    fn label(id: &str) -> &str {
+        ACTIONS.iter().find(|a| a.0 == id).map(|a| a.1).unwrap_or(id)
+    }
+    html! {@if let [action, other, binding] = parts[..] {
+        p{kbd{(pretty(binding))}" is already the shortcut for "(label(other))". Use it for "(label(action))" instead? "(label(other))" will have no shortcut."}
+        div class="button-row"{
+            button class="button" data-op="escape"{"Cancel"}
+            button class="button primary" data-op="shortcut" data-action=(action) data-value=(binding) data-confirm="true"{"Use for "(label(action))}
+        }
+    }}
+}
 pub fn pretty(binding: &str) -> String {
     binding
         .split('+')
@@ -830,6 +843,8 @@ pub fn privacy_extra(s: &Shell) -> Markup {
         div class="settings-group"{
             (setting_toggle("Upgrade connections to HTTPS", "Load the secure version of sites when one exists.", "httpsUpgrade", p["httpsUpgrade"].as_bool().unwrap_or(true)))
             (setting_toggle("Block third-party cookies", "Sites can’t follow you with cookies set by other sites.", "blockThirdPartyCookies", p["blockThirdPartyCookies"].as_bool().unwrap_or(true)))
+            (setting_toggle("Remove tracking from links", "Strip click and campaign identifiers such as utm_source and fbclid from addresses, and open AMP pages from the publisher.", "stripTracking", p["stripTracking"].as_bool().unwrap_or(true)))
+            (setting_toggle("Hide your local IP address", "WebRTC calls won’t reveal your network address. WebKit tabs always do this.", "hideLocalIP", p["hideLocalIP"].as_bool().unwrap_or(true)))
             (module_toggle(s, "cookie-banners", "Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer."))
         }
         (filter_lists(s))
