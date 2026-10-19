@@ -29,6 +29,8 @@ final class BrowserFeatures {
     /// A sign-in waiting for Save, Never or Not now. The password never reaches the interface.
     private var passwordPrompt: (profileID: UUID, credential: LocalCredential, update: Bool)?
     private(set) var tabResources: [[String: Any]] = []
+    /// A capture open in the markup editor, as a PNG data address, with the page title for saving.
+    private var markup: (image: String, title: String)?
     /// The feed each tab's page advertises, with the address it was found on.
     private var pageFeeds: [UUID: (page: URL, feed: String)] = [:]
     private(set) var audible = Set<UUID>()
@@ -98,6 +100,7 @@ final class BrowserFeatures {
         if let siteData { snapshot["siteData"] = siteData }
         snapshot["tabResources"] = tabResources
         snapshot["breakMode"] = breakMode
+        if let markup { snapshot["markupImage"] = markup.image }
         if let blocked = model.activeWebTab.blockedOnPage { snapshot["blockedCount"] = blocked }
         if let found = pageFeeds[model.session.selectedTabID], found.page == model.activeWebTab.url,
            !(app.library.preferences.feeds ?? []).contains(where: { $0.profileID == model.session.profileID && $0.url.absoluteString == found.feed }) {
@@ -660,14 +663,15 @@ final class BrowserFeatures {
                     if mode == "full" { let file = try await tab.fullPageCapture(); self?.save(file.data, name: title, type: file.type) }
                     else {
                         let image = try await tab.capturePNG()
-                        if mode == "copy" { self?.copyImage(image) } else { self?.save(image, name: title, type: "png") }
+                        if mode == "markup" { self?.openMarkup(image, title: title) }
+                        else if mode == "copy" { self?.copyImage(image) } else { self?.save(image, name: title, type: "png") }
                     }
                 } catch { self?.app.notice = error.localizedDescription }
             }
         case "captureArea":
             guard let model, let x = command["x"] as? Double, let y = command["y"] as? Double,
                   let width = command["width"] as? Double, let height = command["height"] as? Double else { break }
-            let tab = model.activeWebTab, title = model.selectedTab.title, copy = command["copy"] as? Bool == true
+            let tab = model.activeWebTab, title = model.selectedTab.title, copy = command["copy"] as? Bool == true, markup = command["markup"] as? Bool == true
             Task { @MainActor [weak self] in
                 do {
                     let png = try await tab.capturePNG()
@@ -677,9 +681,16 @@ final class BrowserFeatures {
                     guard let cropped = image.cropping(to: rect), let data = NSBitmapImageRep(cgImage: cropped).representation(using: .png, properties: [:]) else {
                         throw ValidationError("That area is outside the page.")
                     }
-                    if copy { self?.copyImage(data) } else { self?.save(data, name: title, type: "png") }
+                    if markup { self?.openMarkup(data, title: title) }
+                    else if copy { self?.copyImage(data) } else { self?.save(data, name: title, type: "png") }
                 } catch { self?.app.notice = error.localizedDescription }
             }
+        case "markupClose": markup = nil
+        case "markupSave":
+            guard let current = markup, let raw = command["data"] as? String, raw.hasPrefix("data:image/png;base64,"),
+                  let png = Data(base64Encoded: String(raw.dropFirst("data:image/png;base64,".count))), NSImage(data: png) != nil else { break }
+            markup = nil
+            if command["copy"] as? Bool == true { copyImage(png) } else { save(png, name: current.title, type: "png") }
         case "splitAxis", "splitRatio":
             guard let model else { break }
             var configuration = model.configuration
@@ -937,6 +948,24 @@ final class BrowserFeatures {
         if let content = UTType(filenameExtension: type) { panel.allowedContentTypes = [content] }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try data.write(to: url, options: .atomic) } catch { app.notice = error.localizedDescription }
+    }
+    /// Opens a capture in the markup editor, downsized so it stays responsive.
+    private func openMarkup(_ png: Data, title: String) {
+        guard let image = NSImage(data: png), let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        var data = png
+        if source.width > 2400, let rep = NSBitmapImageRep(data: png) {
+            let scale = 2400 / CGFloat(source.width)
+            let width = 2400, height = max(1, Int(CGFloat(source.height) * scale))
+            if let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+               let cg = rep.cgImage {
+                context.interpolationQuality = .high
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+                if let scaled = context.makeImage(), let encoded = NSBitmapImageRep(cgImage: scaled).representation(using: .png, properties: [:]) { data = encoded }
+            }
+        }
+        markup = ("data:image/png;base64," + data.base64EncodedString(), title)
+        refresh()
     }
     private func copyImage(_ png: Data) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setData(png, forType: .png)

@@ -14,7 +14,7 @@ pub const OPS: &[&str] = &[
     "find-step", "find-close", "address-input", "suggest-move", "suggest-accept", "page-command",
     "nav-history", "go-history", "site-setting", "clear-data", "site-data", "edit-bookmark", "reading",
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "fake-history", "reader-speak", "delete-space",
-    "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
+    "delete-profile", "capture-mode", "capture-area", "markup", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
 ];
@@ -1007,12 +1007,13 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 return;
             }
             match value {
-                "visible" | "copy" | "full" => {
+                "visible" | "copy" | "full" | "markup" => {
                     commands.push(json!({"op":"captureImage","mode":value}));
                     s.menu.clear();
                 }
-                "area" => {
+                "area" | "area-markup" => {
                     s.capture_select = true;
+                    s.capture_markup = value == "area-markup";
                     s.menu.clear();
                 }
                 "cancel" => s.capture_select = false,
@@ -1023,11 +1024,23 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             let n = |k: &str| r[k].as_f64().filter(|v| v.is_finite() && *v >= 0. && *v <= 20_000.);
             if let (Some(x), Some(y), Some(w), Some(h)) = (n("x"), n("y"), n("width"), n("height")) {
                 if w >= 4. && h >= 4. {
-                    commands.push(json!({"op":"captureArea","x":x,"y":y,"width":w,"height":h,"copy":flag(r,"copy")}));
+                    commands.push(json!({"op":"captureArea","x":x,"y":y,"width":w,"height":h,"copy":flag(r,"copy"),"markup":s.capture_markup}));
                 }
             }
             s.capture_select = false;
+            s.capture_markup = false;
         }
+        // The markup editor: the interface draws on the capture and sends back a PNG.
+        "markup" => match value {
+            "save" | "copy" => {
+                let data = text(r, "data");
+                if data.starts_with("data:image/png;base64,") && data.len() <= 40 * 1024 * 1024 {
+                    commands.push(json!({"op":"markupSave","data":data,"copy":value == "copy"}));
+                }
+            }
+            "cancel" => commands.push(json!({"op":"markupClose"})),
+            _ => {}
+        },
         "split-axis" => {
             if ["sideBySide", "stacked"].contains(&value) {
                 commands.push(json!({"op":"splitAxis","value":value}));

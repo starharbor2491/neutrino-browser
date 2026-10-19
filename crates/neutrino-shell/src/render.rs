@@ -764,7 +764,7 @@ fn browser(s: &Shell, preview: bool) -> Markup {
             }} @else if let Some(message)=s.snapshot["pageError"].as_str(){(page_error(message,text(s.active(),"id")))}
             @else if !text(s.active(),"url").is_empty() {div class="native-page" data-page=(text(s.active(),"id")){(page_backdrop(s,text(s.active(),"id")))@if preview {div class="preview-webpage"{p{"Your page"}small{(host(text(s.active(),"url")))}}}}}
             @else {(vacant(s))}
-            @if !preview {(crate::views::capture_overlay(s))}
+            @if !preview {(crate::views::capture_overlay(s))(crate::views::markup_editor(s))}
         }
         @if panel {(workspace_panel(s,if panel_key.is_empty(){"bookmarks"}else{panel_key}))}}
         @if horizontal && placement=="bottom"{(horizontal_tabs(s,preview))}

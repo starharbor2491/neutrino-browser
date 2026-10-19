@@ -442,12 +442,90 @@
     patching = false;
     revealActiveTab();
     updateBookmarkOverflow();
+    updateMarkup();
     updateClocks();
     applySchedule();
     updateSounds();
     scalePreview();
     scheduleGeometry();
   }
+  // Markup editor: strokes stay here and are redrawn after every render, so re-rendering never loses them.
+  const markup = { image: null, source: "", strokes: [], tool: "pen", color: "#ff3b30", drawing: null };
+  function updateMarkup() {
+    const canvas = root.querySelector(".markup-canvas");
+    if (!canvas) { markup.strokes = []; markup.source = ""; markup.image = null; return; }
+    const source = canvas.dataset.markupImage;
+    for (const b of root.querySelectorAll("[data-markup-tool]")) b.setAttribute("aria-pressed", String(b.dataset.markupTool === markup.tool));
+    for (const b of root.querySelectorAll("[data-markup-color]")) b.setAttribute("aria-pressed", String(b.dataset.markupColor === markup.color));
+    if (source !== markup.source) {
+      markup.source = source; markup.strokes = []; markup.image = new Image();
+      markup.image.onload = () => drawMarkup();
+      markup.image.src = source;
+    } else drawMarkup();
+  }
+  function drawMarkup() {
+    const canvas = root.querySelector(".markup-canvas"), image = markup.image;
+    if (!canvas || !image || !image.complete || !image.naturalWidth) return;
+    if (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight) { canvas.width = image.naturalWidth; canvas.height = image.naturalHeight; }
+    const g = canvas.getContext("2d");
+    g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+    g.drawImage(image, 0, 0);
+    for (const stroke of markup.strokes.concat(markup.drawing ? [markup.drawing] : [])) {
+      const scale = canvas.width / 1000;
+      g.strokeStyle = stroke.color; g.lineCap = "round"; g.lineJoin = "round";
+      g.globalAlpha = stroke.tool === "highlight" ? 0.35 : 1;
+      g.lineWidth = (stroke.tool === "highlight" ? 18 : 4) * Math.max(1, scale);
+      g.beginPath();
+      if (stroke.tool === "box" && stroke.points.length > 1) {
+        const [a, b] = [stroke.points[0], stroke.points[stroke.points.length - 1]];
+        g.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+      } else {
+        stroke.points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+        g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+  }
+  function markupPoint(e) {
+    const canvas = e.target.closest(".markup-canvas"), r = canvas.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * canvas.width, ((e.clientY - r.top) / r.height) * canvas.height];
+  }
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest?.(".markup-canvas") || e.button !== 0) return;
+    e.target.setPointerCapture(e.pointerId);
+    markup.drawing = { tool: markup.tool, color: markup.color, points: [markupPoint(e)] };
+    drawMarkup();
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!markup.drawing || !e.target.closest?.(".markup-canvas")) return;
+    markup.drawing.points.push(markupPoint(e));
+    if (markup.drawing.points.length > 5000) markup.drawing.points.shift();
+    drawMarkup();
+  });
+  document.addEventListener("pointerup", () => {
+    if (!markup.drawing) return;
+    if (markup.drawing.points.length > 1) markup.strokes.push(markup.drawing);
+    markup.drawing = null; drawMarkup();
+  });
+  document.addEventListener("click", (e) => {
+    const tool = e.target.closest?.("[data-markup-tool]"), color = e.target.closest?.("[data-markup-color]");
+    const undo = e.target.closest?.("[data-markup-undo]"), out = e.target.closest?.("[data-markup-export]");
+    if (tool) markup.tool = tool.dataset.markupTool;
+    else if (color) markup.color = color.dataset.markupColor;
+    else if (undo) markup.strokes.pop();
+    else if (out) {
+      drawMarkup();
+      const canvas = root.querySelector(".markup-canvas");
+      if (canvas) send({ op: "markup", value: out.dataset.markupExport, data: canvas.toDataURL("image/png") });
+      return;
+    } else return;
+    updateMarkup();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!root.querySelector(".markup-editor")) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); send({ op: "markup", value: "cancel" }); }
+    else if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); markup.strokes.pop(); drawMarkup(); }
+  }, true);
   // A menu or dialog's text field takes focus before its header's Close button.
   function firstControl(container) {
     return (

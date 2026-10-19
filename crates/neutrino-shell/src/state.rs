@@ -56,6 +56,8 @@ pub struct Shell {
     pub find_query: String,
     pub find_index: usize,
     pub capture_select: bool,
+    /// The area being selected goes to the markup editor instead of a file.
+    pub capture_markup: bool,
     pub rail_peek: bool,
     pub recording: String,
     pub library_filter: String,
@@ -103,6 +105,7 @@ impl Default for Shell {
             find_query: String::new(),
             find_index: 0,
             capture_select: false,
+            capture_markup: false,
             rail_peek: false,
             recording: String::new(),
             library_filter: String::new(),
@@ -1093,7 +1096,7 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"moduleSettingsID":if self.screen=="modules"{self.selected_module.as_str()}else{""},"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu() || self.capture_select || self.rail_peek || flag(&self.snapshot,"breakMode"),"shortcuts":crate::features::shortcuts(self).into_iter().map(|(b,a)|json!([b,a])).collect::<Vec<_>>(),"findOpen":self.find_open,"performanceVisible":self.screen=="settings" && self.section=="performance" || self.visible_panel_key()=="resources","focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"moduleSettingsID":if self.screen=="modules"{self.selected_module.as_str()}else{""},"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu() || self.capture_select || self.rail_peek || flag(&self.snapshot,"breakMode") || text(&self.snapshot,"markupImage").starts_with("data:image/png"),"shortcuts":crate::features::shortcuts(self).into_iter().map(|(b,a)|json!([b,a])).collect::<Vec<_>>(),"findOpen":self.find_open,"performanceVisible":self.screen=="settings" && self.section=="performance" || self.visible_panel_key()=="resources","focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
     }
     pub fn visible_panel_key(&self) -> &str {
         if ["browse", "editor"].contains(&self.screen.as_str()) {

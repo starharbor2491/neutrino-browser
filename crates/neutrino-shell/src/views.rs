@@ -298,6 +298,9 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
             button class="menu-item" data-op="capture-mode" data-value="visible"{(icon("camera"))span{"Visible part"}}
             button class="menu-item" data-op="capture-mode" data-value="full"{(icon("download"))span{"Full page"}}
             button class="menu-item" data-op="capture-mode" data-value="copy"{(icon("copy"))span{"Copy visible part"}}
+            div class="menu-separator"{}
+            button class="menu-item" data-op="capture-mode" data-value="area-markup"{(icon("edit"))span{"Select an area and mark up…"}}
+            button class="menu-item" data-op="capture-mode" data-value="markup"{(icon("edit"))span{"Mark up visible part…"}}
         },
         "page-style" => {
             let site = host(text(s.active(), "url"));
@@ -579,6 +582,28 @@ pub fn capture_overlay(s: &Shell) -> Markup {
     }}}
 }
 
+/// Draw on a capture before saving or copying it, as Opera's Snapshot and Edge's web capture allow.
+pub fn markup_editor(s: &Shell) -> Markup {
+    let image = text(&s.snapshot, "markupImage");
+    html! {@if image.starts_with("data:image/png;base64,") {div class="markup-editor" role="dialog" aria-label="Mark up capture"{
+        div class="markup-toolbar" role="toolbar" aria-label="Markup tools"{
+            @for (tool, label, glyph) in [("pen", "Pen", "edit"), ("highlight", "Highlighter", "minus"), ("box", "Box", "focus")] {
+                button class="icon-button markup-tool" data-markup-tool=(tool) aria-label=(label) title=(label){(icon(glyph))}
+            }
+            span class="strip-divider"{}
+            @for (color, label) in [("#ff3b30", "Red"), ("#ffcc00", "Yellow"), ("#34c759", "Green"), ("#0a84ff", "Blue")] {
+                button class="markup-color" data-markup-color=(color) style=(format!("--swatch:{color}")) aria-label=(label) title=(label){}
+            }
+            span class="strip-divider"{}
+            button class="icon-button" data-markup-undo="true" aria-label="Undo" title="Undo (⌘Z)"{(icon("undo"))}
+            span class="spacer"{}
+            button class="button quiet" data-op="markup" data-value="cancel"{"Cancel"}
+            button class="button" data-markup-export="copy"{"Copy"}
+            button class="button primary" data-markup-export="save"{"Save…"}
+        }
+        div class="markup-stage"{canvas class="markup-canvas" data-markup-image=(image) aria-label="Capture"{}}
+    }}}
+}
 pub fn break_overlay(s: &Shell) -> Markup {
     html! {@if flag(&s.snapshot, "breakMode") {div class="break-overlay" role="dialog" aria-label="Break mode"{
         div class="break-card"{(icon("pause"))h2{"Taking a break"}p{"Sound and video are paused and pages are hidden."}time class="break-clock" data-clock="true"{}button class="button primary" data-op="page-command" data-value="break"{"Resume browsing"}}

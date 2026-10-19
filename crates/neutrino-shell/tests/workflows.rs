@@ -399,6 +399,20 @@ fn modules_added_by_updates_follow_the_layout_defaults() {
     assert_eq!(default("org.neutrino.tab-sleep", "arc"), json!(true));
 }
 #[test]
+fn captures_can_be_marked_up_before_saving() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"capture-mode","value":"area-markup"}));
+    assert!(s.capture_select && s.capture_markup);
+    let r = s.dispatch(json!({"op":"capture-area","x":10,"y":10,"width":100,"height":80}));
+    assert_eq!(commands(&r)[0]["markup"], json!(true));
+    s.snapshot["markupImage"] = json!("data:image/png;base64,iVBORw0KGgo=");
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(r["html"].as_str().unwrap().contains("markup-canvas") && r["overlay"] == json!(true));
+    let r = s.dispatch(json!({"op":"markup","value":"copy","data":"data:image/png;base64,QUJD"}));
+    assert_eq!(commands(&r)[0], json!({"op":"markupSave","data":"data:image/png;base64,QUJD","copy":true}));
+    assert!(commands(&s.dispatch(json!({"op":"markup","value":"save","data":"javascript:alert(1)"}))).is_empty());
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));
