@@ -404,7 +404,6 @@ pub fn parse_rules(source: &str) -> Vec<String> {
     parse_rules_up_to(source, 5000)
 }
 
-/// Whether a card number passes the Luhn check card issuers use.
 /// The UTC year and month of a time in seconds since 2001-01-01.
 fn year_month(seconds: f64) -> (u32, u32) {
     // Days since 0000-03-01, from Howard Hinnant's civil_from_days.
@@ -417,6 +416,7 @@ fn year_month(seconds: f64) -> (u32, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     ((yoe + era * 400 + i64::from(month <= 2)) as u32, month as u32)
 }
+/// Whether a card number passes the Luhn check card issuers use.
 fn luhn(number: &str) -> bool {
     let digits: Vec<u32> = number.chars().filter_map(|c| c.to_digit(10)).collect();
     (12..=19).contains(&digits.len())
@@ -435,6 +435,77 @@ fn hostname(domain: &str) -> bool {
 /// Options a domain rule may carry and still block the whole domain's
 /// third-party requests, which is how Neutrino applies every rule.
 const DOMAIN_RULE_OPTIONS: [&str; 5] = ["third-party", "3p", "all", "important", "document"];
+
+/// Options an address rule may carry. Resource types only narrow a rule, so
+/// applying it to every subresource is broader but never misses; others are skipped.
+const PATTERN_OPTIONS: [&str; 18] = ["third-party", "3p", "script", "image", "stylesheet", "css", "subdocument", "frame",
+    "xmlhttprequest", "xhr", "media", "object", "ping", "other", "font", "websocket", "important", "all"];
+
+/// Address rules anchored to a host, such as `||example.com/ads/*` or `||cdn.example^*banner`,
+/// as `||host<rest>` with `$third-party` when the rule says so. Hosts the list exempts
+/// with an `@@` rule are left out, since their exceptions aren't applied.
+pub fn parse_patterns_up_to(source: &str, limit: usize) -> Vec<String> {
+    let host_end = |rule: &str| rule.find(['^', '/', '*', '?', ':', '$', '|']).unwrap_or(rule.len());
+    let exempt: std::collections::HashSet<String> = source.lines().take(400_000)
+        .filter_map(|l| l.trim().strip_prefix("@@||").map(|r| r[..host_end(r)].to_ascii_lowercase())).collect();
+    let mut out = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for line in source.lines().take(400_000) {
+        let Some(rule) = line.trim().strip_prefix("||") else { continue };
+        let (pattern, options) = rule.split_once('$').unwrap_or((rule, ""));
+        if !options.is_empty() && !options.split(',').all(|o| PATTERN_OPTIONS.contains(&o)) {
+            continue;
+        }
+        let third = options.split(',').any(|o| o == "third-party" || o == "3p");
+        let pattern = pattern.to_ascii_lowercase();
+        let (host, rest) = pattern.split_at(host_end(&pattern));
+        let body = rest.strip_suffix('|').unwrap_or(rest);
+        // A rule that is only its host is a domain rule; ports and regular expressions are left out.
+        if body.trim_end_matches(['^', '*']).is_empty() || !hostname(host) || exempt.contains(host) || rest.starts_with(':') {
+            continue;
+        }
+        if body.len() > 200 || body.matches('*').count() > 3 || !body.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-*^?=&%~,;".contains(&b)) {
+            continue;
+        }
+        let rule = format!("||{host}{rest}{}", if third { "$third-party" } else { "" });
+        if seen.insert(rule.clone()) {
+            out.push(rule);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// A WebKit `url-filter` for an address rule from `parse_patterns_up_to`, and whether
+/// it applies only to third-party requests.
+pub fn pattern_url_filter(rule: &str) -> Option<(String, bool)> {
+    let (pattern, options) = rule.split_once('$').unwrap_or((rule, ""));
+    let rest = pattern.strip_prefix("||")?;
+    let end = rest.find(['^', '/', '*', '?'])?;
+    let (host, tail) = rest.split_at(end);
+    if !hostname(host) {
+        return None;
+    }
+    let (tail, anchored) = tail.strip_suffix('|').map_or((tail, false), |t| (t, true));
+    let mut filter = format!(r"^[a-z]+://([^/]+\.)?{}", host.replace('.', r"\."));
+    let chars: Vec<char> = tail.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        match c {
+            '*' => filter.push_str(".*"),
+            // A separator; at the end it may also be the end of the address, which WebKit can't say, so it is left out.
+            '^' => if i + 1 < chars.len() { filter.push_str("[/:?&=]") },
+            '.' | '?' => { filter.push('\\'); filter.push(*c) }
+            c if c.is_ascii_alphanumeric() || "/_-=&%~,;".contains(*c) => filter.push(*c),
+            _ => return None,
+        }
+    }
+    if anchored {
+        filter.push('$');
+    }
+    Some((filter, options == "third-party"))
+}
 
 /// Domain rules from a subscribed filter list, which may hold tens of thousands.
 pub fn parse_rules_up_to(source: &str, limit: usize) -> Vec<String> {
@@ -1626,6 +1697,17 @@ mod tests {
         assert!(style.contains(".promo{display:none!important}"));
         let pick = page_script(&json!({"kind":"pick","label":"Zap \"it\""})).unwrap();
         assert!(pick.starts_with("new Promise(") && pick.contains(r#""Zap \"it\"""#));
+    }
+
+    #[test]
+    fn address_rules_anchor_to_a_host_and_become_webkit_filters() {
+        let list = "[Adblock Plus 2.0]\n||ads.example.com^\n||example.com/ads/*$image,third-party\n||cdn.example.org^*banner|\n||tracker.example/pixel?id=\n||exempt.example/ads/\n@@||exempt.example/ads/ok.js\n||a.example/x$domain=b.example\n||a.example/x$~third-party\n||a.example:8080/x\n||bad host/x\n/generic/ads/\n||a.example/(x)\n";
+        let rules = parse_patterns_up_to(list, 100);
+        assert_eq!(rules, vec!["||example.com/ads/*$third-party", "||cdn.example.org^*banner|", "||tracker.example/pixel?id="]);
+        assert_eq!(pattern_url_filter(&rules[0]), Some((r"^[a-z]+://([^/]+\.)?example\.com/ads/.*".to_string(), true)));
+        assert_eq!(pattern_url_filter(&rules[1]), Some((r"^[a-z]+://([^/]+\.)?cdn\.example\.org[/:?&=].*banner$".to_string(), false)));
+        assert_eq!(pattern_url_filter(&rules[2]).unwrap().0, r"^[a-z]+://([^/]+\.)?tracker\.example/pixel\?id=");
+        assert!(pattern_url_filter("||nohost").is_none() && pattern_url_filter("example.com/x").is_none());
     }
 
     #[test]

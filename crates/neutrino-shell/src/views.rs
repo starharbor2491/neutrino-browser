@@ -1042,7 +1042,10 @@ fn filter_lists(s: &Shell) -> Markup {
     let status = |l: Option<&Value>| -> String {
         match l {
             Some(l) if !text(l, "error").is_empty() => text(l, "error").to_string(),
-            Some(l) if l["domains"].is_number() => format!("{} sites and {} element rules", l["domains"].as_u64().unwrap_or(0), l["cosmetic"].as_u64().unwrap_or(0)),
+            Some(l) if l["domains"].is_number() => match l["patterns"].as_u64().unwrap_or(0) {
+                0 => format!("{} sites and {} element rules", l["domains"].as_u64().unwrap_or(0), l["cosmetic"].as_u64().unwrap_or(0)),
+                n => format!("{} sites, {n} address rules and {} element rules", l["domains"].as_u64().unwrap_or(0), l["cosmetic"].as_u64().unwrap_or(0)),
+            },
             Some(l) if flag(l, "enabled") => "Downloading…".into(),
             _ => String::new(),
         }

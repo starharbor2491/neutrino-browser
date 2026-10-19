@@ -588,7 +588,7 @@ enum RuleListCache {
     static func source(ads: Bool, exceptions: [String], custom: [String], subscribed: [String]) -> (String, String)? {
         let key = [ads ? "ads" : "trackers", exceptions.joined(separator: ","), custom.joined(separator: ","), String(subscribed.count), String(subscribed.hashValue)]
         if key == lastKey, let last { return (last.identifier, last.source) }
-        guard let rules = try? ContentBlocking.webKitRules(ads: ads, exceptions: exceptions, custom: custom, subscribed: Array(subscribed.prefix(110_000))) else { return nil }
+        guard let rules = try? ContentBlocking.webKitRules(ads: ads, exceptions: exceptions, custom: custom, subscribed: Array(subscribed.prefix(130_000))) else { return nil }
         let digest = SHA256.hash(data: Data(rules.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         let identifier = "org.neutrino.blocking." + digest
         lastKey = key; last = (identifier, rules)

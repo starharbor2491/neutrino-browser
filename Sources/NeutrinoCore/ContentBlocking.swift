@@ -18,10 +18,10 @@ public enum ContentBlocking {
   public static func strippingTracking(_ url: URL) -> URL? {
     (try? RustCore.request(["op": "stripTracking", "url": url.absoluteString]) as? String).flatMap(URL.init(string:))
   }
-  /// A subscribed filter list's domain rules and element rules.
-  public static func parseFilterList(_ text: String) throws -> (domains: [String], cosmetic: [String]) {
+  /// A subscribed filter list's domain rules, element rules and address rules anchored to a host.
+  public static func parseFilterList(_ text: String) throws -> (domains: [String], cosmetic: [String], patterns: [String]) {
     let value = try RustCore.request(["op": "parseFilterList", "value": text]) as? [String: Any]
-    return (value?["domains"] as? [String] ?? [], value?["cosmetic"] as? [String] ?? [])
+    return (value?["domains"] as? [String] ?? [], value?["cosmetic"] as? [String] ?? [], value?["patterns"] as? [String] ?? [])
   }
   /// Domains from filter-list text: plain domains, hosts-file lines and `||domain^` rules.
   public static func parseRules(_ text: String) -> [String] {

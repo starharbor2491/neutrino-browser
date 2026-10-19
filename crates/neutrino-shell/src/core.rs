@@ -146,6 +146,16 @@ fn blocked_domains(r: &Value) -> Vec<String> {
 /// WebKit content rules for a blocking level, with sites whose Shields are down exempt.
 fn webkit_rules(r: &Value) -> Value {
     let mut rules: Vec<Value> = blocked_domains(r).iter().map(|d| json!({"trigger":{"url-filter":format!(r"^https?://([^/]+\.)?{}[/:]",d.replace('.',r"\.")),"resource-type":["image","style-sheet","script","font","raw","media","popup"]},"action":{"type":"block"}})).collect();
+    // Address rules from subscribed lists arrive among the domains, marked by their leading "||".
+    for rule in array(&r["subscribed"]).iter().filter_map(Value::as_str).filter(|v| v.starts_with("||")).take(20_000) {
+        if let Some((filter, third)) = crate::features::pattern_url_filter(rule) {
+            let mut trigger = json!({"url-filter":filter,"resource-type":["image","style-sheet","script","font","raw","media","popup"]});
+            if third {
+                trigger["load-type"] = json!(["third-party"]);
+            }
+            rules.push(json!({"trigger":trigger,"action":{"type":"block"}}));
+        }
+    }
     let exempt: Vec<Value> = array(&r["exceptions"]).iter().filter_map(Value::as_str)
         .filter(|h| !h.is_empty() && h.len() <= 253 && h.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.".contains(&b)))
         .take(500).map(|h| json!(format!("*{}", h.to_ascii_lowercase()))).collect();
@@ -233,7 +243,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
             if source.len() > 20 * 1024 * 1024 {
                 return Err("That filter list is larger than 20 MB.");
             }
-            json!({"domains":crate::features::parse_rules_up_to(source, 60_000),"cosmetic":crate::features::parse_cosmetic_up_to(source, 20_000)})
+            json!({"domains":crate::features::parse_rules_up_to(source, 60_000),"cosmetic":crate::features::parse_cosmetic_up_to(source, 20_000),"patterns":crate::features::parse_patterns_up_to(source, 20_000)})
         }
         "webKitRules" => webkit_rules(&r),
         "reader" => json!(reader(text(&r,"html"))?),

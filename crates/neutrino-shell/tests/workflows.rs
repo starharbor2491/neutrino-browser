@@ -574,6 +574,20 @@ fn playlist_plays_unread_items_in_turn() {
     assert_eq!(commands(&s.dispatch(json!({"op":"reading","value":"play-next"})))[0], json!({"op":"playlist","value":"next"}));
 }
 #[test]
+fn subscribed_address_rules_reach_webkit_and_not_the_domain_list() {
+    let parsed = neutrino_shell::core_request(json!({"op":"parseFilterList","value":"[Adblock Plus 2.0]\n||ads.example^\n||news.example/ads/*\n"})).unwrap();
+    assert_eq!(parsed["patterns"], json!(["||news.example/ads/*"]));
+    let mut subscribed: Vec<Value> = parsed["domains"].as_array().unwrap().clone();
+    subscribed.extend(parsed["patterns"].as_array().unwrap().iter().cloned());
+    let rules = neutrino_shell::core_request(json!({"op":"webKitRules","subscribed":subscribed,"exceptions":["shields.example"]})).unwrap();
+    let list = rules.as_array().unwrap();
+    assert!(list.iter().any(|r| r["trigger"]["url-filter"] == r"^[a-z]+://([^/]+\.)?news\.example/ads/.*"));
+    // Exceptions stay last, and the domain list keeps only domains.
+    assert_eq!(list.last().unwrap()["action"]["type"], "ignore-previous-rules");
+    let domains = neutrino_shell::core_request(json!({"op":"blockingDomains","subscribed":subscribed})).unwrap();
+    assert!(domains.as_array().unwrap().iter().all(|d| !d.as_str().unwrap().contains('|')));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

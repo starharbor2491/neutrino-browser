@@ -387,6 +387,8 @@ public struct FilterList: Identifiable, Codable, Equatable, Sendable {
     public var updatedAt: Date?
     public var domains: Int?
     public var cosmetic: Int?
+    /// Address rules anchored to a host, such as ||example.com/ads/.
+    public var patterns: Int?
     public var error: String?
     public init(id: String, title: String, url: URL, enabled: Bool = true) { self.id = id; self.title = title; self.url = url; self.enabled = enabled }
 }

@@ -6,15 +6,16 @@ import NeutrinoCore
 /// downloads from its publisher, is parsed on this Mac and refreshes once a week.
 extension AppState {
     private var filterListFolder: URL { dataDirectory.appendingPathComponent("FilterLists", isDirectory: true) }
-    private struct SavedList: Codable { var domains: [String]; var cosmetic: [String] }
+    private struct SavedList: Codable { var domains: [String]; var cosmetic: [String]; var patterns: [String]? }
 
     /// Loads the saved rules of every enabled list and reapplies blocking.
     func loadFilterLists() {
-        var domains: [String] = [], generic: [String] = [], bySite: [String: [String]] = [:]
+        var domains: [String] = [], patterns: [String] = [], generic: [String] = [], bySite: [String: [String]] = [:]
         for list in library.preferences.filterLists ?? [] where list.enabled {
             guard let data = try? Data(contentsOf: filterListFolder.appendingPathComponent(list.id + ".json")),
                   let saved = try? JSONDecoder().decode(SavedList.self, from: data) else { continue }
             domains += saved.domains
+            patterns += saved.patterns ?? []
             for rule in saved.cosmetic {
                 guard let marker = rule.range(of: "##") else { continue }
                 let hosts = rule[..<marker.lowerBound].split(separator: ",").map(String.init).filter { !$0.hasPrefix("~") }
@@ -22,7 +23,8 @@ extension AppState {
                 else { for host in hosts { bySite[host, default: []].append(rule) } }
             }
         }
-        filterListDomains = Array(domains.prefix(120_000))
+        // Address rules ride along with the domains, marked by their leading "||".
+        filterListDomains = Array(domains.prefix(110_000)) + Array(patterns.prefix(20_000))
         filterListGenericCosmetic = Array(generic.prefix(4000))
         filterListSiteCosmetic = bySite
         for window in windows.values { window.model?.updateBlockingPolicy() }
@@ -62,10 +64,10 @@ extension AppState {
                 guard data.count <= 20_000_000 else { throw ValidationError("The list is larger than 20 MB.") }
                 let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
                 let parsed = try ContentBlocking.parseFilterList(text)
-                guard !parsed.domains.isEmpty || !parsed.cosmetic.isEmpty else { throw ValidationError("No rules Neutrino can use were found in this list.") }
-                try JSONEncoder().encode(SavedList(domains: parsed.domains, cosmetic: parsed.cosmetic))
+                guard !parsed.domains.isEmpty || !parsed.cosmetic.isEmpty || !parsed.patterns.isEmpty else { throw ValidationError("No rules Neutrino can use were found in this list.") }
+                try JSONEncoder().encode(SavedList(domains: parsed.domains, cosmetic: parsed.cosmetic, patterns: parsed.patterns))
                     .write(to: filterListFolder.appendingPathComponent(list.id + ".json"), options: .atomic)
-                result.updatedAt = Date(); result.domains = parsed.domains.count; result.cosmetic = parsed.cosmetic.count; result.error = nil
+                result.updatedAt = Date(); result.domains = parsed.domains.count; result.cosmetic = parsed.cosmetic.count; result.patterns = parsed.patterns.count; result.error = nil
             } catch {
                 result.error = error.localizedDescription
             }

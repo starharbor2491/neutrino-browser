@@ -18,6 +18,7 @@
 #include <vector>
 #include "NeutrinoEngineABI.h"
 #include "NeutrinoTrackingStrip.h"
+#include "NeutrinoFilterMatch.h"
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 #include "include/cef_cookie.h"
@@ -507,25 +508,33 @@ struct BlockPolicy {
   /// Requests cancelled since the tab group opened, for the shield count.
   std::atomic<uint64_t> blocked{0};
   std::shared_ptr<const std::unordered_set<std::string>> domains;
+  /// Address rules anchored to a host, from subscribed filter lists.
+  std::shared_ptr<const neutrino_filter::Index> patterns;
 };
 class BlockedResourceHandler final : public CefResourceRequestHandler {
  public:
   explicit BlockedResourceHandler(std::shared_ptr<BlockPolicy> policy) : policy_(std::move(policy)) {}
-  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame>,
+  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,
       CefRefPtr<CefRequest> request,CefRefPtr<CefCallback>) override {
     if (!policy_->enabled.load()) return RV_CONTINUE;
-    auto domains=std::atomic_load(&policy_->domains); if (!domains) return RV_CONTINUE;
-    CefURLParts parts; if (!CefParseURL(request->GetURL(),parts)) return RV_CONTINUE;
+    auto domains=std::atomic_load(&policy_->domains);
+    auto patterns=std::atomic_load(&policy_->patterns);
+    if (!domains && !patterns) return RV_CONTINUE;
+    const std::string url=request->GetURL().ToString();
+    CefURLParts parts; if (!CefParseURL(url,parts)) return RV_CONTINUE;
     const std::string scheme=CefString(&parts.scheme).ToString();
     if (scheme!="http" && scheme!="https") return RV_CONTINUE;
     std::string host=CefString(&parts.host).ToString();
     std::transform(host.begin(),host.end(),host.begin(),[](unsigned char ch){ return std::tolower(ch); });
     // The host and each parent domain: a.b.example.com, b.example.com, example.com, com.
-    for (size_t start=0; start<host.size();) {
+    if (domains) for (size_t start=0; start<host.size();) {
       if (domains->count(host.substr(start))) { policy_->blocked.fetch_add(1); return RV_CANCEL; }
       const size_t dot=host.find('.',start);
       if (dot==std::string::npos) break;
       start=dot+1;
+    }
+    if (patterns && neutrino_filter::Blocked(*patterns,url,frame ? frame->GetURL().ToString() : std::string())) {
+      policy_->blocked.fetch_add(1); return RV_CANCEL;
     }
     return RV_CONTINUE;
   }
@@ -609,8 +618,9 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
   uint64_t BlockedCount() const { return blocking_->blocked.load(); }
-  void SetBlocking(bool enabled,const std::vector<std::string>& domains) {
+  void SetBlocking(bool enabled,const std::vector<std::string>& domains,std::shared_ptr<const neutrino_filter::Index> patterns) {
     std::atomic_store(&blocking_->domains,std::make_shared<const std::unordered_set<std::string>>(domains.begin(),domains.end()));
+    std::atomic_store(&blocking_->patterns,std::move(patterns));
     blocking_->enabled.store(enabled);
   }
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>,
@@ -1500,14 +1510,18 @@ void Command(void* opaque,int command,const char* text,double value) {
     std::vector<std::string> domains; std::string source=text ? text : "";
     // Subscribed filter lists bring tens of thousands of domains.
     if (source.size()>4*1024*1024) return;
-    size_t offset=0;
+    // Lines starting with "||" are address rules anchored to a host.
+    auto patterns=std::make_shared<neutrino_filter::Index>();
+    size_t offset=0,rules=0;
     while (offset<source.size() && domains.size()<150000) {
       const size_t end=source.find('\n',offset);
       const std::string domain=source.substr(offset,end==std::string::npos ? end : end-offset);
-      if (!domain.empty() && domain.size()<=253 && domain.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-")==std::string::npos) domains.push_back(domain);
+      if (domain.compare(0,2,"||")==0) { if (rules<30000 && neutrino_filter::Add(*patterns,domain)) ++rules; }
+      else if (!domain.empty() && domain.size()<=253 && domain.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-")==std::string::npos) domains.push_back(domain);
       if (end==std::string::npos) break; offset=end+1;
     }
-    for (Page* member : Members(owner)) if (member->client) member->client->SetBlocking(value!=0,domains);
+    std::shared_ptr<const neutrino_filter::Index> shared=rules ? std::shared_ptr<const neutrino_filter::Index>(patterns) : nullptr;
+    for (Page* member : Members(owner)) if (member->client) member->client->SetBlocking(value!=0,domains,shared);
     return;
   }
   if (command==NEUTRINO_CEF_RESTORE_TABS) {

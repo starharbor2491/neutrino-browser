@@ -96,7 +96,7 @@ def build(work, arch):
     (package / "Contents/Resources/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     proof.checked(["codesign", "--force", "--sign", "-", package])
     proof.checked(["codesign", "--verify", "--deep", "--strict", package])
-    source_files = [ROOT / "ChromiumRuntime/NeutrinoChromiumBridge.mm", ROOT / "ChromiumRuntime/NeutrinoTrackingStrip.h", ROOT / "ChromiumRuntime/Helper.cc",
+    source_files = [ROOT / "ChromiumRuntime/NeutrinoChromiumBridge.mm", ROOT / "ChromiumRuntime/NeutrinoTrackingStrip.h", ROOT / "ChromiumRuntime/NeutrinoFilterMatch.h", ROOT / "ChromiumRuntime/Helper.cc",
                     ROOT / "ChromiumRuntime/CMakeLists.txt", ROOT / "ChromiumRuntime/Helper-Info.plist.in",
                     ROOT / "Sources/NeutrinoEngineABI/include/NeutrinoEngineABI.h", Path(__file__).resolve()]
     source_digests = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_files}
