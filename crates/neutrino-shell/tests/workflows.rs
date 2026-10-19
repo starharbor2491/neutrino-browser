@@ -378,6 +378,19 @@ fn reader_places_images_after_their_paragraph_and_reads_aloud() {
     assert_eq!(commands(&r)[0], json!({"op":"readerSpeak","value":"start"}));
 }
 #[test]
+fn boards_hold_page_captures() {
+    let mut s = shell();
+    s.snapshot["preferences"]["boards"] = json!([{"id":"b1","profileID":"p1","name":"Ideas","items":[
+        {"id":"i1","kind":"image","title":"Alpha","url":"https://example.com/a","text":"","x":24,"y":24}]}]);
+    s.snapshot["boardImages"] = json!({"i1":"data:image/jpeg;base64,QUJD"});
+    s.dispatch(json!({"op":"screen","value":"library"}));
+    let html = s.dispatch(json!({"op":"section","value":"boards"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("board-card image") && html.contains("src=\"data:image/jpeg;base64,QUJD\""));
+    let r = s.dispatch(json!({"op":"board","value":"add-capture","board":"b1"}));
+    assert_eq!(commands(&r)[0], json!({"op":"boardCapture","board":"b1"}));
+    assert!(commands(&s.dispatch(json!({"op":"board","value":"add-capture","board":"missing"}))).is_empty());
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

@@ -5278,6 +5278,25 @@ input[type="color"] {
 .board-card:active {
   cursor: grabbing;
 }
+.board-card.image {
+  padding: 6px 6px 8px;
+}
+.board-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  object-position: top;
+  border-radius: calc(6px * var(--sq));
+  margin-bottom: 6px;
+  pointer-events: none;
+}
+.board-image.placeholder {
+  display: grid;
+  place-items: center;
+  background: var(--hover);
+  color: var(--muted);
+}
 .board-card.note {
   background: color-mix(in oklab, #f6d365 70%, var(--elevated));
   color: #2b2410;

@@ -901,6 +901,8 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                     commands.push(json!({"op":"boardMove","board":board,"item":text(r,"item"),"x":x.round(),"y":y.round()}));
                 }
                 "remove" if exists => commands.push(json!({"op":"boardRemove","board":board,"item":text(r,"item")})),
+                // A picture of the current page, as Arc's Easels and Opera's Pinboards hold.
+                "add-capture" if exists && regular && !text(s.active(), "url").is_empty() => commands.push(json!({"op":"boardCapture","board":board})),
                 _ => {}
             }
         }

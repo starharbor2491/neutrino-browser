@@ -161,6 +161,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     /// The article's images for Reader, fetched and downsized: [{src (data URL), alt, anchor}].
     private var readerImages: [[String: String]] = []
     private var readerVoice: ReaderVoice?
+    private var boardsVisible = false
     private var assistantTask: Task<Void, Never>?
     private var assistantGeneration = UUID()
     private var previewStep: Int?
@@ -478,6 +479,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if let responseDocument, responseDocument != document { assistantResponse = ""; readerImages = []; readerVoice?.stop(); self.responseDocument = nil }
             snapshot["assistantResponse"] = assistantResponse
             snapshot["readerImages"] = readerImages
+            if boardsVisible, !model.isPrivate { snapshot["boardImages"] = features.boardImages(profileID: model.session.profileID) }
             snapshot["readerSpeaking"] = readerVoice?.speaking == true
             features.snapshot(into: &snapshot, model: model)
 
@@ -494,6 +496,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         if let section=result["librarySection"] as? String,["bookmarks","history","downloads","notes","archive"].contains(section),section != librarySection {
             librarySection=section;libraryPage=0;return synchronize()
         }
+        // Board pictures are sent only while a board is showing.
+        let showingBoards = result["librarySection"] as? String == "boards"
+        if showingBoards != boardsVisible { boardsVisible = showingBoards; if showingBoards { return synchronize() } }
         if downloadCenter != nil && !downloadScreenOpened { downloadScreenOpened = true; result = handle.dispatch(["op": "screen", "value": "library", "section": "downloads"]) }
         if let step = previewStep { result = handle.dispatch(["op": "setup-step", "value": step]); previewStep = nil }
         if let sheet = model?.sheet, sheet != lastSheet {

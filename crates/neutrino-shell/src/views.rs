@@ -707,11 +707,16 @@ pub fn boards(s: &Shell) -> Markup {
         }
         @if let Some(b) = selected {
             @let board = text(b, "id");
-            div class="board-actions"{button class="button" data-op="board" data-value="add-page" data-board=(board) disabled[text(s.active(),"url").is_empty()]{"Add current page"}button class="button" data-op="menu" data-value=(format!("board-note:{board}")){"Add note"}span class="spacer"{}button class="button quiet danger" data-op="board" data-value="delete" data-board=(board){"Delete board"}}
+            div class="board-actions"{button class="button" data-op="board" data-value="add-page" data-board=(board) disabled[text(s.active(),"url").is_empty()]{"Add current page"}button class="button" data-op="board" data-value="add-capture" data-board=(board) disabled[text(s.active(),"url").is_empty() || s.private()]{(icon("camera"))"Add capture"}button class="button" data-op="menu" data-value=(format!("board-note:{board}")){"Add note"}span class="spacer"{}button class="button quiet danger" data-op="board" data-value="delete" data-board=(board){"Delete board"}}
             div class="board-canvas" data-board=(board) aria-label=(format!("Board {}",text(b,"name"))){
                 @for item in array(&b["items"]) {
                     div class=(format!("board-card {}",text(item,"kind"))) data-item=(text(item,"id")) style=(format!("left:{}px;top:{}px",item["x"].as_f64().unwrap_or(0.),item["y"].as_f64().unwrap_or(0.))) tabindex="0"{
                         @if text(item,"kind")=="link" {button class="board-link" data-op="navigate" data-value=(text(item,"url")){(site(item))span{strong{(text(item,"title"))}small{(host(text(item,"url")))}}}}
+                        @else if text(item,"kind")=="image" {
+                            @let picture = text(&s.snapshot["boardImages"], text(item,"id"));
+                            @if picture.starts_with("data:image/") {img class="board-image" src=(picture) alt=(text(item,"title")) draggable="false";} @else {div class="board-image placeholder"{(icon("camera"))}}
+                            button class="board-link" data-op="navigate" data-value=(text(item,"url")){span{strong{(text(item,"title"))}small{(host(text(item,"url")))}}}
+                        }
                         @else {p{(text(item,"text"))}}
                         button class="icon-button board-remove" data-op="board" data-value="remove" data-board=(board) data-item=(text(item,"id")) aria-label="Remove from board"{(icon("close"))}
                     }

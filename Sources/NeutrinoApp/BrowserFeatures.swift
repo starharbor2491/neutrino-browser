@@ -573,7 +573,31 @@ final class BrowserFeatures {
         case "createBoard":
             guard regular, let name = command["name"] as? String else { break }
             app.library.preferences.boards = Array(((app.library.preferences.boards ?? []) + [Board(profileID: profileID, name: String(name.prefix(80)))]).suffix(50))
-        case "deleteBoard": if let id { app.library.preferences.boards?.removeAll { $0.id == id } }
+        case "deleteBoard":
+            if let id, let board = app.library.preferences.boards?.first(where: { $0.id == id }) {
+                board.items.filter { $0.kind == "image" }.forEach { removeBoardImage($0.id) }
+                app.library.preferences.boards?.removeAll { $0.id == id }
+            }
+        case "boardCapture":
+            // Arc's Easels and Opera's Pinboards hold pictures of pages; this saves the visible part, downsized.
+            guard regular, app.feature("boards"), let model, let raw = command["board"] as? String, let boardID = UUID(uuidString: raw),
+                  app.library.preferences.boards?.contains(where: { $0.id == boardID && $0.profileID == profileID }) == true else { break }
+            let tab = model.activeWebTab, title = model.selectedTab.customTitle ?? model.selectedTab.title, url = tab.url
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let png = try await tab.capturePNG()
+                    guard let image = NSImage(data: png), let jpeg = Self.jpeg(image, maxWidth: 640) else { throw ValidationError("The page could not be captured.") }
+                    guard var boards = self.app.library.preferences.boards, let index = boards.firstIndex(where: { $0.id == boardID }) else { return }
+                    let count = boards[index].items.count
+                    guard count < 200 else { self.app.notice = "A board holds up to 200 items."; return }
+                    let item = BoardItem(kind: "image", title: String(title.prefix(512)), url: url, text: "", x: Double(24 + (count % 4) * 240), y: Double(24 + (count / 4) * 120))
+                    try FileManager.default.createDirectory(at: self.boardImageFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                    try jpeg.write(to: self.boardImageFolder.appendingPathComponent(item.id.uuidString + ".jpg"), options: .atomic)
+                    boards[index].items.append(item)
+                    self.app.library.preferences.boards = boards
+                } catch { self.app.notice = error.localizedDescription }
+            }
         case "boardAdd", "boardMove", "boardRemove":
             guard regular, let raw = command["board"] as? String, let boardID = UUID(uuidString: raw), var boards = app.library.preferences.boards,
                   let index = boards.firstIndex(where: { $0.id == boardID && $0.profileID == profileID }) else { break }
@@ -591,7 +615,9 @@ final class BrowserFeatures {
                     boards[index].items[item].x = min(4000, max(0, command["x"] as? Double ?? 0))
                     boards[index].items[item].y = min(4000, max(0, command["y"] as? Double ?? 0))
                 }
-            default: boards[index].items.removeAll { $0.id == itemID }
+            default:
+                if let itemID, boards[index].items.contains(where: { $0.id == itemID && $0.kind == "image" }) { removeBoardImage(itemID) }
+                boards[index].items.removeAll { $0.id == itemID }
             }
             app.library.preferences.boards = boards
         case "addWebPanel":
@@ -915,6 +941,27 @@ final class BrowserFeatures {
     private func copyImage(_ png: Data) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setData(png, forType: .png)
         app.notice = "Copied to the clipboard."
+    }
+    private var boardImageFolder: URL { app.dataDirectory.appendingPathComponent("BoardImages", isDirectory: true) }
+    private var boardImageCache: [UUID: String] = [:]
+    private func removeBoardImage(_ id: UUID) {
+        boardImageCache.removeValue(forKey: id)
+        try? FileManager.default.removeItem(at: boardImageFolder.appendingPathComponent(id.uuidString + ".jpg"))
+    }
+    /// Pictures on this Profile's boards as data addresses, for the boards view only.
+    func boardImages(profileID: UUID) -> [String: String] {
+        var out: [String: String] = [:], total = 0
+        for board in app.library.preferences.boards ?? [] where board.profileID == profileID {
+            for item in board.items where item.kind == "image" {
+                if boardImageCache[item.id] == nil,
+                   let data = try? Data(contentsOf: boardImageFolder.appendingPathComponent(item.id.uuidString + ".jpg")), data.count <= 1_000_000 {
+                    boardImageCache[item.id] = "data:image/jpeg;base64," + data.base64EncodedString()
+                }
+                guard let value = boardImageCache[item.id], total + value.utf8.count <= 12_000_000 else { continue }
+                out[item.id.uuidString] = value; total += value.utf8.count
+            }
+        }
+        return out
     }
     static func jpeg(_ image: NSImage, maxWidth: CGFloat) -> Data? {
         guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil), source.width > 0 else { return nil }

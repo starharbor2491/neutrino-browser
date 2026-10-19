@@ -438,7 +438,7 @@ public struct SavedSession: Identifiable, Codable, Equatable, Sendable {
 }
 public struct BoardItem: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
-    /// "link" or "note".
+    /// "link", "note" or "image" (a picture of a page, saved beside the library).
     public var kind: String
     public var title: String
     public var url: URL?
