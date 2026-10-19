@@ -424,6 +424,7 @@ impl Shell {
                         "resources",
                         "tabs",
                         "safari",
+                        "feeds",
                     ]
                     .contains(&value)
                     {
@@ -433,7 +434,8 @@ impl Shell {
                             } else {
                                 value.into()
                             };
-                        if self.panel == "safari" {
+                        if self.panel == "feeds" {
+                        } else if self.panel == "safari" {
                             commands.push(json!({"op":"projectLibrary","section":"bookmarks"}));
                         } else if !["resources", "tabs", "closed"].contains(&self.panel.as_str()) && !self.panel.starts_with("web:") {
                             self.section = self.panel.clone();

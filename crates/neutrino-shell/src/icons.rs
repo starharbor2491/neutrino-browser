@@ -22,7 +22,7 @@ pub fn outline(name: &str) -> &'static str {
         "code"=>"m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16", "print"=>"M6 9V3h12v6M6 17H3V9h18v8h-3M6 14h12v7H6z",
         "pip"=>"M3 5h18v14H3zM12 12h7v5h-7z", "trash"=>"M4 7h16M10 11v6M14 11v6M5 7l1 14h12l1-14M9 7V4h6v3", "minus"=>"M5 12h14",
         "pause"=>"M8 5v14M16 5v14", "play"=>"M7 4v16l13-8z", "panel"=>"M4 4h16v16H4zM15 4v16", "star"=>"m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z",
-        "window"=>"M3 7h14v13H3zM7 7V4h14v13h-4", "reader"=>"M5 5h14M5 9h14M5 13h14M5 17h9", "terminal"=>"M3 4h18v16H3zM7 9l3 3-3 3M12 15h5",
+        "window"=>"M3 7h14v13H3zM7 7V4h14v13h-4", "reader"=>"M5 5h14M5 9h14M5 13h14M5 17h9", "terminal"=>"M3 4h18v16H3zM7 9l3 3-3 3M12 15h5", "feed"=>"M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14M6 18h.01",
         _=>"M5 5h14v14H5z"
     }
 }

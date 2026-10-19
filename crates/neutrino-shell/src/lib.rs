@@ -5,6 +5,7 @@ mod appearance;
 mod bookmarks;
 mod browser_import;
 mod core;
+mod feeds;
 mod features;
 mod icons;
 mod module_repository;

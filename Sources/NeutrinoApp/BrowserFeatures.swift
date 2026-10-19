@@ -28,6 +28,8 @@ final class BrowserFeatures {
     /// A sign-in waiting for Save, Never or Not now. The password never reaches the interface.
     private var passwordPrompt: (profileID: UUID, credential: LocalCredential, update: Bool)?
     private(set) var tabResources: [[String: Any]] = []
+    /// The feed each tab's page advertises, with the address it was found on.
+    private var pageFeeds: [UUID: (page: URL, feed: String)] = [:]
     private(set) var audible = Set<UUID>()
     private(set) var media: (id: UUID, playing: Bool)?
     private(set) var breakMode = false
@@ -62,6 +64,7 @@ final class BrowserFeatures {
                 await self.sampleMedia(model, includeChromium: tick % 3 == 0)
                 if tick % 10 == 0 { self.sleepIdleTabs(model); await self.captureThumbnail(model) }
                 if tick % 200 == 0 { self.archiveIdleTabs(model) }
+                if tick % 600 == 0, self.app.feature("feeds"), !model.isPrivate { await self.app.refreshFeeds(force: false) }
                 if self.sampleResources || self.limitsEnabled { await self.sampleUsage(model) }
                 tick += 1
             }
@@ -95,6 +98,10 @@ final class BrowserFeatures {
         snapshot["tabResources"] = tabResources
         snapshot["breakMode"] = breakMode
         if let blocked = model.activeWebTab.blockedOnPage { snapshot["blockedCount"] = blocked }
+        if let found = pageFeeds[model.session.selectedTabID], found.page == model.activeWebTab.url,
+           !(app.library.preferences.feeds ?? []).contains(where: { $0.profileID == model.session.profileID && $0.url.absoluteString == found.feed }) {
+            snapshot["pageFeed"] = found.feed
+        }
         if !model.isPrivate {
             if cards?.profileID != model.session.profileID { cards = (model.session.profileID, LocalCard.list(profile: model.session.profileID).map(\.summary)) }
             snapshot["cards"] = cards?.list ?? []
@@ -256,6 +263,13 @@ final class BrowserFeatures {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }
         return (type as String) == "Battery Power"
+    }
+
+    func foundFeed(_ feed: String, page: URL, tab id: UUID) {
+        let previous = pageFeeds[id]?.feed
+        if feed.isEmpty { pageFeeds.removeValue(forKey: id) } else { pageFeeds[id] = (page, String(feed.prefix(2048))) }
+        if let open = model?.session.tabs.map(\.id) { pageFeeds = pageFeeds.filter { open.contains($0.key) } }
+        if previous != pageFeeds[id]?.feed { refresh() }
     }
 
     // MARK: Commands
@@ -538,6 +552,9 @@ final class BrowserFeatures {
             guard let model, let id, let saved = app.library.preferences.savedSessions?.first(where: { $0.id == id && $0.profileID == profileID }) else { break }
             for page in saved.tabs.prefix(max(0, 200 - model.session.tabs.count)) { model.newTab(url: page.url) }
         case "deleteSession": if let id { app.library.preferences.savedSessions?.removeAll { $0.id == id } }
+        case "feedAdd", "feedRemove", "feedRefresh", "feedOpen", "feedReadAll":
+            guard regular, app.feature("feeds") else { break }
+            if let url = app.feedCommand(operation, command, profileID: profileID) { model?.newTab(url: url) }
         case "createBoard":
             guard regular, let name = command["name"] as? String else { break }
             app.library.preferences.boards = Array(((app.library.preferences.boards ?? []) + [Board(profileID: profileID, name: String(name.prefix(80)))]).suffix(50))
@@ -1004,6 +1021,12 @@ extension BrowserModel {
         }
         if !isPrivate { features?.autofill(tab, profileID: session.profileID) }
         if app.feature("spatial-navigation"), let script = PageScript.source("spatialNavigation") { Task { _ = try? await tab.runPageScript(script) } }
+        if app.feature("feeds"), !isPrivate, let url = tab.url, let script = PageScript.source("feedLink") {
+            Task { [weak self] in
+                guard let feed = try? await tab.runPageScript(script) else { return }
+                self?.features?.foundFeed(feed, page: url, tab: id)
+            }
+        }
         if app.feature("mouse-gestures"), let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
     }
     /// Remembers the zoom chosen for the active page's site.

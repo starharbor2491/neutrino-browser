@@ -201,6 +201,7 @@ pub fn page_menu(s: &Shell) -> Markup {
             @if enabled("screenshot"){button class="menu-item" data-op="menu" data-value="capture" disabled[blank]{(icon("camera"))span{"Capture"}kbd{"⇧⌘S"}}}
             @if enabled("notes"){button class="menu-item" data-op="panel" data-value="notes"{(icon("edit"))span{"Notes beside page"}}}
             button class="menu-item" data-op="summarize" disabled[blank]{(icon("spark"))span{"Summarize page"}}
+            @if features::on(s, "feeds") && !text(&s.snapshot, "pageFeed").is_empty() && !s.private() {button class="menu-item" data-op="feed" data-value="subscribe-page"{(icon("feed"))span{"Subscribe to this site’s feed"}}}
             @if features::on(s, "autofill") && !array(&s.snapshot["cards"]).is_empty() {button class="menu-item" data-op="menu" data-value="fill-card" disabled[blank]{(icon("key"))span{"Fill card"}}}
             @if features::on(s, "autofill") && (!profile_items(s, "addresses").is_empty() || !array(&prefs(s)["addresses"]).is_empty()) {button class="menu-item" data-op="menu" data-value="fill-address" disabled[blank]{(icon("user"))span{"Fill address"}}}
         }
@@ -841,6 +842,28 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             }
         }
     }
+}
+
+/// Vivaldi's Feeds panel: newest entries from every subscription, unread first in weight.
+pub fn feeds_panel(s: &Shell) -> Markup {
+    let feeds = profile_items(s, "feeds");
+    let mut entries: Vec<(&Value, &Value)> = feeds.iter().flat_map(|f| array(&f["entries"]).iter().map(move |e| (*f, e))).collect();
+    entries.sort_by(|a, b| b.1["time"].as_f64().unwrap_or(0.).total_cmp(&a.1["time"].as_f64().unwrap_or(0.)));
+    let unread = entries.iter().filter(|(_, e)| !flag(e, "read")).count();
+    html! {div class="feeds-panel"{
+        form class="route-form" data-form="feed"{
+            input type="url" name="url" placeholder="https://example.com/feed.xml" aria-label="Feed address" spellcheck="false" autocomplete="off";
+            button class="button" type="submit"{"Subscribe"}
+        }
+        @if feeds.is_empty() {(crate::render::empty("No feeds yet", "Subscribe to a site’s RSS or Atom feed. Sites that offer one show Subscribe in the page menu.", "feed"))}
+        @else {
+            div class="feeds-actions"{span{(unread)" unread"}span class="spacer"{}button class="button quiet" data-op="feed" data-value="refresh"{"Refresh"}@if unread > 0 {button class="button quiet" data-op="feed" data-value="read-all"{"Mark all read"}}}
+            div class="filter-chips feed-list"{@for f in &feeds {span class="chip"{(text(f,"title"))@if !text(f,"error").is_empty(){" · "(text(f,"error"))}button class="chip-remove" data-op="feed" data-value="remove" data-id=(text(f,"id")) aria-label=(format!("Unsubscribe from {}", text(f,"title"))){(icon("close"))}}}}
+            div class="feed-entries"{@for (f, e) in entries.iter().take(80) {
+                button class=(if flag(e,"read") {"feed-entry read"} else {"feed-entry"}) data-op="feed" data-value="open" data-id=(text(e,"id")){strong{(text(e,"title"))}small{(text(f,"title"))@if !text(e,"date").is_empty(){" · "(text(e,"date"))}}}
+            }}
+        }
+    }}
 }
 
 /// Asks to save a password after a sign-in, above the page so nothing covers it.

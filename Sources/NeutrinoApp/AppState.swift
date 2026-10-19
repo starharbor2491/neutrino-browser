@@ -27,6 +27,7 @@ final class AppState: ObservableObject {
     var filterListDomains: [String] = []
     var filterListGenericCosmetic: [String] = []
     var filterListSiteCosmetic: [String: [String]] = [:]
+    var feedsRefreshing = false
     @Published var installedModules: [InstalledModule] = [] { didSet { modulePresentationCache = nil; resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
     var modulePresentationCache: ModulePresentation?
     @Published private(set) var resourceWorkerGeneration = UUID()

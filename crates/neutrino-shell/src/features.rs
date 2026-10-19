@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -45,6 +45,7 @@ pub const MODULES: &[(&str, &str, &[&str])] = &[
     ("boards", "Workspace", &["arc", "gx"]),
     ("reading-list", "Workspace", &["*"]),
     ("sessions", "Workspace", &["vivaldi"]),
+    ("feeds", "Workspace", &["vivaldi"]),
     ("speed-dial", "Workspace", &["vivaldi", "gx"]),
     ("media-controls", "Media and sound", &["arc", "gx"]),
     ("break-mode", "Media and sound", &["vivaldi"]),
@@ -554,6 +555,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "link-route" => "link-routes",
         "tidy-tabs" => "tidy-tabs",
         "address-book" | "card" => "autofill",
+        "feed" => "feeds",
         "page-command" if value == "panic" => "panic",
         "page-command" if value == "break" => "break-mode",
         "page-command" if value == "fast-forward" || value == "rewind" => "fast-forward",
@@ -1099,6 +1101,32 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             }
             _ => {}
         },
+        "feed" => {
+            let feeds = array(&s.snapshot["preferences"]["feeds"]);
+            match value {
+                "add" | "subscribe-page" => {
+                    let raw = if value == "add" { text(r, "url").trim().to_string() } else { text(&s.snapshot, "pageFeed").to_string() };
+                    match Url::parse(&raw) {
+                        Ok(url) if regular && ["https", "http"].contains(&url.scheme()) && url.host_str().is_some() => {
+                            commands.push(json!({"op":"feedAdd","url":url.as_str()}));
+                            s.notice = "Subscribing…".into();
+                            s.menu.clear();
+                        }
+                        _ => s.notice = "Enter the address of an RSS or Atom feed.".into(),
+                    }
+                }
+                "remove" if feeds.iter().any(|f| f["id"] == r["id"]) => commands.push(json!({"op":"feedRemove","id":r["id"]})),
+                "refresh" => commands.push(json!({"op":"feedRefresh"})),
+                "open" => {
+                    let entry = feeds.iter().flat_map(|f| array(&f["entries"]).iter()).find(|e| e["id"] == r["id"]);
+                    if let Some(e) = entry {
+                        commands.push(json!({"op":"feedOpen","id":e["id"],"url":e["url"]}));
+                    }
+                }
+                "read-all" => commands.push(json!({"op":"feedReadAll"})),
+                _ => {}
+            }
+        }
         "stack-tabs" => {
             let loose = |key: &str| s.tabs().iter().any(|t| text(t, "id") == text(r, key) && !flag(t, "pinned") && text(t, "folderID").is_empty());
             if regular && crate::render::style(s) == "vivaldi" && on(s, "tab-stacks") && text(r, "id") != text(r, "onto") && loose("id") && loose("onto") {
@@ -1305,6 +1333,8 @@ pub fn page_script(r: &Value) -> Option<String> {
             let domains: Vec<&str> = array(&r["domains"]).iter().filter_map(Value::as_str).filter(|d| d.len() <= 253 && d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')).take(20_000).collect();
             format!("(()=>{{const d=new Set({});const hit=h=>{{for(let p=h.toLowerCase();p;){{if(d.has(p))return true;const i=p.indexOf('.');if(i<0)return false;p=p.slice(i+1)}}return false}};const seen=new Set();for(const e of document.querySelectorAll('script[src],img[src],iframe[src],link[href][rel~=stylesheet],embed[src],source[src],video[src],audio[src]')){{try{{const x=new URL(e.getAttribute('src')||e.getAttribute('href'),location.href);if(x.hostname!==location.hostname&&hit(x.hostname))seen.add(x.href)}}catch(_){{}}}}return String(seen.size)}})()", serde_json::to_string(&domains).unwrap_or_else(|_| "[]".into()))
         }
+        // The RSS or Atom feed a page advertises in its head, or "".
+        "feedLink" => "(()=>{const l=document.querySelector('link[rel~=alternate][href][type=\"application/rss+xml\"],link[rel~=alternate][href][type=\"application/atom+xml\"]');return l&&/^https?:/.test(l.href)?l.href:''})()".into(),
         // Vivaldi's Fast Forward: the next page in a series, or "".
         "nextPage" => "(()=>{const a=document.querySelector('link[rel~=next][href],a[rel~=next][href]');if(a)return a.href;const words=/^(next|next page|older|older posts|more|weiter|suivant|siguiente|›|»|>|→)$/i;for(const e of document.querySelectorAll('a[href]')){const t=(e.innerText||e.getAttribute('aria-label')||'').trim();if(t.length<20&&words.test(t)&&!e.href.startsWith('javascript:'))return e.href}return ''})()".into(),
         // Vivaldi's spatial navigation: Shift with an arrow key moves between links.

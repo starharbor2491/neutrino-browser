@@ -919,6 +919,8 @@
       send({ op: "setting", key: "themeSchedule", value: { enabled: f.get("enabled") === "on", light: f.get("light"), dark: f.get("dark") } });
     else if (form.dataset.form === "startup-pages")
       send({ op: "startup-pages", value: f.get("pages") });
+    else if (form.dataset.form === "feed")
+      send({ op: "feed", value: "add", url: f.get("url") });
     else if (form.dataset.form === "card")
       send({ op: "card", value: "save", name: f.get("name"), number: f.get("number"), expiry: f.get("expiry") });
     else if (form.dataset.form === "filter-list")

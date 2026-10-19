@@ -414,6 +414,9 @@ fn workspace_panel(s: &Shell, key: &str) -> Markup {
     if key == "safari" {
         return safari_sidebar(s);
     }
+    if key == "feeds" {
+        return html! {aside class="workspace-panel" aria-label="Feeds"{header{h2{"Feeds"}button class="icon-button" data-op="panel" data-value="" aria-label="Close panel"{(icon("close"))}}(crate::views::feeds_panel(s))}};
+    }
     let mut copy = s.clone();
     copy.section = key.into();
     copy.panel = key.into();
@@ -539,7 +542,7 @@ fn panel_strip(s: &Shell) -> Markup {
     let style = style(s);
     let open = s.visible_panel_key();
     let items: Vec<&str> = if array(&s.config()["layout"]["panelItems"]).is_empty() {
-        if style == "gx" { vec!["control", "bookmarks", "history", "downloads", "notes"] } else { vec!["bookmarks", "downloads", "history", "notes", "tabs"] }
+        if style == "gx" { vec!["control", "bookmarks", "history", "downloads", "notes"] } else { vec!["bookmarks", "downloads", "history", "notes", "feeds", "tabs"] }
     } else {
         array(&s.config()["layout"]["panelItems"]).iter().filter_map(Value::as_str).collect()
     };
@@ -553,6 +556,7 @@ fn panel_strip(s: &Shell) -> Markup {
                 "downloads" => ("downloads", "Downloads", "download"),
                 "notes" => ("notes", "Notes", "edit"),
                 "tabs" => ("tabs", "Window", "sidebar"),
+                "feeds" if crate::features::on(s, "feeds") => ("feeds", "Feeds", "feed"),
                 _ => ("", "", ""),
             };
             @if !key.is_empty() {button class=(if open == key {"strip-button selected"} else {"strip-button"}) data-op="panel" data-value=(if open == key {""} else {key}) data-tip=(label) aria-label=(label) aria-pressed=((open == key).to_string()){(icon(glyph))}}

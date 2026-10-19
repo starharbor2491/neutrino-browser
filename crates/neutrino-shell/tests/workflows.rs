@@ -228,6 +228,29 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn feeds_subscribe_from_the_page_and_open_entries() {
+    let mut s = shell();
+    s.snapshot["pageFeed"] = json!("https://example.com/feed.xml");
+    s.dispatch(json!({"op":"menu","value":"page"}));
+    let r = s.dispatch(json!({"op":"feed","value":"subscribe-page"}));
+    assert_eq!(commands(&r)[0], json!({"op":"feedAdd","url":"https://example.com/feed.xml"}));
+    let r = s.dispatch(json!({"op":"feed","value":"add","url":"javascript:alert(1)"}));
+    assert!(commands(&r).is_empty());
+    s.snapshot["preferences"]["feeds"] = json!([{"id":"f1","profileID":"p1","title":"Example news","url":"https://example.com/feed.xml","entries":[
+        {"id":"e1","title":"Older","url":"https://example.com/1","time":1.0,"date":"","read":true},
+        {"id":"e2","title":"Newer","url":"https://example.com/2","time":2.0,"date":"Oct 19","read":false}]},
+        {"id":"f2","profileID":"p2","title":"Someone else","url":"https://other.example/feed","entries":[]}]);
+    let html = s.dispatch(json!({"op":"panel","value":"feeds"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("1 unread") && !html.contains("Someone else"));
+    assert!(html.find("Newer").unwrap() < html.find("Older").unwrap());
+    let r = s.dispatch(json!({"op":"feed","value":"open","id":"e2"}));
+    assert_eq!(commands(&r)[0], json!({"op":"feedOpen","id":"e2","url":"https://example.com/2"}));
+    let r = s.dispatch(json!({"op":"feed","value":"remove","id":"missing"}));
+    assert!(commands(&r).is_empty());
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.feeds","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    assert!(commands(&s.dispatch(json!({"op":"feed","value":"refresh"}))).is_empty());
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

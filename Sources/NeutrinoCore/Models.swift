@@ -305,6 +305,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     /// Keep the local network address out of WebRTC (Chromium's IP handling policy).
     public var hideLocalIP: Bool?
     public var filterLists: [FilterList]?
+    /// RSS and Atom feeds in the Feeds panel.
+    public var feeds: [FeedSubscription]?
     /// Sites where Neutrino never offers to save a password.
     public var neverSavePasswords: [String]?
     /// Element-hiding rules such as "example.com##.banner" or "##.banner".
@@ -372,6 +374,32 @@ public struct FilterList: Identifiable, Codable, Equatable, Sendable {
     public var cosmetic: Int?
     public var error: String?
     public init(id: String, title: String, url: URL, enabled: Bool = true) { self.id = id; self.title = title; self.url = url; self.enabled = enabled }
+}
+/// A site's RSS or Atom feed, fetched from its publisher and refreshed every 30 minutes.
+public struct FeedSubscription: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public var updatedAt: Date?
+    public var error: String?
+    public var entries: [FeedEntry]
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL) {
+        self.id = id; self.profileID = profileID; self.title = title; self.url = url; entries = []
+    }
+}
+public struct FeedEntry: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var url: URL
+    /// When the publisher dated the entry, used for ordering.
+    public var time: Date?
+    /// The entry's date as shown in the panel.
+    public var date: String
+    public var read: Bool
+    public init(id: UUID = UUID(), title: String, url: URL, time: Date?, date: String, read: Bool = false) {
+        self.id = id; self.title = title; self.url = url; self.time = time; self.date = date; self.read = read
+    }
 }
 public struct LinkRoute: Codable, Equatable, Sendable {
     public var host: String
