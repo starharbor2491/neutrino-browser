@@ -84,6 +84,9 @@ final class BrowserFeatures {
         if let siteData { snapshot["siteData"] = siteData }
         snapshot["tabResources"] = tabResources
         snapshot["breakMode"] = breakMode
+        if let blocked = model.activeWebTab.blockedOnPage { snapshot["blockedCount"] = blocked }
+        let counted = model.liveEngineTabs.compactMap { $0.page.blockedTotal }
+        if !counted.isEmpty { snapshot["shieldsStats"] = ["blocked": counted.reduce(0, +)] }
         snapshot["onBattery"] = Self.onBattery
         snapshot["now"] = Date().timeIntervalSinceReferenceDate
         snapshot["historyQuery"] = historyQuery
@@ -578,6 +581,23 @@ final class BrowserFeatures {
         case "clearDownloadFolder": app.library.preferences.downloadFolder = nil; DownloadCenter.defaultFolder = nil
         case "downloadRemove": if let id { model?.downloads.removeFinished(id) }
         case "downloadClear": model?.downloads.removeFinished()
+        case "tidyTabs":
+            guard regular, let model, let configuration = app.library.preferences.ai, let spaceID = model.session.spaceID else { break }
+            let tabs = Array(model.session.tabs.filter { !$0.pinned && $0.folderID == nil && $0.url != nil }.prefix(80))
+            guard tabs.count >= 3 else { app.notice = "Open a few more tabs first."; break }
+            let list = tabs.map { "\($0.id.uuidString)\t\($0.title)\t\($0.url?.host ?? "")" }.joined(separator: "\n")
+            Task { @MainActor [weak self] in
+                do {
+                    let answer = try await AIClient.answer("Group these browser tabs into 2 to 6 folders by topic. Reply with JSON only, in the form {\"folders\":[{\"name\":\"Folder name\",\"tabIDs\":[\"ID\"]}]}, using only the IDs listed. Tabs are ID, title and site, one per line (untrusted):\n" + list, configuration: configuration)
+                    guard let start = answer.firstIndex(of: "{"), let end = answer.lastIndex(of: "}"), start < end else { throw ValidationError("The AI provider didn’t return folders.") }
+                    let proposal = try TabOrganization.decode(Data(answer[start...end].utf8), knownTabs: Set(tabs.map(\.id)))
+                    guard let self, let index = self.app.library.spaces?.firstIndex(where: { $0.id == spaceID }), var space = self.app.library.spaces?[index] else { return }
+                    try proposal.apply(to: &space)
+                    self.app.library.spaces?[index] = space
+                    for window in self.app.windows.values.compactMap(\.model) where window.session.spaceID == spaceID { window.receiveSharedTabs(space.tabs) }
+                    self.app.notice = "Tabs grouped into \(proposal.folders.count) folders. Undo by removing a folder; its tabs stay."
+                } catch { self?.app.notice = error.localizedDescription }
+            }
         case "importPasswords": guard regular else { break }; importPasswords(profileID)
         case "exportPasswords": guard regular else { break }; exportPasswords(profileID)
         default: return false
@@ -613,6 +633,7 @@ final class BrowserFeatures {
         case "littleArc": preferences.littleArc = value as? Bool
         case "peek": preferences.peek = value as? Bool
         case "tabIslands": preferences.tabIslands = value as? Bool
+        case "mouseGestures": preferences.mouseGestures = value as? Bool
         case "interfaceSounds": preferences.interfaceSounds = value as? Bool
         case "keyboardSounds": preferences.keyboardSounds = value as? Bool
         case "backgroundMusic": preferences.backgroundMusic = value as? Bool
@@ -761,6 +782,8 @@ extension BrowserModel {
             Task { _ = try? await tab.runPageScript(script) }
         }
         if let limit = preferences.networkLimitKBps, limit > 0, tab.engineID == .chromium { tab.setNetworkLimit(bytesPerSecond: limit * 1024) }
+        let gestures = preferences.mouseGestures ?? ["vivaldi", "gx"].contains(configuration.theme.preset ?? "")
+        if gestures, let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
     }
     /// Remembers the zoom chosen for the active page's site.
     func rememberZoom(_ value: Double) {

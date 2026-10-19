@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Reads bookmarks other browsers keep on this Mac. Chromium-family browsers share
-//! one JSON format; Firefox keeps an SQLite database. Safari is read by the host.
+//! Reads bookmarks and history other browsers keep on this Mac. Chromium-family
+//! browsers share one JSON bookmarks format and one SQLite history format; Firefox
+//! and Safari keep SQLite databases. Safari's bookmarks are read by the host.
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -90,6 +91,56 @@ fn parse_firefox(places: &Path) -> Result<Vec<Value>, &'static str> {
     result
 }
 
+/// Seconds between 1970-01-01 and 2001-01-01, the host's date reference.
+const REFERENCE: f64 = 978_307_200.0;
+
+/// Runs a read-only query on a private copy of a database another browser may hold open.
+fn query_copy(path: &Path, sql: &str, row: fn(&rusqlite::Row) -> rusqlite::Result<(String, String, f64)>) -> Result<Vec<Value>, &'static str> {
+    let copy = std::env::temp_dir().join(format!("neutrino-history-{}.sqlite", std::process::id()));
+    std::fs::write(&copy, read_bounded(path)?).map_err(|_| "That browser’s history couldn’t be copied for import.")?;
+    let result = (|| {
+        let db = rusqlite::Connection::open_with_flags(&copy, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| "That browser’s history couldn’t be opened.")?;
+        let mut query = db.prepare(sql).map_err(|_| "That browser’s history uses an unsupported format.")?;
+        let rows = query.query_map([], row).map_err(|_| "That browser’s history couldn’t be read.")?;
+        Ok(rows
+            .flatten()
+            .filter(|(url, _, at)| web(url) && url.len() <= 8192 && at.is_finite())
+            .map(|(url, title, at)| json!({"title": title.chars().take(512).collect::<String>(), "url": url, "visitedAt": at}))
+            .collect())
+    })();
+    let _ = std::fs::remove_file(&copy);
+    result
+}
+
+/// Recent history of another browser on this Mac, newest first, as
+/// `[{title, url, visitedAt}]` with seconds since 2001-01-01.
+pub fn history(source: &str, home: &str) -> Result<Value, &'static str> {
+    let home = Path::new(home);
+    if !home.is_absolute() {
+        return Err("Invalid home folder.");
+    }
+    let found = match source {
+        "firefox" => {
+            let places = firefox_places(home).ok_or("Firefox history wasn’t found on this Mac.")?;
+            query_copy(&places, "SELECT url, COALESCE(title, ''), last_visit_date FROM moz_places WHERE last_visit_date IS NOT NULL ORDER BY last_visit_date DESC LIMIT 5000",
+                |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as f64 / 1e6 - REFERENCE)))?
+        }
+        "safari" => query_copy(&home.join("Library/Safari/History.db"),
+            "SELECT i.url, COALESCE(v.title, ''), v.visit_time FROM history_visits v JOIN history_items i ON v.history_item = i.id ORDER BY v.visit_time DESC LIMIT 5000",
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, f64>(2)?)))
+            .map_err(|_| "macOS protects Safari’s history. Allow Neutrino in System Settings → Privacy & Security → Full Disk Access, then import again.")?,
+        _ => {
+            let bookmarks = chromium_bookmarks(source).ok_or("Importing from that browser isn’t supported.")?;
+            let history = home.join(bookmarks).with_file_name("History");
+            // Chromium counts microseconds from 1601-01-01.
+            query_copy(&history, "SELECT url, COALESCE(title, ''), last_visit_time FROM urls WHERE last_visit_time > 0 ORDER BY last_visit_time DESC LIMIT 5000",
+                |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as f64 / 1e6 - 11_644_473_600.0 - REFERENCE)))?
+        }
+    };
+    Ok(json!(found))
+}
+
 /// Bookmarks of another browser on this Mac, as `[{title, url}]`.
 pub fn bookmarks(source: &str, home: &str) -> Result<Value, &'static str> {
     let home = Path::new(home);
@@ -135,6 +186,23 @@ mod tests {
         assert_eq!(found[0]["title"], "A");
         assert!(bookmarks("chrome", home.to_str().unwrap()).is_err());
         assert!(bookmarks("vivaldi", "relative/home").is_err());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn reads_chromium_history_newest_first_in_reference_seconds() {
+        let home = std::env::temp_dir().join(format!("neutrino-history-test-{}", std::process::id()));
+        let folder = home.join("Library/Application Support/Google/Chrome/Default");
+        std::fs::create_dir_all(&folder).unwrap();
+        let db = rusqlite::Connection::open(folder.join("History")).unwrap();
+        db.execute_batch("CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT, last_visit_time INTEGER);
+            INSERT INTO urls (url, title, last_visit_time) VALUES ('https://old.example/', 'Old', 13000000000000000), ('https://new.example/', 'New', 13300000000000000), ('chrome://settings/', 'Settings', 13400000000000000);").unwrap();
+        drop(db);
+        let found = history("chrome", home.to_str().unwrap()).unwrap();
+        assert_eq!(found.as_array().unwrap().len(), 2);
+        assert_eq!(found[0]["url"], "https://new.example/");
+        let seconds = found[0]["visitedAt"].as_f64().unwrap();
+        assert!((seconds - (13_300_000_000.0 - 11_644_473_600.0 - REFERENCE)).abs() < 1.0);
         std::fs::remove_dir_all(home).unwrap();
     }
 }

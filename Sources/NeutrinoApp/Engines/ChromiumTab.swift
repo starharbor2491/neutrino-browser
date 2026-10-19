@@ -35,6 +35,10 @@ final class ChromiumTab: BrowserEngineTab {
     private let hostView: NSView
     private var pageURL: URL? { didSet { if oldValue?.host != pageURL?.host { updateBlockingPolicy(); applyScriptPolicy() } } }
     private var scriptsDisabled = false
+    private var blockedCount = 0
+    private var blockedAtPage = 0
+    override var blockedOnPage: Int? { max(0, blockedCount - blockedAtPage) }
+    override var blockedTotal: Int? { blockedCount }
     private var activePristine = true
     private var failedURL: URL?
     private var pageTitle: String?
@@ -497,6 +501,8 @@ final class ChromiumTab: BrowserEngineTab {
             if let chrome = value["chromeStyle"] as? Bool { chromeStyle = chrome }
             if let chrome = value["navigationChrome"] as? Bool { navigationChrome = chrome }
             if let visible = value["navigationChromeVisible"] as? Bool { navigationChromeVisible = visible }
+            if let blocked = value["blocked"] as? Int, blocked >= 0 { blockedCount = blocked }
+            if value["navigationStart"] as? Bool == true { blockedAtPage = blockedCount }
             if let address = value["committedURL"] as? String, let url = URL(string: address) {
                 failedURL = nil; errorMessage = nil; activePristine = false; pageURL = url; pageTitle = nil
             }

@@ -510,7 +510,20 @@ final class AppState: ObservableObject {
         var urls = Set(library.bookmarks.filter { $0.profileID == profileID }.map(\.url))
         let additions = found.filter { urls.insert($0.1).inserted }.map { Bookmark(profileID: profileID, title: String($0.0.prefix(512)), url: $0.1) }
         library.bookmarks.append(contentsOf: additions)
-        notice = additions.isEmpty ? "No new bookmarks found in \(name)." : "Imported \(additions.count) bookmarks from \(name)."
+        // History is optional: a browser without readable history still imports its bookmarks.
+        let visits = ((try? RustCore.request(["op": "browserHistory", "source": source, "home": FileManager.default.homeDirectoryForCurrentUser.path])) as? [[String: Any]] ?? [])
+        let known = Set(library.history.filter { $0.profileID == profileID }.map { "\($0.url.absoluteString) \(Int($0.visitedAt.timeIntervalSinceReferenceDate))" })
+        let entries: [HistoryEntry] = visits.compactMap { item in
+            guard let url = (item["url"] as? String).flatMap(URL.init(string:)), AddressResolver.isWebURL(url),
+                  let seconds = item["visitedAt"] as? Double, seconds.isFinite, !known.contains("\(url.absoluteString) \(Int(seconds))") else { return nil }
+            let title = (item["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? url.host ?? "Website"
+            return HistoryEntry(profileID: profileID, title: boundedPageTitle(title), url: url, visitedAt: Date(timeIntervalSinceReferenceDate: seconds))
+        }
+        if !entries.isEmpty {
+            library.history = Array((library.history + entries).sorted { $0.visitedAt < $1.visitedAt }.suffix(10_000))
+        }
+        let parts = [additions.isEmpty ? nil : "\(additions.count) bookmarks", entries.isEmpty ? nil : "\(entries.count) history entries"].compactMap { $0 }
+        notice = parts.isEmpty ? "Nothing new found in \(name)." : "Imported \(parts.joined(separator: " and ")) from \(name)."
         return true
     }
     private func safariBookmarks() throws -> [(String, URL)] {

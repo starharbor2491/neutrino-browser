@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs",
 ];
 
 /// Actions offered by the command bar, shortcuts and command chains:
@@ -319,7 +319,7 @@ fn valid_setting(key: &str, v: &Value) -> bool {
         "networkLimitKBps" => [0, 256, 1024, 5120, 10240].contains(&v.as_i64().unwrap_or(-1)),
         "autoArchiveDays" => [0, 1, 7, 14, 30].contains(&v.as_i64().unwrap_or(-1)),
         "batterySaver" | "hideCookieBanners" | "blockThirdPartyCookies" | "httpsUpgrade" | "stripTracking"
-        | "littleArc" | "peek" | "tabIslands" | "keyboardSounds" | "backgroundMusic" | "askWhereToSave"
+        | "littleArc" | "peek" | "tabIslands" | "keyboardSounds" | "backgroundMusic" | "askWhereToSave" | "mouseGestures"
         | "interfaceSounds" => v.is_boolean(),
         "musicVolume" => v.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)),
         "defaultSearchID" => v.as_str().is_some_and(|id| id.len() <= 64),
@@ -839,6 +839,15 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             commands.push(json!({"op":"preference","key":"startupPages","value":pages}));
             commands.push(json!({"op":"preference","key":"restoreSession","value":false}));
         }
+        "tidy-tabs" => {
+            if s.snapshot["preferences"]["ai"].is_null() {
+                s.notice = "Set up an AI provider in Settings → AI providers to tidy tabs.".into();
+            } else if regular {
+                commands.push(json!({"op":"tidyTabs"}));
+                s.notice = "Grouping tabs…".into();
+            }
+            s.menu.clear();
+        }
         "split-ratio" => {
             if let Some(v) = r["value"].as_f64().filter(|v| (0.2..=0.8).contains(v)) {
                 commands.push(json!({"op":"splitRatio","value":v}));
@@ -923,6 +932,9 @@ pub fn page_script(r: &Value) -> Option<String> {
         "mute" => format!("(()=>{{const m={};window.__neutrinoMuted=m;const all=()=>document.querySelectorAll('video,audio').forEach(e=>{{if(m)e.muted=true;else if(e.dataset.neutrinoMuted)e.muted=false;if(m)e.dataset.neutrinoMuted='1';else delete e.dataset.neutrinoMuted}});all();if(!window.__neutrinoMuteObserver){{window.__neutrinoMuteObserver=true;document.addEventListener('play',e=>{{if(window.__neutrinoMuted&&e.target instanceof HTMLMediaElement){{e.target.muted=true;e.target.dataset.neutrinoMuted='1'}}}},true)}}return String(m)}})()", flag(r, "value")),
         "mediaState" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended&&m.readyState>2);return JSON.stringify({audible:!!p&&!p.muted&&p.volume>0,playing:!!p,media:ms.length>0,title:(navigator.mediaSession&&navigator.mediaSession.metadata&&navigator.mediaSession.metadata.title)||''})})()".into(),
         "mediaToggle" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended);if(p){p.pause();return 'paused'}const q=ms.find(m=>m.currentTime>0&&!m.ended)||ms[0];if(q){q.play();return 'playing'}return 'none'})()".into(),
+        // Hold Option and drag: left goes back, right forward, up then down reloads,
+        // up or down scrolls to the top or bottom.
+        "gestures" => "(()=>{if(window.__neutrinoGestures)return 'ready';window.__neutrinoGestures=true;let start=null,path=[],moved=false;addEventListener('mousedown',e=>{if(e.button===0&&e.altKey){start=[e.clientX,e.clientY];path=[];moved=false}},true);addEventListener('mousemove',e=>{if(!start||!(e.buttons&1))return;const dx=e.clientX-start[0],dy=e.clientY-start[1];if(Math.hypot(dx,dy)<40)return;const d=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');if(path[path.length-1]!==d)path.push(d);start=[e.clientX,e.clientY];if(!moved){moved=true;getSelection()&&getSelection().removeAllRanges();document.documentElement.style.userSelect='none'}},true);addEventListener('mouseup',()=>{if(!start)return;start=null;document.documentElement.style.userSelect='';if(!moved)return;const g=path.join('');addEventListener('click',e=>{e.preventDefault();e.stopPropagation()},{capture:true,once:true});if(g==='L')history.back();else if(g==='R')history.forward();else if(g==='UD')location.reload();else if(g==='U')scrollTo({top:0,behavior:'smooth'});else if(g==='D')scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})},true);return 'installed'})()".into(),
         "pauseAll" => "(()=>{document.querySelectorAll('video,audio').forEach(m=>m.pause());return 'paused'})()".into(),
         "pip" => "(()=>{if(document.pictureInPictureElement){document.exitPictureInPicture();return 'exit'}const vs=[...document.querySelectorAll('video')].filter(v=>v.readyState>0).sort((a,b)=>b.clientWidth*b.clientHeight-a.clientWidth*a.clientHeight);const v=vs.find(v=>!v.paused)||vs[0];if(!v)return 'none';if(v.requestPictureInPicture){v.disablePictureInPicture=false;v.requestPictureInPicture();return 'pip'}if(v.webkitSetPresentationMode){v.webkitSetPresentationMode('picture-in-picture');return 'pip'}return 'none'})()".into(),
         "findCount" => format!("(()=>{{const q={}.toLowerCase();if(!q)return '0';const t=(document.body&&document.body.innerText||'').toLowerCase();let n=0,i=0;while((i=t.indexOf(q,i))!==-1&&n<9999){{n++;i+=q.length}}return String(n)}})()", quote(text(r, "query"))),

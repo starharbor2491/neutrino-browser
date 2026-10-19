@@ -202,6 +202,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         "validateSVGIcons" => {crate::modules::svg_icons(&r["icons"])?;json!(true)},
         "parseBookmarks" => crate::bookmarks::parse(text(&r,"html"))?,
         "exportBookmarks" => crate::bookmarks::export(&r["bookmarks"]),
+        "browserHistory" => crate::browser_import::history(text(&r, "source"), text(&r, "home"))?,
         "browserBookmarks" => crate::browser_import::bookmarks(text(&r, "source"), text(&r, "home"))?,
         "resolveAddress" => json!(resolve_address(text(&r,"input"), text(&r,"search"))),
         "isWebURL" => json!(Url::parse(text(&r,"url")).is_ok_and(|u| matches!(u.scheme(),"http"|"https") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none())),

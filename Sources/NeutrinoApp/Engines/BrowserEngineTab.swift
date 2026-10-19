@@ -105,6 +105,10 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func clearWebsiteData(cookies: Bool, cache: Bool) async {}
     func clearSiteData(host: String) async {}
     func cookieDomains() async -> [String] { [] }
+    /// Requests blocked on the current page, when the engine counts them.
+    var blockedOnPage: Int? { nil }
+    /// Requests blocked since the tab opened, when the engine counts them.
+    var blockedTotal: Int? { nil }
     /// Memory in megabytes and processor time in seconds, when the engine reports them.
     func resourceUsage() async -> (memoryMB: Double, cpuSeconds: Double)? { nil }
     var hasActiveDownloads: Bool { false }

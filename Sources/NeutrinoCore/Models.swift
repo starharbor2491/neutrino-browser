@@ -243,6 +243,8 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
     public var toolbarItems: [String]?
     /// The first split pane's share of the window, from 0.2 to 0.8.
     public var splitRatio: Double?
+    /// The tab sidebar shows site icons only.
+    public var compactRail: Bool?
     public init() {}
     public mutating func normalize() {
         if let normalized = try? RustCore.transform(self, operation: "normalizeLayout") { self = normalized }
@@ -315,6 +317,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var littleArc: Bool?
     public var peek: Bool?
     public var tabIslands: Bool?
+    /// Option-drag gestures on pages; on by default in the Vivaldi and Opera GX styles.
+    public var mouseGestures: Bool?
     public init() {}
 }
 public struct SearchEngine: Identifiable, Codable, Equatable, Sendable {

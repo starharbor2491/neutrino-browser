@@ -756,6 +756,7 @@ pub fn general_extra(s: &Shell) -> Markup {
             div class="list-row"{div{strong{"Downloads"}small{(if text(p,"downloadFolder").is_empty(){"Ask where to save each file".to_string()}else{format!("Save to {}", text(p,"downloadFolder"))})}}button class="button" data-op="native" data-action="chooseDownloadFolder"{"Choose folder…"}@if !text(p,"downloadFolder").is_empty(){button class="button quiet" data-op="native" data-action="clearDownloadFolder"{"Always ask"}}}
             @if style(s) == "arc" {(setting_toggle("Open links from other apps in a small window", "Like Little Arc: read it, then keep it as a tab or close it.", "littleArc", p["littleArc"].as_bool().unwrap_or(true)))}
             (setting_toggle("Peek at links", "Shift-click a link to preview it in a floating window. WebKit tabs only.", "peek", p["peek"].as_bool().unwrap_or(true)))
+            (setting_toggle("Mouse gestures", "Hold ⌥ and drag on a page: left goes back, right forward, up then down reloads.", "mouseGestures", p["mouseGestures"].as_bool().unwrap_or(["vivaldi", "gx"].contains(&style(s)))))
             @if style(s) == "gx" {(setting_toggle("Group tabs from the same page", "Tabs you open from a page stay beside it as an island.", "tabIslands", p["tabIslands"].as_bool().unwrap_or(true)))}
         }
     }

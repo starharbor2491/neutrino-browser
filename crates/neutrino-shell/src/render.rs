@@ -219,6 +219,7 @@ fn rail(s: &Shell, preview: bool) -> Markup {
     let horizontal = ["top", "bottom"].contains(&text(&s.config()["layout"], "tabs"));
     let bottom = text(&s.config()["layout"], "navigation") == "bottom";
     let arc = style(s) == "arc";
+    let compact = flag(&s.config()["layout"], "compactRail");
     html! {aside class="workspace-rail" aria-label="Workspace" {
         div class="rail-top" {div class="traffic-clearance" data-window-drag="true"{}
             button class="icon-button" data-op="sidebar" aria-label="Hide sidebar" title="Hide sidebar (⌘B)"{(icon("sidebar"))}
@@ -227,7 +228,7 @@ fn rail(s: &Shell, preview: bool) -> Markup {
             @else {button class="icon-button" data-op="menu" data-value="browser" aria-label="Browser menu" title="Browser menu"{(icon("more"))}}
         }
         @if !bottom && !horizontal {(location(s))}
-        @if !preview{(feedback(s))}
+        @if !preview && !compact {(feedback(s))}
         @if arc {(crate::views::favorites(s))}
         div class="space-heading"{strong{(if s.private(){"Private"}else{text(&s.snapshot,"spaceName")})}button class="icon-button" data-op="menu" data-value="space" aria-label="Space options" title="Space options"{(icon("more"))}}
         @if horizontal {div class="horizontal-guide"{button class="new-tab" data-op="newTab"{(icon("plus"))"New tab"}button class="new-tab" data-op="screen" data-value="library" data-section="archive"{(icon("folder"))"Archived tabs"}}}
@@ -292,8 +293,7 @@ fn vacant_page(s: &Shell) -> Markup {
         "brave" => html! {section class="start-page brave-start" aria-label="New tab"{
             div class="brave-top"{
                 @if s.snapshot["shieldsStats"].is_object() && crate::views::start_option(s, "stats") {div class="brave-stats"{
-                    div{strong{(s.snapshot["shieldsStats"]["blocked"].as_u64().unwrap_or(0))}small{"Trackers & ads blocked"}}
-                    div{strong{(format!("{:.1} MB", s.snapshot["shieldsStats"]["savedBytes"].as_f64().unwrap_or(0.) / 1e6))}small{"Bandwidth saved"}}
+                    div{strong{(s.snapshot["shieldsStats"]["blocked"].as_u64().unwrap_or(0))}small{"Trackers & ads blocked in open tabs"}}
                 }}
                 span class="spacer"{}
                 @if clock {time class="brave-clock" data-clock="true"{}}
@@ -463,7 +463,10 @@ fn address(s: &Shell, style: &str) -> Markup {
         div class="address-group" {
             (location(s))
             @if ["chrome", "brave", "safari"].contains(&style) {(bookmark_button(s))}
-            @if style == "brave" {button class=(if shields {"shields-button on"} else {"shields-button"}) data-op="menu" data-value="shields" title=(if shields {"Shields are up for this site"} else {"Shields are down for this site"}) aria-label="Shields"{(icon("shield"))}}
+            @if style == "brave" {
+                @let count = s.snapshot["blockedCount"].as_u64().filter(|n| *n > 0 && shields);
+                button class=(if shields {"shields-button on"} else {"shields-button"}) data-op="menu" data-value="shields" title=(if shields {"Shields are up for this site"} else {"Shields are down for this site"}) aria-label=(match count {Some(n) => format!("Shields: {n} blocked on this page"), None => "Shields".into()}){(icon("shield"))@if let Some(n) = count {span class="shield-count"{(if n > 99 {"99+".to_string()} else {n.to_string()})}}}
+            }
         }
         @if style == "vivaldi" {form class="location search-field" data-form="address" aria-label="Search"{(icon("search"))input name="address" placeholder=(format!("Search {}",match text(&s.snapshot["preferences"],"search"){"google"=>"Google","bing"=>"Bing",_=>"DuckDuckGo"})) autocomplete="off" spellcheck="false" aria-label="Search the web";}}
     }
@@ -598,17 +601,19 @@ fn browser(s: &Shell, preview: bool) -> Markup {
     let status = flag(&s.config()["layout"], "statusBar");
     let gradient: Vec<&str> = array(&s.snapshot["spaces"]).iter().find(|v| v["id"] == s.snapshot["session"]["spaceID"]).map(|v| array(&v["gradient"]).iter().filter_map(Value::as_str).filter(|h| crate::appearance::hex(h)).collect()).unwrap_or_default();
     let space_style = if gradient.len() == 2 && !s.private() { format!(";--space-from:{};--space-to:{}", gradient[0], gradient[1]) } else { String::new() };
-    html! {div class=(format!("browser-shell style-{style} placement-{} {} {} {} {}{}",placement,if panel{"with-panel"}else{""},if s.sidebar_hidden{"rail-hidden"}else{""},if preview{"editing-preview"}else{""},if strip{"with-strip"}else{""},if s.rail_peek && !preview {" rail-peek"}else{""})) style=(format!("--rail-width:{width}px;--panel-width:{}px{space_style}",s.config()["layout"]["sidebarWidth"].as_f64().unwrap_or(300.))) data-navigation=(text(&s.config()["layout"],"navigation")) data-panel=(if strip {"leading"} else {text(&s.config()["layout"],"sidebar")}) data-tone=[(!s.private()).then_some(tone).flatten()] data-gradient=[(!space_style.is_empty()).then_some("true")] {
+    let compact = flag(&s.config()["layout"], "compactRail") && !horizontal;
+    let width = if compact { 64. } else { width };
+    html! {div class=(format!("browser-shell style-{style} placement-{} {} {} {} {}{}{}",placement,if panel{"with-panel"}else{""},if s.sidebar_hidden{"rail-hidden"}else{""},if preview{"editing-preview"}else{""},if strip{"with-strip"}else{""},if s.rail_peek && !preview {" rail-peek"}else{""},if compact {" compact-rail"} else {""})) style=(format!("--rail-width:{width}px;--panel-width:{}px{space_style}",s.config()["layout"]["sidebarWidth"].as_f64().unwrap_or(300.))) data-navigation=(text(&s.config()["layout"],"navigation")) data-panel=(if strip {"leading"} else {text(&s.config()["layout"],"sidebar")}) data-tone=[(!s.private()).then_some(tone).flatten()] data-gradient=[(!space_style.is_empty()).then_some("true")] {
         div class="window-grip" data-window-drag="true"{}
         @if !horizontal || preview {(rail(s,preview))}
         @if s.sidebar_hidden && !horizontal && !preview {div class="rail-edge" data-rail-edge="true" aria-hidden="true"{}}
 
-        @if !horizontal && !s.sidebar_hidden {div class="rail-resizer" role="separator" tabindex="0" aria-label="Sidebar width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="340" aria-valuenow=(width) data-resize="rail" {}}
+        @if !horizontal && !s.sidebar_hidden && !compact {div class="rail-resizer" role="separator" tabindex="0" aria-label="Sidebar width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="340" aria-valuenow=(width) data-resize="rail" {}}
         main class="browser-main" {
         @if horizontal && placement=="top" && style != "safari" {(horizontal_tabs(s,preview))}
         @if style != "arc" || s.sidebar_hidden || horizontal {(toolbar(s, style, horizontal, panel))}
         @if horizontal && placement=="top" && style == "safari" {(horizontal_tabs(s,preview))}
-        @if (s.sidebar_hidden || horizontal) && !preview {(feedback(s))}
+        @if (s.sidebar_hidden || horizontal || compact) && !preview {(feedback(s))}
         @if flag(&s.config()["layout"],"bookmarksBar") && !s.private() {(crate::views::bookmarks_bar(s))}
         @if !preview {(crate::views::find_bar(s))}
         div class="page-workspace"{@if strip {(panel_strip(s))}div class="page-frame"{
@@ -821,7 +826,7 @@ fn editor_extra(s: &Shell) -> Markup {
                 @let next: Vec<&str> = if on { items.iter().copied().filter(|i| i != key).collect() } else { items.iter().copied().chain([*key]).collect() };
                 button class=(if on {"toolbar-choice selected"} else {"toolbar-choice"}) data-op="editor-value" data-key="toolbarItems" data-json=(serde_json::to_string(&next).unwrap_or_default()) aria-pressed=(on.to_string()){(icon(glyph))span{(label)}}
             }}
-            @for (key, label) in [("panelBar","Panel bar"),("statusBar","Status bar")] {button class="toggle-row" data-op="editor-value" data-key=(key) data-value=((!flag(layout,key)).to_string()) data-type="bool" role="switch" aria-checked=(flag(layout,key).to_string()){span{(label)}span class=(if flag(layout,key){"switch on"}else{"switch"}){span{}}}}
+            @for (key, label) in [("panelBar","Panel bar"),("statusBar","Status bar"),("compactRail","Icon-only sidebar")] {button class="toggle-row" data-op="editor-value" data-key=(key) data-value=((!flag(layout,key)).to_string()) data-type="bool" role="switch" aria-checked=(flag(layout,key).to_string()){span{(label)}span class=(if flag(layout,key){"switch on"}else{"switch"}){span{}}}}
             label class="control-label"{"Split view"}(segments("editor-value","split",if text(layout,"split").is_empty(){"sideBySide"}else{text(layout,"split")},&[("sideBySide","Side by side"),("stacked","Stacked")]))
         }
     }
@@ -1139,7 +1144,7 @@ fn menu(s: &Shell) -> Markup {
         @match s.menu.as_str(){
             "workspaces"=>{div class="menu-label"{"Spaces"}@for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate(){button class="menu-item" data-op="switchSpace" data-id=(text(space,"id")) aria-current=[(space["id"]==s.snapshot["session"]["spaceID"]).then_some("true")]{span class="space-symbol menu-space" data-tone=(index%5){(text(space,"name").chars().next().unwrap_or('S'))}span{(text(space,"name"))}@if space["id"]==s.snapshot["session"]["spaceID"]{(icon("check"))}}}div class="menu-separator"{}(menu_item("New Space","menu","new-space","plus"))}
             "shields"=>{@let site=host(text(s.active(),"url"));@let up=flag(&s.snapshot["preferences"],"blockTrackers")&&!shields_lowered(s);
-                div class="shields-panel"{strong{(site)}p{(if !flag(&s.snapshot["preferences"],"blockTrackers"){"Shields are off for every site."}else if up{"Shields are up. Ads and trackers are blocked on this site."}else{"Shields are down. Nothing is blocked on this site."})}
+                div class="shields-panel"{strong{(site)}@if let Some(n) = s.snapshot["blockedCount"].as_u64().filter(|_| up) {p class="shields-count"{strong{(n)}" requests blocked on this page"}}p{(if !flag(&s.snapshot["preferences"],"blockTrackers"){"Shields are off for every site."}else if up{"Shields are up. Ads and trackers are blocked on this site."}else{"Shields are down. Nothing is blocked on this site."})}
                     @if flag(&s.snapshot["preferences"],"blockTrackers"){button class="toggle-row" data-op="shields-site" role="switch" aria-checked=(up.to_string()){span{strong{"Shields for this site"}}span class=(if up{"switch on"}else{"switch"}){span{}}}}
                     button class="menu-item" data-op="screen" data-value="settings" data-section="privacy"{(icon("settings"))span{"Shields settings"}}}
             }
@@ -1147,6 +1152,8 @@ fn menu(s: &Shell) -> Markup {
             "notes-scope"=>{@for (value,label) in [("space","This Space"),("all","All notes")]{button class="menu-item" data-op="native" data-action="notesScope" data-value=(value){(icon(if text(&s.snapshot,"notesScope")==value{"check"}else{"folder"}))span{(label)}}}}
             "split-choose"=>{div class="menu-label"{"Open beside this page"}@for t in s.tabs().iter().filter(|t|t["id"]!=s.active()["id"] && !text(t,"url").is_empty()){button class="menu-item" data-op="split-with" data-id=(text(t,"id")){(site(t))span{(text(t,"title"))}}}@if s.tabs().iter().filter(|t|!text(t,"url").is_empty()).count()<2{p class="field-help"{"Open a second page, then choose it here."}}}
             "space"=>{div class="menu-group"{(menu_item("New folder","menu","new-folder","folder"))(menu_item("Save tabs as session…","menu","save-session","download"))button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))span{"Archived tabs"}}}
+                div class="menu-separator"{}
+                button class="menu-item" data-op="tidy-tabs" disabled[s.private()]{(icon("spark"))span{"Tidy tabs into folders"}}
                 div class="menu-separator"{}
                 div class="menu-group"{(menu_item("Rename Space","menu","rename-space","edit"))(menu_item("Icon and colors…","menu","space-style","appearance"))(menu_item("Edit layout","screen","editor","sidebar"))(menu_item("New Space","menu","new-space","plus"))}
                 div class="menu-separator"{}

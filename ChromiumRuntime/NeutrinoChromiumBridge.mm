@@ -395,6 +395,7 @@ int query_command=0;
 bool reconciling_windows=false;
 Page* Group(Page* page) { return page->group ? page->group : page; }
 bool RefreshActive(Page* group);
+int BlockedCount(Page* page);
 void SetActive(Page* page);
 void FinishEmptyGroup(Page* group);
 void ReconcileWindows();
@@ -444,6 +445,7 @@ void State(Page* page, bool finished = false) {
   value->SetBool("canGoBack", page->browser->CanGoBack());
   value->SetBool("canGoForward", page->browser->CanGoForward());
   value->SetDouble("zoom",std::pow(1.2,page->published_zoom_level));
+  value->SetInt("blocked",BlockedCount(page));
   // A pristine active page may acquire an inactive extension-created sibling.
   // Publish that inventory without turning the untouched blank page into a URL.
   auto inner=CefListValue::Create();
@@ -492,6 +494,8 @@ Page* AdoptAuxiliaryBrowser(CefRefPtr<CefBrowser> browser,Page* preferred_owner)
 
 struct BlockPolicy {
   std::atomic<bool> enabled{false};
+  /// Requests cancelled since the tab group opened, for the shield count.
+  std::atomic<uint64_t> blocked{0};
   std::shared_ptr<const std::vector<std::string>> domains;
 };
 class BlockedResourceHandler final : public CefResourceRequestHandler {
@@ -507,7 +511,7 @@ class BlockedResourceHandler final : public CefResourceRequestHandler {
     std::string host=CefString(&parts.host).ToString();
     std::transform(host.begin(),host.end(),host.begin(),[](unsigned char ch){ return std::tolower(ch); });
     for (const auto& domain : *domains) {
-      if (host==domain || (host.size()>domain.size() && host.ends_with("."+domain))) return RV_CANCEL;
+      if (host==domain || (host.size()>domain.size() && host.ends_with("."+domain))) { policy_->blocked.fetch_add(1); return RV_CANCEL; }
     }
     return RV_CONTINUE;
   }
@@ -577,6 +581,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+  uint64_t BlockedCount() const { return blocking_->blocked.load(); }
   void SetBlocking(bool enabled,const std::vector<std::string>& domains) {
     std::atomic_store(&blocking_->domains,std::make_shared<const std::vector<std::string>>(domains));
     blocking_->enabled.store(enabled);
@@ -972,6 +977,9 @@ class Client final : public CefClient, public CefLifeSpanHandler,
 // Upstream extension APIs remain active behind the clipped native chrome.
 Page::Page() { [view setWantsLayer:YES]; generation=++next_page_generation; group=this; }
 Page::~Page() { [view release]; }
+int BlockedCount(Page* page) {
+  return page && page->client ? static_cast<int>(std::min<uint64_t>(page->client->BlockedCount(),INT_MAX)) : 0;
+}
 void SetActive(Page* page) {
   auto owner=Group(page);
   if (owner->active==page) return;
