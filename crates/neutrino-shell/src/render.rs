@@ -13,7 +13,7 @@ fn icon_definitions(s: &Shell) -> Markup {
         "shield", "pin", "edit", "sun", "moon", "spark", "undo", "arrow", "user", "grid",
         "external", "grip", "key", "book", "activity", "camera", "plug", "appearance", "quote",
         "focus", "copy", "kebab", "menu", "home", "volume", "muted", "code", "print", "pip", "trash",
-        "minus", "pause", "play", "panel", "star",
+        "minus", "pause", "play", "panel", "star", "rewind", "fast-forward",
     ];
     html! {svg class="icon-definitions" aria-hidden="true"{defs{@for name in names{
         @let key = match name {"bookmark"=>"bookmarks","grid"=>"modules","plus"=>"newTab","download"=>"downloads","edit"=>"notes","book"=>"reader","activity"=>"resources","camera"=>"screenshot","focus"=>"focus",v=>v};
@@ -268,6 +268,12 @@ pub(crate) fn space_mark(space: &Value) -> String {
 pub(crate) fn rail_navigation(s: &Shell) -> Markup {
     html! {div class="rail-navigation" {
         button class="icon-button" data-op="back" title="Back" aria-label="Back" disabled[!flag(&s.snapshot,"canGoBack")]{(icon("back"))}button class="icon-button" data-op="forward" title="Forward" aria-label="Forward" disabled[!flag(&s.snapshot,"canGoForward")]{(icon("forward"))}
+        // Vivaldi's toolbar has Rewind (the site's first page) and Fast Forward (its next page).
+        @if style(s) == "vivaldi" && crate::features::on(s, "fast-forward") {
+            @let blank = text(s.active(), "url").is_empty();
+            button class="icon-button" data-op="page-command" data-value="rewind" title="Rewind" aria-label="Rewind" disabled[blank]{(icon("rewind"))}
+            button class="icon-button" data-op="page-command" data-value="fast-forward" title="Fast Forward" aria-label="Fast Forward" disabled[blank]{(icon("fast-forward"))}
+        }
         (button(if flag(&s.snapshot,"loading"){"Stop loading"}else{"Reload page"},if flag(&s.snapshot,"loading"){"stop"}else{"reload"},if flag(&s.snapshot,"loading"){"close"}else{"reload"}))
     }}
 }
@@ -707,6 +713,7 @@ fn horizontal_tabs(s: &Shell, preview: bool) -> Markup {
         }
         (button("New tab","newTab","plus"))
         div class="strip-spacer" data-window-drag="true" data-drop-group="today" {}
+        @if ["chrome", "brave", "gx"].contains(&style(s)) {button class="icon-button tab-search" data-op="menu" data-value="tab-search" title="Search tabs (⇧⌘A)" aria-label="Search tabs"{(icon("down"))}}
     }
     @if stacks {(crate::views::stack_row(s, preview))}
     }

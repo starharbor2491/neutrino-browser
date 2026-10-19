@@ -322,9 +322,7 @@
           next.setSelectionRange(...selection);
         } catch {}
     } else if (dialog)
-      dialog
-        .querySelector("input,button:not(:disabled),select")
-        ?.focus({ preventScroll: true });
+      firstControl(dialog)?.focus({ preventScroll: true });
     else if (hadDialog && returnFocus) {
       root.querySelector(returnFocus)?.focus({ preventScroll: true });
       returnFocus = null;
@@ -355,9 +353,7 @@
     positionDialog();
     const menu = root.querySelector(".anchored-menu .popover-menu");
     if (menu && previousMenu !== menu.dataset.menu && menu.dataset.menu !== "suggest")
-      menu
-        .querySelector("input,button:not(:disabled),select")
-        ?.focus({ preventScroll: true });
+      firstControl(menu)?.focus({ preventScroll: true });
     const step = root.querySelector(".onboarding");
     if (step && previousStep !== step.className) {
       step.classList.add("setup-enter");
@@ -449,6 +445,13 @@
     updateSounds();
     scalePreview();
     scheduleGeometry();
+  }
+  // A menu or dialog's text field takes focus before its header's Close button.
+  function firstControl(container) {
+    return (
+      container.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not(:disabled),textarea') ||
+      container.querySelector("input,button:not(:disabled),select")
+    );
   }
   // The bookmarks bar shows what fits; » opens a menu with the rest, as in Chrome and Vivaldi.
   function updateBookmarkOverflow() {

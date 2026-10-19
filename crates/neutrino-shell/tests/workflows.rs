@@ -338,6 +338,17 @@ fn fake_my_history_sends_one_kind_of_visit() {
     assert!(commands(&s.dispatch(json!({"op":"fake-history","value":"learning"}))).is_empty());
 }
 #[test]
+fn tab_search_lists_and_filters_open_tabs() {
+    let mut s = shell();
+    let html = s.dispatch(json!({"op":"menu","value":"tab-search"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Search open tabs") && html.contains("data-op=\"selectTab\" data-id=\"a\"") && html.contains("data-op=\"selectTab\" data-id=\"c\""));
+    let html = s.dispatch(json!({"op":"name","value":"example.com"}))["html"].as_str().unwrap().to_string();
+    let menu = &html[html.find("popover-menu").unwrap()..];
+    assert!(menu.contains("data-id=\"a\"") && !menu.contains("data-id=\"c\""));
+    s.dispatch(json!({"op":"selectTab","id":"a"}));
+    assert!(s.menu.is_empty());
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

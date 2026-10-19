@@ -369,6 +369,16 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
                 div class="button-row"{button class="button" type="button" data-op="native" data-action="removeBookmark" data-id=(id){"Delete"}button class="button primary" type="submit"{"Save"}}
             }}
         }
+        // Chrome's tab search: every open tab in this Space, filtered as you type.
+        "tab-search" => {
+            let query = s.name.to_lowercase();
+            let tabs: Vec<&Value> = s.tabs().iter().filter(|t| query.is_empty() || title(t).to_lowercase().contains(&query) || text(t, "url").to_lowercase().contains(&query)).collect();
+            html! {
+                label class="field"{span{"Search open tabs"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Title or address" maxlength="200" autocomplete="off";}
+                @if tabs.is_empty() {p class="field-help"{"No open tab matches."}}
+                @for t in tabs.iter().take(60) {button class="menu-item" data-op="selectTab" data-id=(text(t,"id")){(site(t))span{(title(t))@if !text(t,"url").is_empty() {small{(host(text(t,"url")))}}}}}
+            }
+        }
         m if m.starts_with("bm-overflow:") => {
             let first: usize = m[12..].parse().unwrap_or(0);
             let (loose, folders) = bar_entries(s);
@@ -405,6 +415,7 @@ pub fn menu_title(m: &str) -> Option<&'static str> {
         m if m.starts_with("edit-bookmark:") => "Edit bookmark",
         m if m.starts_with("board-note:") => "Add a note",
         m if m.starts_with("shortcut-conflict:") => "Shortcut in use",
+        "tab-search" => "Search tabs",
         _ => return None,
     })
 }
