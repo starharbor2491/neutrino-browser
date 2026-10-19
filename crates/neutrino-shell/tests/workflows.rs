@@ -327,6 +327,17 @@ fn a_shortcut_in_use_moves_only_after_confirmation() {
     assert_eq!(commands(&r), &[json!({"op":"setShortcut","action":"new-window","value":"ctrl+alt+k"})]);
 }
 #[test]
+fn fake_my_history_sends_one_kind_of_visit() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"fake-history","value":"learning"}));
+    let entries = commands(&r)[0]["entries"].as_array().unwrap().clone();
+    assert_eq!(commands(&r)[0]["op"], "fakeHistory");
+    assert!(entries.len() >= 6 && entries.iter().all(|e| e["url"].as_str().unwrap().starts_with("https://")));
+    assert!(commands(&s.dispatch(json!({"op":"fake-history","value":"anything"}))).is_empty());
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.fake-history","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    assert!(commands(&s.dispatch(json!({"op":"fake-history","value":"learning"}))).is_empty());
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

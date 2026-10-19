@@ -786,6 +786,19 @@ final class BrowserFeatures {
                 } catch { self?.app.notice = error.localizedDescription }
             }
         case "importPasswords": guard regular else { break }; importPasswords(profileID)
+        case "fakeHistory":
+            // Opera GX's Fake My History: visits spread over the last day, as ordinary entries.
+            guard regular, app.feature("fake-history"), let entries = command["entries"] as? [[String: Any]] else { break }
+            let now = Date()
+            let visits = entries.prefix(40).flatMap { entry -> [HistoryEntry] in
+                guard let raw = entry["url"] as? String, let url = URL(string: raw), AddressResolver.isWebURL(url) else { return [] }
+                let title = String((entry["title"] as? String ?? url.host ?? "Website").prefix(512))
+                return (0..<Int.random(in: 1...3)).map { _ in
+                    HistoryEntry(profileID: profileID, title: title, url: url, visitedAt: now.addingTimeInterval(-Double.random(in: 60...86_400)))
+                }
+            }
+            app.library.history = Array((app.library.history + visits).sorted { $0.visitedAt < $1.visitedAt }.suffix(10_000))
+            app.notice = "Added \(visits.count) visits to your history."
         case "importBrowserPasswords":
             guard regular, app.feature("password-manager"), let source = command["value"] as? String else { break }
             Task { @MainActor [weak self] in

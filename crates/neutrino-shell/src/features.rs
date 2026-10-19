@@ -13,10 +13,44 @@ pub const OPS: &[&str] = &[
     "tab-action", "rename-tab", "select-index", "tab-step", "reopen-closed", "find-open", "find-query",
     "find-step", "find-close", "address-input", "suggest-move", "suggest-accept", "page-command",
     "nav-history", "go-history", "site-setting", "clear-data", "site-data", "edit-bookmark", "reading",
-    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "delete-space",
+    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "fake-history", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
+];
+
+/// Fake My History kinds: key, label, and the pages a visit can be to.
+pub const FAKE_HISTORY: &[(&str, &str, &[(&str, &str)])] = &[
+    ("productive", "Productive", &[
+        ("Getting Things Done – Wikipedia", "https://en.wikipedia.org/wiki/Getting_Things_Done"),
+        ("Pomodoro Technique – Wikipedia", "https://en.wikipedia.org/wiki/Pomodoro_Technique"),
+        ("Spreadsheet – Wikipedia", "https://en.wikipedia.org/wiki/Spreadsheet"),
+        ("MDN Web Docs", "https://developer.mozilla.org/en-US/"),
+        ("The Rust Programming Language", "https://doc.rust-lang.org/book/"),
+        ("Swift.org – Documentation", "https://www.swift.org/documentation/"),
+        ("Time management – Wikipedia", "https://en.wikipedia.org/wiki/Time_management"),
+        ("Inbox zero – Wikipedia", "https://en.wikipedia.org/wiki/Inbox_zero"),
+    ]),
+    ("learning", "Learning", &[
+        ("Photosynthesis – Wikipedia", "https://en.wikipedia.org/wiki/Photosynthesis"),
+        ("Roman Empire – Wikipedia", "https://en.wikipedia.org/wiki/Roman_Empire"),
+        ("Linear algebra – Wikipedia", "https://en.wikipedia.org/wiki/Linear_algebra"),
+        ("Khan Academy", "https://www.khanacademy.org/"),
+        ("Project Gutenberg", "https://www.gutenberg.org/"),
+        ("Plate tectonics – Wikipedia", "https://en.wikipedia.org/wiki/Plate_tectonics"),
+        ("Byzantine Empire – Wikipedia", "https://en.wikipedia.org/wiki/Byzantine_Empire"),
+        ("Periodic table – Wikipedia", "https://en.wikipedia.org/wiki/Periodic_table"),
+    ]),
+    ("wholesome", "Wholesome", &[
+        ("Bread – Wikipedia", "https://en.wikipedia.org/wiki/Bread"),
+        ("Houseplant – Wikipedia", "https://en.wikipedia.org/wiki/Houseplant"),
+        ("Knitting – Wikipedia", "https://en.wikipedia.org/wiki/Knitting"),
+        ("Golden Retriever – Wikipedia", "https://en.wikipedia.org/wiki/Golden_Retriever"),
+        ("Birdwatching – Wikipedia", "https://en.wikipedia.org/wiki/Birdwatching"),
+        ("Tea – Wikipedia", "https://en.wikipedia.org/wiki/Tea"),
+        ("Hiking – Wikipedia", "https://en.wikipedia.org/wiki/Hiking"),
+        ("Origami – Wikipedia", "https://en.wikipedia.org/wiki/Origami"),
+    ]),
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -52,6 +86,7 @@ pub const MODULES: &[(&str, &str, &[&str])] = &[
     ("sounds", "Media and sound", &["gx"]),
     ("limiter", "Performance", &["gx"]),
     ("panic", "Performance", &["gx"]),
+    ("fake-history", "Performance", &["gx"]),
     ("wallpapers", "Look", &["gx", "vivaldi", "brave"]),
     ("theme-schedule", "Look", &["vivaldi"]),
     ("interface-css", "Look", &[]),
@@ -557,6 +592,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "address-book" | "card" => "autofill",
         "feed" => "feeds",
         "browser-passwords" => "password-manager",
+        "fake-history" => "fake-history",
         "page-command" if value == "panic" => "panic",
         "page-command" if value == "break" => "break-mode",
         "page-command" if value == "fast-forward" || value == "rewind" => "fast-forward",
@@ -901,6 +937,14 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             let gradient: Vec<&str> = array(&r["gradient"]).iter().filter_map(Value::as_str).filter(|h| crate::appearance::hex(h)).take(2).collect();
             if regular && (emoji.chars().count() <= 2) {
                 commands.push(json!({"op":"setSpaceAppearance","id":target,"emoji":emoji,"gradient":gradient}));
+            }
+        }
+        // Opera GX's Fake My History: ordinary visits of one kind, dated over the last day by the host.
+        "fake-history" => {
+            if let Some((_, _, sites)) = FAKE_HISTORY.iter().find(|c| c.0 == value) {
+                if regular {
+                    commands.push(json!({"op":"fakeHistory","entries":sites.iter().map(|(title, url)| json!({"title":title,"url":url})).collect::<Vec<_>>()}));
+                }
             }
         }
         // Saved passwords from a Chromium-family browser, decrypted by the host with that browser's Keychain key.

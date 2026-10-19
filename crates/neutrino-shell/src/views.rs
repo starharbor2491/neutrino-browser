@@ -1069,6 +1069,11 @@ pub fn gx_control(s: &Shell) -> Markup {
         @for r in rows {div class="list-row"{div{strong{(text(r,"title"))}small{(format!("{:.0} MB · {:.0}% CPU", r["memory"].as_f64().unwrap_or(0.), r["cpu"].as_f64().unwrap_or(0.)))}}button class="button quiet" data-op="tab-action" data-id=(text(r,"id")) data-value="sleep"{"Sleep"}}}
         h3{"GX Cleaner"}
         div class="list-row"{div{strong{"Clean browsing data"}small{"Cache, cookies, history and downloads, by time range."}}button class="button" data-op="menu" data-value="clear-data"{"Clean…"}}
+        @if features::on(s, "fake-history") && !s.private() {
+            h3{"Fake My History"}
+            p class="field-help"{"Adds visits of one kind to your history, dated over the last day. They are ordinary history entries you can delete."}
+            div class="button-row"{@for (key, label, _) in features::FAKE_HISTORY {button class="button" data-op="fake-history" data-value=(key){(label)}}}
+        }
     }}
 }
 
