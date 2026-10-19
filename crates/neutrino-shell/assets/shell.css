@@ -5722,7 +5722,14 @@ body.split-armed .split-drop {
 .split-drop-zone.drop-hover {
   background: color-mix(in oklab, var(--accent) 20%, transparent);
 }
-/* Hidden sidebar: reveal at the window edge */
+/* Hidden sidebar: reveal at the window edge. Native pages sit above the interface,
+   so the page leaves the edge strip uncovered. */
+.browser-shell.rail-hidden:not(.placement-top):not(.placement-bottom):not(.placement-trailing) {
+  padding-left: 8px;
+}
+.browser-shell.placement-trailing.rail-hidden {
+  padding-right: 8px;
+}
 .rail-edge {
   position: absolute;
   left: 0;
