@@ -53,6 +53,13 @@ public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
     public var chromiumPages: [ChromiumSessionPage]?
     public var folderID: UUID?
     public var lastUsedAt: Date?
+    /// A name the person gave the tab; shown instead of the page title.
+    public var customTitle: String?
+    public var muted: Bool?
+    /// The address a pinned tab returns to.
+    public var pinnedURL: URL?
+    /// Set when the tab was opened from one of the Profile's Favorites.
+    public var favoriteID: UUID?
     public init(id: UUID = UUID(), title: String = "New tab", url: URL? = nil, pinned: Bool = false, parentID: UUID? = nil, engineID: BrowserEngineID? = nil, chromiumPages: [ChromiumSessionPage]? = nil) {
         self.id = id; self.title = title; self.url = url; self.pinned = pinned; self.parentID = parentID; self.engineID = engineID; self.chromiumPages = chromiumPages
     }
@@ -107,8 +114,10 @@ public struct Bookmark: Identifiable, Codable, Equatable, Sendable {
     public var title: String
     public var url: URL
     public var createdAt: Date
-    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, createdAt: Date = Date()) {
-        self.id = id; self.profileID = profileID; self.title = title; self.url = url; self.createdAt = createdAt
+    /// A one-level folder name; "Speed Dial" and "Bookmarks bar" are shown specially.
+    public var folder: String?
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, createdAt: Date = Date(), folder: String? = nil) {
+        self.id = id; self.profileID = profileID; self.title = title; self.url = url; self.createdAt = createdAt; self.folder = folder
     }
 }
 public struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
@@ -202,6 +211,8 @@ public struct Theme: Codable, Equatable, Sendable {
     public var tabsAppearance: ComponentAppearance?
     public var navigationAppearance: ComponentAppearance?
     public var sidebarAppearance: ComponentAppearance?
+    /// Short interface sounds for clicks and tab changes.
+    public var sounds: Bool?
     public init() {}
     public mutating func normalize() {
         if let normalized = try? RustCore.transform(self, operation: "normalizeTheme") { self = normalized }
@@ -222,6 +233,16 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
     public var hideTabStrip: Bool?
     public var sidebarAutoHide: Bool?
     public var secondaryPanel: String?
+    /// A strip of panel buttons beside the window, as in Opera GX and Vivaldi.
+    public var panelBar: Bool?
+    /// Which panels the strip shows, in order.
+    public var panelItems: [String]?
+    /// "menu" keeps page tools in the page menu; "toolbar" shows them as buttons.
+    public var pageTools: String?
+    /// Extra toolbar buttons chosen in Customize.
+    public var toolbarItems: [String]?
+    /// The first split pane's share of the window, from 0.2 to 0.8.
+    public var splitRatio: Double?
     public init() {}
     public mutating func normalize() {
         if let normalized = try? RustCore.transform(self, operation: "normalizeLayout") { self = normalized }
@@ -253,7 +274,153 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var autoArchiveDays: Int?
     public var ai: AIConfiguration?
     public var startGuideHidden: Bool?
+    /// Ads are blocked with trackers unless this is false.
+    public var blockAds: Bool?
+    /// Sites (hosts without "www.") where blocking is turned off.
+    public var shieldsDown: [String]?
+    public var searchEngines: [SearchEngine]?
+    /// A custom engine used instead of `search` when set.
+    public var defaultSearchID: String?
+    public var siteZoom: [String: Double]?
+    public var siteSettings: [String: SiteSettings]?
+    public var readingList: [ReadingItem]?
+    public var savedSessions: [SavedSession]?
+    public var boards: [Board]?
+    public var webPanels: [WebPanel]?
+    public var favorites: [FavoriteSite]?
+    public var sleepAfterMinutes: Int?
+    public var memoryLimitMB: Int?
+    public var cpuLimit: Int?
+    public var networkLimitKBps: Int?
+    public var batterySaver: Bool?
+    public var hideCookieBanners: Bool?
+    public var blockThirdPartyCookies: Bool?
+    public var httpsUpgrade: Bool?
+    public var stripTracking: Bool?
+    public var customBlockList: [String]?
+    public var startupPages: [String]?
+    /// Extra keyboard shortcuts: action identifier to "ctrl+alt+shift+cmd+key".
+    public var shortcuts: [String: String]?
+    public var commandChains: [CommandChain]?
+    public var interfaceCSS: String?
+    public var startPage: [String: Bool]?
+    public var themeSchedule: ThemeSchedule?
+    public var readerStyle: ReaderStyle?
+    public var addresses: [AutofillAddress]?
+    public var downloadFolder: String?
+    public var interfaceSounds: Bool?
+    public var keyboardSounds: Bool?
+    public var backgroundMusic: Bool?
+    public var musicVolume: Double?
+    public var littleArc: Bool?
+    public var peek: Bool?
+    public var tabIslands: Bool?
     public init() {}
+}
+public struct SearchEngine: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var keyword: String
+    /// An HTTPS address with %s where the search terms go.
+    public var url: String
+    public init(id: String = UUID().uuidString, name: String, keyword: String, url: String) { self.id = id; self.name = name; self.keyword = keyword; self.url = url }
+}
+/// Per-site choices from the site information menu and page tools.
+public struct SiteSettings: Codable, Equatable, Sendable {
+    public var blockScripts: Bool?
+    public var allowPopups: Bool?
+    public var muted: Bool?
+    /// "allow", "block" or nil to ask.
+    public var camera: String?
+    public var microphone: String?
+    /// "dark", "grayscale", "sepia", "invert", "contrast" or "noimages".
+    public var filter: String?
+    public var css: String?
+    public var hide: [String]?
+    public init() {}
+}
+public struct ReadingItem: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public var addedAt: Date
+    public var read: Bool
+    /// Saved to the Playlist: a page with video or music.
+    public var media: Bool?
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, media: Bool = false) {
+        self.id = id; self.profileID = profileID; self.title = title; self.url = url; addedAt = Date(); read = false; self.media = media
+    }
+}
+public struct SavedPage: Codable, Equatable, Sendable {
+    public var title: String
+    public var url: URL
+    public init(title: String, url: URL) { self.title = title; self.url = url }
+}
+public struct SavedSession: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var name: String
+    public var tabs: [SavedPage]
+    public var savedAt: Date
+    public init(id: UUID = UUID(), profileID: UUID, name: String, tabs: [SavedPage]) { self.id = id; self.profileID = profileID; self.name = name; self.tabs = tabs; savedAt = Date() }
+}
+public struct BoardItem: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    /// "link" or "note".
+    public var kind: String
+    public var title: String
+    public var url: URL?
+    public var text: String
+    public var x: Double
+    public var y: Double
+    public init(id: UUID = UUID(), kind: String, title: String, url: URL?, text: String, x: Double, y: Double) {
+        self.id = id; self.kind = kind; self.title = title; self.url = url; self.text = text; self.x = x; self.y = y
+    }
+}
+public struct Board: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var name: String
+    public var items: [BoardItem]
+    public init(id: UUID = UUID(), profileID: UUID, name: String) { self.id = id; self.profileID = profileID; self.name = name; items = [] }
+}
+/// A website kept open beside the page in the panel strip.
+public struct WebPanel: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL) { self.id = id; self.profileID = profileID; self.title = title; self.url = url }
+}
+/// A site shown above every Space of a Profile, as Arc's Favorites are.
+public struct FavoriteSite: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL) { self.id = id; self.profileID = profileID; self.title = title; self.url = url }
+}
+public struct CommandChain: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var steps: [String]
+    public init(id: UUID = UUID(), name: String, steps: [String]) { self.id = id; self.name = name; self.steps = steps }
+}
+public struct AutofillAddress: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name = "", organization = "", street = "", city = "", region = "", postalCode = "", country = "", email = "", phone = ""
+    public init(id: UUID = UUID()) { self.id = id }
+}
+public struct ThemeSchedule: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var light: String
+    public var dark: String
+}
+public struct ReaderStyle: Codable, Equatable, Sendable {
+    public var size: Int
+    public var theme: String
+    public var font: String
 }
 public struct LibraryState: Codable, Equatable, Sendable {
     public var profiles: [Profile] = [Profile(name: "Personal")]

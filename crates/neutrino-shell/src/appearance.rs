@@ -17,13 +17,102 @@ pub const PRESETS: &[(&str, &str, &str)] = &[
         "Opera GX",
         "Dark workspace and visible resource tools",
     ),
+    ("vivaldi", "Vivaldi", "Panels, a status bar and every option"),
 ];
+
+/// Onboarding after the layout choice follows the chosen browser's own first-run
+/// flow. Account and sync steps are left out: they need the vendor's service.
+pub fn setup_flow(preset: &str) -> &'static [&'static str] {
+    match preset {
+        "arc" => &["layout", "arc-welcome", "arc-theme", "arc-import", "arc-favorites", "arc-default", "arc-tour"],
+        "gx" => &["layout", "gx-welcome", "gx-theme", "gx-sounds", "gx-sidebar", "gx-blocking", "gx-import"],
+        "vivaldi" => &["layout", "vivaldi-welcome", "vivaldi-edition", "vivaldi-import", "vivaldi-theme", "vivaldi-tabs", "vivaldi-blocking", "vivaldi-done"],
+        "brave" => &["layout", "brave-welcome", "brave-import", "brave-shields", "brave-done"],
+        "chrome" => &["layout", "chrome-welcome", "chrome-theme", "chrome-default"],
+        "safari" => &["layout"],
+        _ => &["layout", "workspace", "import", "appearance", "defaults", "ai", "review"],
+    }
+}
+
+/// Sites offered as favorites in the Arc-style setup: (name, address).
+pub const FAVORITE_SITES: &[(&str, &str)] = &[
+    ("Gmail", "https://mail.google.com/"),
+    ("Calendar", "https://calendar.google.com/"),
+    ("YouTube", "https://www.youtube.com/"),
+    ("GitHub", "https://github.com/"),
+    ("Notion", "https://www.notion.so/"),
+    ("Figma", "https://www.figma.com/"),
+    ("Slack", "https://app.slack.com/"),
+    ("Spotify", "https://open.spotify.com/"),
+    ("Linear", "https://linear.app/"),
+    ("WhatsApp", "https://web.whatsapp.com/"),
+    ("X", "https://x.com/"),
+    ("Reddit", "https://www.reddit.com/"),
+];
+/// Tools a GX-style sidebar can show: (id, label).
+pub const SIDEBAR_TOOLS: &[(&str, &str)] = &[
+    ("control", "Resource control"),
+    ("messengers", "Messengers"),
+    ("bookmarks", "Bookmarks"),
+    ("history", "History"),
+    ("downloads", "Downloads"),
+    ("notes", "Notes"),
+    ("player", "Media player"),
+];
+/// Opera GX's named color themes, applied as a custom accent.
+pub const GX_THEMES: &[(&str, &str)] = &[
+    ("GX Classic", "fa1e4e"),
+    ("Ultraviolet", "8f44fd"),
+    ("Hackerman", "1ed760"),
+    ("Lambda", "ff6a00"),
+    ("Frutti di mare", "1ec8e6"),
+    ("Rose quartz", "ff6fa8"),
+];
+/// Vivaldi's bundled themes: (id, label, color mode, accent hex).
+pub const VIVALDI_THEMES: &[(&str, &str, &str, &str)] = &[
+    ("vivaldi", "Vivaldi", "light", "ef3939"),
+    ("dark", "Dark", "dark", "ef3939"),
+    ("blueprint", "Blueprint", "dark", "4a90d9"),
+    ("subtle", "Subtle", "light", "6a7f99"),
+    ("system", "Match system", "system", "ef3939"),
+];
+
+/// The configuration a finished setup applies, shared by the macOS host and tests.
+pub fn setup_configuration(setup: &Value) -> Value {
+    let id = setup["preset"].as_str().filter(|p| PRESETS.iter().any(|x| x.0 == *p)).unwrap_or("neutrino");
+    let mut c = preset(id).unwrap_or_default();
+    if let Some(accent) = setup["accent"].as_str().filter(|a| ["purple", "blue", "teal", "orange", "pink"].contains(a)) {
+        c["theme"]["accent"] = json!(accent);
+    }
+    if let Some(mode) = setup["appearance"].as_str().filter(|m| ["system", "light", "dark"].contains(m)) {
+        c["theme"]["colorMode"] = json!(mode);
+    }
+    if let Some(tabs) = setup["layout"].as_str().filter(|t| ["leading", "trailing", "top", "bottom"].contains(t)) {
+        c["layout"]["tabs"] = json!(tabs);
+    }
+    if let Some(hex_value) = setup["accentHex"].as_str().filter(|h| hex(h)) {
+        c["theme"]["accentHex"] = json!(hex_value.trim_start_matches('#'));
+    }
+    if id == "gx" {
+        c["theme"]["sounds"] = json!(setup["sounds"].as_bool().unwrap_or(true));
+    }
+    if id == "vivaldi" {
+        let edition = setup["edition"].as_str().unwrap_or("classic");
+        c["layout"]["statusBar"] = json!(edition != "essentials");
+        c["layout"]["panelBar"] = json!(edition != "essentials");
+        c["layout"]["bookmarksBar"] = json!(edition == "full");
+        c["layout"]["pageTools"] = json!(if edition == "full" { "toolbar" } else { "menu" });
+    }
+    c["theme"] = normalize_theme(c["theme"].clone());
+    c["layout"] = normalize_layout(c["layout"].clone());
+    c
+}
 
 pub fn preset(id: &str) -> Option<Value> {
     if !PRESETS.iter().any(|p| p.0 == id) {
         return None;
     }
-    let horizontal = matches!(id, "chrome" | "safari" | "brave");
+    let horizontal = matches!(id, "chrome" | "safari" | "brave" | "gx" | "vivaldi");
     let mut config = json!({
         "theme":{"design":"graphite","colorMode":"dark","accent":"purple","density":"comfortable","cornerRadius":8.,"transparency":false,"reducedMotion":false,"iconPack":"outline","iconStroke":1.7,"preset":id},
         "layout":{"tabs":if horizontal{"top"}else{"leading"},"navigation":"top","sidebar":"trailing","sidebarWidth":300.,"tabsWidth":248.,"bookmarksBar":id=="chrome","statusBar":false,"treeTabs":false}
@@ -47,9 +136,17 @@ pub fn preset(id: &str) -> Option<Value> {
         }
         "gx" => {
             config["theme"]["accent"] = json!("pink");
+            config["theme"]["accentHex"] = json!("fa1e4e");
             config["theme"]["iconPack"] = json!("precision");
             config["theme"]["cornerRadius"] = json!(4.);
-            config["layout"]["secondaryPanel"] = json!("resources");
+            config["layout"]["panelBar"] = json!(true);
+        }
+        "vivaldi" => {
+            config["theme"]["colorMode"] = json!("system");
+            config["theme"]["accentHex"] = json!("ef3939");
+            config["theme"]["cornerRadius"] = json!(6.);
+            config["layout"]["panelBar"] = json!(true);
+            config["layout"]["statusBar"] = json!(true);
         }
         _ => {}
     }
@@ -117,6 +214,9 @@ pub fn normalize_layout(mut l: Value) -> Value {
     }
     if l["treeTabs"] == true && matches!(l["tabs"].as_str(), Some("top" | "bottom")) {
         l["tabs"] = json!("leading");
+    }
+    if l["pageTools"].as_str().is_some_and(|v| !["menu", "toolbar"].contains(&v)) {
+        l["pageTools"] = Value::Null;
     }
     if l["secondaryPanel"]
         .as_str()

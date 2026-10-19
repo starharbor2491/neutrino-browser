@@ -1429,9 +1429,9 @@ void Command(void* opaque,int command,const char* text,double value) {
   if (command==NEUTRINO_CEF_POPUPS) { owner->popups=value!=0; return; }
   if (command==NEUTRINO_CEF_SET_BLOCKING) {
     std::vector<std::string> domains; std::string source=text ? text : "";
-    if (source.size()>32768) return;
+    if (source.size()>262144) return;
     size_t offset=0;
-    while (offset<source.size() && domains.size()<200) {
+    while (offset<source.size() && domains.size()<6000) {
       const size_t end=source.find('\n',offset);
       const std::string domain=source.substr(offset,end==std::string::npos ? end : end-offset);
       if (!domain.empty() && domain.size()<=253 && domain.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-")==std::string::npos) domains.push_back(domain);
@@ -1521,6 +1521,30 @@ void Command(void* opaque,int command,const char* text,double value) {
       if (!text || !*text) host->StopFinding(true);
       else host->Find(text,value==0,false,true);
       break;
+    case NEUTRINO_CEF_MUTE: host->SetAudioMuted(value!=0); break;
+    case NEUTRINO_CEF_CHROME_COMMAND: {
+      // A fixed set of page commands; nothing that changes settings or profiles.
+      static const std::set<std::string> allowed={"IDC_PRINT","IDC_DEV_TOOLS","IDC_DEV_TOOLS_INSPECT","IDC_SAVE_PAGE"};
+      const std::string name=text ? text : "";
+      if (!allowed.count(name)) break;
+      const int id=cef_id_for_command_id_name(name.c_str());
+      if (id>0 && host->CanExecuteChromeCommand(id)) host->ExecuteChromeCommand(id,CEF_WOD_CURRENT_TAB);
+      else Message(owner,NEUTRINO_CEF_NOTICE,"Chrome can’t do that for this page.");
+      break;
+    }
+    case NEUTRINO_CEF_PREFERENCE: {
+      const std::string name=text ? text : "";
+      if (name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode") break;
+      if (!std::isfinite(value) || value<0 || value>2) break;
+      auto context=host->GetRequestContext();
+      if (!context || !context->CanSetPreference(name)) break;
+      auto preference=CefValue::Create();
+      if (name=="profile.cookie_controls_mode") preference->SetInt(static_cast<int>(value));
+      else preference->SetBool(value!=0);
+      CefString error;
+      context->SetPreference(name,preference,error);
+      break;
+    }
   }
 }
 // Inspect only this process's own accessibility objects, and only in the

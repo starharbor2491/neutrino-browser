@@ -487,6 +487,52 @@ final class AppState: ObservableObject {
             return true
         } catch { notice = error.localizedDescription; return false }
     }
+    /// Imports bookmarks another browser keeps on this Mac, skipping ones already saved.
+    @discardableResult
+    func importBrowserData(from source: String, profileID: UUID) -> Bool {
+        guard !finalQuitDataFrozen else { notice = "Wait for Neutrino to finish saving before importing bookmarks."; return false }
+        guard !deletingProfileIDs.contains(profileID), library.profiles.contains(where: { $0.id == profileID }) else { notice = "This profile is unavailable."; return false }
+        let names = ["chrome": "Chrome", "safari": "Safari", "firefox": "Firefox", "edge": "Edge", "brave": "Brave", "arc": "Arc", "vivaldi": "Vivaldi", "opera": "Opera", "operagx": "Opera GX"]
+        guard let name = names[source] else { return false }
+        var found: [(String, URL)] = []
+        do {
+            if source == "safari" {
+                found = try safariBookmarks()
+            } else {
+                let result = try RustCore.request(["op": "browserBookmarks", "source": source, "home": FileManager.default.homeDirectoryForCurrentUser.path])
+                found = ((result as? [[String: Any]]) ?? []).compactMap { item in
+                    guard let url = (item["url"] as? String).flatMap(URL.init(string:)), AddressResolver.isWebURL(url) else { return nil }
+                    let title = (item["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? url.host ?? "Website"
+                    return (title, url)
+                }
+            }
+        } catch { notice = error.localizedDescription; return false }
+        var urls = Set(library.bookmarks.filter { $0.profileID == profileID }.map(\.url))
+        let additions = found.filter { urls.insert($0.1).inserted }.map { Bookmark(profileID: profileID, title: String($0.0.prefix(512)), url: $0.1) }
+        library.bookmarks.append(contentsOf: additions)
+        notice = additions.isEmpty ? "No new bookmarks found in \(name)." : "Imported \(additions.count) bookmarks from \(name)."
+        return true
+    }
+    private func safariBookmarks() throws -> [(String, URL)] {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Safari/Bookmarks.plist")
+        guard let data = try? Data(contentsOf: file) else {
+            throw ValidationError("macOS protects Safari’s bookmarks. Allow Neutrino in System Settings → Privacy & Security → Full Disk Access, then import again.")
+        }
+        guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw ValidationError("Safari’s bookmarks file couldn’t be read.")
+        }
+        var found: [(String, URL)] = []
+        func walk(_ node: [String: Any]) {
+            guard found.count < 20_000 else { return }
+            if node["WebBookmarkType"] as? String == "WebBookmarkTypeLeaf", let address = node["URLString"] as? String,
+               let url = URL(string: address), AddressResolver.isWebURL(url) {
+                found.append(((node["URIDictionary"] as? [String: Any])?["title"] as? String ?? url.host ?? "Website", url))
+            }
+            for child in node["Children"] as? [[String: Any]] ?? [] { walk(child) }
+        }
+        walk(root)
+        return found
+    }
     func exportBookmarks(profileID: UUID) {
         do { saveFile(try BookmarkExchange.export(library.bookmarks.filter { $0.profileID == profileID }), name: "Neutrino Bookmarks.html", type: .html) }
         catch { notice = error.localizedDescription }

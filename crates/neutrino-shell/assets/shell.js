@@ -23,7 +23,10 @@
     patching = false,
     feedbackTimer = null,
     feedbackMessage = "",
-    wheelGesture = { sum: 0, last: 0, locked: false };
+    wheelGesture = { sum: 0, last: 0, locked: false },
+    shortcutMap = new Map(),
+    activeTab = null,
+    inputTimers = {};
   const native = () => window.webkit?.messageHandlers?.neutrino;
   const textInputSelector =
     "textarea,input:not([type=range]):not([type=checkbox]):not([type=radio])";
@@ -219,6 +222,8 @@
       announce(result.error);
       return;
     }
+    if (Array.isArray(result.shortcuts))
+      shortcutMap = new Map(result.shortcuts.map(([binding, action]) => [binding, action]));
     if (!result.html) return;
     patching = true;
     const previousMenu = root.querySelector(".popover-menu")?.dataset.menu;
@@ -349,7 +354,7 @@
     positionMenu();
     positionDialog();
     const menu = root.querySelector(".anchored-menu .popover-menu");
-    if (menu && previousMenu !== menu.dataset.menu)
+    if (menu && previousMenu !== menu.dataset.menu && menu.dataset.menu !== "suggest")
       menu
         .querySelector("input,button:not(:disabled),select")
         ?.focus({ preventScroll: true });
@@ -437,9 +442,106 @@
       );
     announce(result.announce);
     patching = false;
+    revealActiveTab();
+    updateClocks();
+    applySchedule();
+    updateSounds();
     scalePreview();
     scheduleGeometry();
   }
+  // Keep the selected tab visible after it changes, in the sidebar and in tab strips.
+  function revealActiveTab() {
+    const tab = root.querySelector(".browser-shell:not(.editing-preview) .tab-row.active[data-tab]");
+    const id = tab?.dataset.tab || null;
+    if (!tab || id === activeTab) {
+      activeTab = id;
+      return;
+    }
+    activeTab = id;
+    tab.scrollIntoView({ block: "nearest", inline: "nearest", behavior: motionAllowed() ? "smooth" : "auto" });
+  }
+  function updateClocks() {
+    const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    for (const el of root.querySelectorAll("[data-clock]")) if (el.textContent !== now) el.textContent = now;
+  }
+  setInterval(updateClocks, 15000);
+  // Light and dark by time of day, when the person set a schedule.
+  function applySchedule() {
+    const shell = root.querySelector(".app-shell");
+    const schedule = shell?.dataset.schedule;
+    if (!schedule) return;
+    const [light, dark] = schedule.split("-");
+    const now = new Date(),
+      minutes = now.getHours() * 60 + now.getMinutes(),
+      at = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    const day = at(light) <= at(dark)
+      ? minutes >= at(light) && minutes < at(dark)
+      : minutes >= at(light) || minutes < at(dark);
+    shell.dataset.mode = day ? "light" : "dark";
+  }
+  setInterval(applySchedule, 60000);
+  // Interface sounds, key clicks and background music are generated, not sampled.
+  let audio = null,
+    music = null;
+  function context() {
+    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume().catch(() => {});
+    return audio;
+  }
+  function sounds() {
+    return (root.querySelector(".app-shell")?.dataset.sounds || "").split(" ");
+  }
+  function tone(kind) {
+    if (!sounds().includes(kind === "key" ? "keys" : "ui")) return;
+    const ctx = context(),
+      t = ctx.currentTime,
+      osc = ctx.createOscillator(),
+      gain = ctx.createGain();
+    const [freq, length, level] =
+      kind === "key" ? [1900, 0.025, 0.035] : kind === "close" ? [420, 0.09, 0.05] : kind === "open" ? [880, 0.08, 0.05] : [660, 0.05, 0.035];
+    osc.type = kind === "key" ? "square" : "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    if (kind !== "key") osc.frequency.exponentialRampToValueAtTime(freq * (kind === "close" ? 0.7 : 1.25), t + length);
+    gain.gain.setValueAtTime(level, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + length);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + length + 0.02);
+  }
+  window.neutrinoSound = tone;
+  function updateSounds() {
+    const want = sounds().includes("music") && !document.hidden;
+    if (want && !music) {
+      const ctx = context(),
+        master = ctx.createGain();
+      master.gain.value = 0.0001;
+      master.gain.linearRampToValueAtTime(0.03, ctx.currentTime + 3);
+      master.connect(ctx.destination);
+      const voices = [110, 164.81, 220, 277.18].map((f, i) => {
+        const osc = ctx.createOscillator(),
+          lfo = ctx.createOscillator(),
+          depth = ctx.createGain(),
+          g = ctx.createGain();
+        osc.type = i % 2 ? "triangle" : "sine";
+        osc.frequency.value = f;
+        lfo.frequency.value = 0.05 + i * 0.03;
+        depth.gain.value = 0.4;
+        lfo.connect(depth).connect(g.gain);
+        g.gain.value = 0.5;
+        osc.connect(g).connect(master);
+        osc.start();
+        lfo.start();
+        return [osc, lfo];
+      });
+      music = { master, voices };
+    } else if (!want && music) {
+      const { master, voices } = music;
+      music = null;
+      master.gain.linearRampToValueAtTime(0.0001, audio.currentTime + 0.6);
+      setTimeout(() => voices.flat().forEach((v) => v.stop()), 700);
+    }
+  }
+  document.addEventListener("visibilitychange", updateSounds);
   function topDialog() {
     return (
       root.querySelector(".modal-menu .popover-menu") ||
@@ -491,9 +593,15 @@
     const scope = menu.dataset.menu === "notes-scope"
       ? document.getElementById("notes-scope-trigger")?.getBoundingClientRect()
       : null;
-    const width = scope ? 220 : 240;
+    const field = ["suggest", "site"].includes(menu.dataset.menu)
+      ? root.querySelector(".browser-shell:not(.editing-preview) #address-input")?.closest(".location")?.getBoundingClientRect()
+      : null;
+    const wide = ["clear-data", "boost", "add-panel", "space-style"].includes(menu.dataset.menu) || menu.dataset.menu?.startsWith("edit-bookmark:");
+    const width = menu.dataset.menu === "suggest" && field ? Math.max(field.width, 320) : scope ? 220 : wide ? 320 : menu.dataset.menu === "site" ? 300 : 240;
     menu.style.width = Math.min(width, innerWidth - 24) + "px";
-    const anchor = scope
+    const anchor = field
+      ? { x: field.left, y: field.bottom + 4 }
+      : scope
       ? { x: scope.left, y: scope.bottom + 4 }
       : menuAnchor || { x: (r?.left || 0) + 10, y: 44 };
     menu.style.left =
@@ -526,6 +634,8 @@
     if (value) document.getElementById("announcer").textContent = value;
   }
   function send(request) {
+    if (["newTab", "selectTab", "tab-step", "select-index"].includes(request.op)) tone(request.op === "newTab" ? "open" : "select");
+    else if (["closeTab", "closeCurrent"].includes(request.op)) tone("close");
     chain = chain
       .then(() => transport({ kind: "action", request }))
       .then(patch)
@@ -648,12 +758,33 @@
     }
     if (r.op === "editor-scope" || el.dataset.type === "bool")
       r.value = r.value === "true";
+    else if (el.dataset.type === "number") r.value = Number(r.value);
+    if (el.dataset.json !== undefined) {
+      try {
+        r.value = JSON.parse(el.dataset.json);
+      } catch {}
+      delete r.json;
+    }
+    if (r.offset !== undefined) r.offset = Number(r.offset);
     if (r.index !== undefined) r.index = Number(r.index);
     if (r.page !== undefined) r.page = Number(r.page);
     return r;
   }
   document.addEventListener("click", (e) => {
     if (e.target.closest(".editing-preview")) return;
+    const generate = e.target.closest("[data-generate]");
+    if (generate) {
+      e.preventDefault();
+      const input = generate.closest(".password-field")?.querySelector("input");
+      const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789-_!?";
+      const bytes = crypto.getRandomValues(new Uint8Array(20));
+      if (input) {
+        input.value = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+        input.type = "text";
+        input.select();
+      }
+      return;
+    }
     const button = e.target.closest("[data-op]");
     if (button && !button.disabled) {
       e.preventDefault();
@@ -708,13 +839,25 @@
     else if (el.dataset.moduleSearch)
       send({ op: "module-query", value: el.value });
     else if (el.id === "command-input") send({ op: "query", value: el.value });
+    else if (el.id === "address-input") debounce("address", 70, () => send({ op: "address-input", value: el.value }));
+    else if (el.dataset.find) debounce("find", 140, () => send({ op: "find-query", value: el.value }));
+    else if (el.dataset.libraryQuery)
+      debounce("library", 160, () => send({ op: "native", action: el.dataset.libraryQuery === "history" ? "historyQuery" : "bookmarkQuery", value: el.value }));
     else if (el.dataset.setup)
       send({ op: "setup-field", key: el.dataset.setup, value: el.value });
     else if (el.dataset.name !== undefined)
       send({ op: "name", value: el.value });
   });
+  function debounce(key, delay, run) {
+    clearTimeout(inputTimers[key]);
+    inputTimers[key] = setTimeout(run, delay);
+  }
   document.addEventListener("change", (e) => {
     const el = e.target;
+    if (el.dataset.editorColor) {
+      send({ op: "editor-value", key: el.dataset.editorColor, value: el.value.replace("#", "") });
+      return;
+    }
     if (el.dataset.setupName) {send({op:"editor-rename-named",id:el.dataset.setupName,value:el.value});}
     else if (el.dataset.moduleSetting) {
       const value = el.type === "number" ? Number(el.value) : el.value;
@@ -746,10 +889,34 @@
   document.addEventListener("submit", (e) => {
     e.preventDefault();
     const form = e.target;
+    const f = new FormData(form);
     if (form.dataset.form === "address") {
-      const value = new FormData(form).get("address");
-      if (value?.trim()) send({ op: "navigate", value });
-    } else if (form.dataset.form === "credential") {
+      const value = f.get("address");
+      clearTimeout(inputTimers.address);
+      if (form.querySelector("#address-input") && root.querySelector('.popover-menu[data-menu="suggest"]')) send({ op: "suggest-accept" });
+      else if (value?.trim()) send({ op: "navigate", value });
+    } else if (form.dataset.form === "boost")
+      send({ op: "boost", css: f.get("css"), hide: f.get("hide") });
+    else if (form.dataset.form === "clear-data")
+      send({ op: "clear-data", range: f.get("range"), items: f.getAll("items") });
+    else if (form.dataset.form === "edit-bookmark")
+      send({ op: "edit-bookmark", id: form.dataset.id, title: f.get("title"), url: f.get("url"), folder: f.get("folder") });
+    else if (form.dataset.form === "space-style")
+      send({ op: "space-appearance", emoji: f.get("emoji"), gradient: [f.get("from"), f.get("to")] });
+    else if (form.dataset.form === "search-engine")
+      send({ op: "search-engine", value: "save", name: f.get("name"), keyword: f.get("keyword"), url: f.get("url") });
+    else if (form.dataset.form === "address-book")
+      send({ op: "address-book", value: "save", fields: Object.fromEntries(f) });
+    else if (form.dataset.form === "chain")
+      send({ op: "chain", value: "save", steps: f.getAll("steps").filter(Boolean) });
+    else if (form.dataset.form === "interface-css")
+      send({ op: "setting", key: "interfaceCSS", value: f.get("css") });
+    else if (form.dataset.form === "schedule")
+      send({ op: "setting", key: "themeSchedule", value: { enabled: f.get("enabled") === "on", light: f.get("light"), dark: f.get("dark") } });
+    else if (form.dataset.form === "startup-pages")
+      send({ op: "startup-pages", value: f.get("pages") });
+    else if (form.dataset.form === "custom-rules")
+      send({ op: "custom-rules", value: "save", rules: f.get("rules") }); else if (form.dataset.form === "credential") {
       const f = new FormData(form);
       const request = {
         op: "saveCredential",
@@ -760,8 +927,8 @@
       form.elements.password.value = "";
       send(request);
     } else if (form.dataset.form === "find") {
-      send({ op: "find", value: new FormData(form).get("find") });
-      send({ op: "escape" });
+      clearTimeout(inputTimers.find);
+      send({ op: "find-query", value: f.get("find") });
     } else if (form.dataset.form === "ai") {
       const f = new FormData(form);
       const request = {
@@ -783,6 +950,51 @@
         (e.target.matches("select") && !currentEditing),
       command = e.metaKey || e.ctrlKey;
     if (e.isComposing) return;
+    const recording = root.querySelector("[data-recording]");
+    if (recording) {
+      e.preventDefault();
+      if (e.key === "Escape") send({ op: "record-shortcut", value: "" });
+      else if (!["Shift", "Control", "Alt", "Meta"].includes(e.key))
+        send({ op: "shortcut", action: recording.dataset.recording, value: binding(e) });
+      return;
+    }
+    if (e.target.id === "address-input" && root.querySelector('.popover-menu[data-menu="suggest"]')) {
+      if (["ArrowDown", "ArrowUp"].includes(e.key)) {
+        e.preventDefault();
+        send({ op: "suggest-move", value: e.key === "ArrowDown" ? 1 : -1 });
+        return;
+      }
+    }
+    if (e.target.dataset?.find) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(inputTimers.find);
+        send({ op: "find-step", value: e.shiftKey ? -1 : 1 });
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        send({ op: "find-close" });
+        return;
+      }
+    }
+    if (!command && !e.altKey && sounds().includes("keys") && e.key.length === 1) tone("key");
+    if (command && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+      e.preventDefault();
+      send({ op: "select-index", value: Number(e.key) });
+      return;
+    }
+    if (command && e.key.toLowerCase() === "g" && root.querySelector(".find-bar")) {
+      e.preventDefault();
+      send({ op: "find-step", value: e.shiftKey ? -1 : 1 });
+      return;
+    }
+    const action = shortcutMap.get(binding(e));
+    if (action && !["new-tab", "palette", "bookmark", "sidebar", "settings"].includes(action) && (command || e.altKey || e.ctrlKey || /^f\d+$/.test(binding(e)))) {
+      e.preventDefault();
+      send({ op: "run-action", value: action });
+      return;
+    }
     if (command && ["l", "k", "t"].includes(e.key.toLowerCase())) {
       e.preventDefault();
       const key = e.key.toLowerCase();
@@ -969,7 +1181,38 @@
       }
     }
   });
+  // A shortcut as "ctrl+alt+shift+cmd+key", named from the physical key.
+  function binding(e) {
+    const code = e.code || "";
+    let key = code.startsWith("Key") ? code.slice(3).toLowerCase()
+      : code.startsWith("Digit") ? code.slice(5)
+      : /^F\d+$/.test(code) ? code.toLowerCase()
+      : ({ Tab: "tab", Escape: "esc", Backspace: "delete", Delete: "delete", Enter: "enter", Space: "space", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", Backquote: "`", Backslash: "\\", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" })[code] || e.key.toLowerCase();
+    return [e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", e.metaKey && "cmd", key].filter(Boolean).join("+");
+  }
+  let pressTimer = 0;
+  document.addEventListener("pointerdown", (e) => {
+    const nav = e.target.closest('[data-op="back"],[data-op="forward"]');
+    if (!nav || nav.disabled) return;
+    pressTimer = setTimeout(() => {
+      const r = nav.getBoundingClientRect();
+      menuAnchor = { x: r.left, y: r.bottom + 5 };
+      send({ op: "nav-history", value: nav.dataset.op });
+    }, 480);
+  });
+  document.addEventListener("pointerup", () => clearTimeout(pressTimer));
   document.addEventListener("contextmenu", (e) => {
+    const nav = e.target.closest('[data-op="back"],[data-op="forward"]');
+    const panel = e.target.closest("[data-panel-id]");
+    const favorite = e.target.closest("[data-favorite]");
+    const dial = e.target.closest("[data-dial]");
+    const target = nav ? ["nav-history", nav.dataset.op] : panel ? ["menu", "web-panel:" + panel.dataset.panelId] : favorite ? ["menu", "favorite:" + favorite.dataset.favorite] : dial ? ["menu", "edit-bookmark:" + dial.dataset.dial] : null;
+    if (target) {
+      e.preventDefault();
+      menuAnchor = { x: e.clientX, y: e.clientY };
+      send({ op: target[0], value: target[1] });
+      return;
+    }
     const tab = e.target.closest("[data-tab]");
     if (tab) {
       e.preventDefault();
@@ -1257,6 +1500,87 @@
     },
     { passive: false },
   );
+  // Area capture: drag a rectangle over the frozen page image.
+  let capture = null;
+  document.addEventListener("pointerdown", (e) => {
+    const overlay = e.target.closest(".capture-overlay");
+    if (!overlay || e.button !== 0) return;
+    const r = overlay.getBoundingClientRect();
+    capture = { overlay, x: e.clientX - r.left, y: e.clientY - r.top, box: overlay.querySelector(".capture-box") };
+    capture.box.hidden = false;
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!capture) return;
+    const r = capture.overlay.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - r.left, r.width)),
+      y = Math.max(0, Math.min(e.clientY - r.top, r.height));
+    Object.assign(capture, { w: x - capture.x, h: y - capture.y });
+    Object.assign(capture.box.style, {
+      left: Math.min(x, capture.x) + "px",
+      top: Math.min(y, capture.y) + "px",
+      width: Math.abs(capture.w) + "px",
+      height: Math.abs(capture.h) + "px",
+    });
+  });
+  document.addEventListener("pointerup", (e) => {
+    if (!capture) return;
+    const { x, y, w = 0, h = 0 } = capture;
+    capture = null;
+    send({ op: "capture-area", x: Math.min(x, x + w), y: Math.min(y, y + h), width: Math.abs(w), height: Math.abs(h), copy: e.altKey });
+  });
+  // Boards: drag cards to arrange them.
+  let card = null;
+  document.addEventListener("pointerdown", (e) => {
+    const el = e.target.closest(".board-card");
+    if (!el || e.target.closest("button")) return;
+    const canvas = el.closest(".board-canvas");
+    card = { el, canvas, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop, moved: false };
+    el.setPointerCapture?.(e.pointerId);
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!card) return;
+    card.moved = true;
+    card.el.style.left = Math.max(0, e.clientX - card.dx) + "px";
+    card.el.style.top = Math.max(0, e.clientY - card.dy) + "px";
+  });
+  document.addEventListener("pointerup", () => {
+    if (!card) return;
+    const { el, canvas, moved } = card;
+    card = null;
+    if (moved)
+      send({ op: "board", value: "move", board: canvas.dataset.board, item: el.dataset.item, x: el.offsetLeft, y: el.offsetTop });
+  });
+  // Split view: drag the divider to resize the panes.
+  let split = null;
+  document.addEventListener("pointerdown", (e) => {
+    const divider = e.target.closest(".split-divider");
+    if (!divider) return;
+    const canvas = divider.closest(".split-canvas");
+    split = { canvas, stacked: canvas.dataset.axis === "stacked", ratio: null };
+    divider.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!split) return;
+    const r = split.canvas.getBoundingClientRect();
+    const ratio = split.stacked ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    split.ratio = Math.max(0.2, Math.min(0.8, ratio));
+    split.canvas.style.setProperty("--split", split.ratio);
+    scheduleGeometry();
+  });
+  document.addEventListener("pointerup", () => {
+    if (!split) return;
+    const { ratio } = split;
+    split = null;
+    if (ratio !== null) send({ op: "split-ratio", value: Math.round(ratio * 100) / 100 });
+  });
+  // Hidden sidebar: point at the window's edge to reveal it over the page.
+  document.addEventListener("pointerover", (e) => {
+    if (e.target.closest("[data-rail-edge]")) send({ op: "rail-peek", value: true });
+    else if (root.querySelector(".rail-peek") && !e.target.closest(".workspace-rail,.popover-menu,.menu-scrim"))
+      send({ op: "rail-peek", value: false });
+  });
   transport({ kind: "ready" })
     .then(patch)
     .catch((e) => announce(e.message));

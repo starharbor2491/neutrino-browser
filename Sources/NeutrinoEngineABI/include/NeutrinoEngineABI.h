@@ -25,7 +25,13 @@ enum { NEUTRINO_CEF_LOAD = 1, NEUTRINO_CEF_RELOAD, NEUTRINO_CEF_STOP,
        NEUTRINO_CEF_REOPEN_TAB, NEUTRINO_CEF_PREVIOUS_TAB, NEUTRINO_CEF_NEXT_TAB,
        NEUTRINO_CEF_SET_BLOCKING, NEUTRINO_CEF_REQUEST_CLOSE,
        NEUTRINO_CEF_SUSPEND_INPUT, NEUTRINO_CEF_SELECT_INNER_PAGE,
-       NEUTRINO_CEF_CLOSE_INNER_PAGE };
+       NEUTRINO_CEF_CLOSE_INNER_PAGE,
+       /* Value 1 mutes the active page, 0 unmutes it. */
+       NEUTRINO_CEF_MUTE,
+       /* Text names an allowed Chrome command such as IDC_PRINT. */
+       NEUTRINO_CEF_CHROME_COMMAND,
+       /* Text names an allowed profile preference; value is its number or 0/1. */
+       NEUTRINO_CEF_PREFERENCE };
 
 /// Versioned ABI loaded only from an explicitly installed engine package.
 typedef struct neutrino_cef_api {

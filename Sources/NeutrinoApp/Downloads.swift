@@ -102,6 +102,10 @@ final class DownloadItem: ObservableObject, Identifiable {
 @MainActor
 final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
     @Published var items: [DownloadItem] = [] { didSet { admission.refresh(self) } }
+    /// Saves downloads here without asking, when the person chose a folder.
+    static var defaultFolder: URL?
+    /// Removes finished downloads from the list; their files stay on disk.
+    func removeFinished(_ id: UUID? = nil) { items.removeAll { !$0.active && !$0.awaitsTerminalUpdate && (id == nil || $0.id == id) } }
     private let admission: DownloadAdmission
     private var acceptanceDestination: URL?
     var acceptingDownloads: Bool { admission.acceptingDownloads }
@@ -210,6 +214,8 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
             // Production downloads always present the save panel below.
             acceptanceDestination = nil
             selected = destination
+        } else if let folder = Self.defaultFolder, FileManager.default.fileExists(atPath: folder.path) {
+            selected = Self.available(item.name, in: folder)
         } else {
             let panel = NSSavePanel(); panel.nameFieldStringValue = item.name
             panel.message = "Choose where to save this download."
@@ -226,6 +232,17 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
         let staging = url.deletingLastPathComponent().appendingPathComponent(".neutrino-download-" + UUID().uuidString + ".part")
         item.approvedReplacement = FileManager.default.fileExists(atPath: url.path)
         item.destination = url; item.staging = staging; item.status = "Downloading"; completion(staging)
+    }
+    /// "name.ext", or "name 2.ext" and so on when that file exists.
+    private static func available(_ name: String, in folder: URL) -> URL {
+        let candidate = folder.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: candidate.path) else { return candidate }
+        let base = candidate.deletingPathExtension().lastPathComponent, ext = candidate.pathExtension
+        for n in 2..<1000 {
+            let next = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+            if !FileManager.default.fileExists(atPath: next.path) { return next }
+        }
+        return folder.appendingPathComponent(UUID().uuidString + (ext.isEmpty ? "" : "." + ext))
     }
     func downloadDidFinish(_ download: WKDownload) {
         guard let item = item(download) else { return }

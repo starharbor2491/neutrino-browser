@@ -50,6 +50,16 @@ pub struct Shell {
     pub module_query: String,
     pub focus: String,
     pub focus_serial: u64,
+    pub address_query: String,
+    pub suggest_index: usize,
+    pub find_open: bool,
+    pub find_query: String,
+    pub find_index: usize,
+    pub capture_select: bool,
+    pub rail_peek: bool,
+    pub recording: String,
+    pub library_filter: String,
+    pub board: String,
     order_undo: Vec<Value>,
     adjustment: String,
 }
@@ -60,7 +70,7 @@ impl Default for Shell {
             screen: "browse".into(),
             section: "general".into(),
             step: 0,
-            setup: json!({"profile":"Personal","space":"Everyday","search":"duckDuckGo","blockTrackers":true,"blockPopups":true,"restoreSession":true,"appearance":"dark","accent":"purple","layout":"leading","preset":"neutrino","imported":false}),
+            setup: json!({"profile":"Personal","space":"Everyday","search":"duckDuckGo","blockTrackers":true,"blockAds":true,"blockPopups":true,"restoreSession":true,"appearance":"dark","accent":"purple","layout":"leading","preset":"neutrino","imported":false,"favorites":[],"sidebarTools":["messengers","history","downloads","bookmarks","control"],"edition":"classic","sounds":true}),
             draft: None,
             undo: vec![],
             redo: vec![],
@@ -87,6 +97,16 @@ impl Default for Shell {
             module_query: String::new(),
             focus: String::new(),
             focus_serial: 0,
+            address_query: String::new(),
+            suggest_index: 0,
+            find_open: false,
+            find_query: String::new(),
+            find_index: 0,
+            capture_select: false,
+            rail_peek: false,
+            recording: String::new(),
+            library_filter: String::new(),
+            board: String::new(),
             order_undo: vec![],
             adjustment: String::new(),
         }
@@ -195,6 +215,9 @@ impl Shell {
                 "query" => {
                     self.query = bound(text(&request, "value"), 8192);
                     self.selected_result = 0;
+                    if !self.query.is_empty() {
+                        commands.push(json!({"op":"suggest","value":bound(&self.query, 2048)}));
+                    }
                 }
                 "result-next" => {
                     self.selected_result =
@@ -204,9 +227,16 @@ impl Shell {
                     self.selected_result = self.selected_result.saturating_sub(1);
                 }
                 "escape" => {
-                    if self.palette {
+                    if self.capture_select || self.rail_peek || !self.recording.is_empty() {
+                        self.capture_select = false;
+                        self.rail_peek = false;
+                        self.recording.clear();
+                    } else if self.palette {
                         self.palette = false;
                     } else if !self.menu.is_empty() {
+                        if self.menu == "suggest" {
+                            self.address_query.clear();
+                        }
                         if self.menu == "discard-editor" {
                             self.pending_exit = None;
                         }
@@ -241,6 +271,7 @@ impl Shell {
                         "reader",
                         "resources",
                         "recovery",
+                        "source",
                     ]
                     .contains(&screen)
                     {
@@ -266,13 +297,18 @@ impl Shell {
                                 "passwords",
                                 "updates",
                                 "engines",
+                                "performance",
+                                "shortcuts",
+                                "autofill",
+                                "search",
                             ]
                             .contains(&self.section.as_str())
                         {
                             self.section = "general".into();
                         }
                         if screen == "library" {
-                            if !["bookmarks", "history", "downloads", "notes", "archive"]
+                            self.library_filter.clear();
+                            if !["bookmarks", "history", "downloads", "notes", "archive", "reading", "sessions", "boards"]
                                 .contains(&self.section.as_str())
                             {
                                 self.section = "bookmarks".into();
@@ -283,6 +319,7 @@ impl Shell {
                 }
                 "section" => {
                     self.section = bound(text(&request, "value"), 40);
+                    self.library_filter.clear();
                     if self.screen == "browse"
                         && ["bookmarks", "history", "downloads", "notes", "archive"]
                             .contains(&self.section.as_str())
@@ -325,10 +362,13 @@ impl Shell {
                     } else if text(&value, "kind") == "command" {
                         self.palette = false;
                         return self.dispatch(json!({"op":"screen","value":value["value"]}));
-                    } else if let Some(url) = resolve_address(
-                        text(&value, "value"),
-                        text(&self.snapshot["preferences"], "search"),
-                    ) {
+                    } else if text(&value, "kind") == "action" {
+                        return self.dispatch(json!({"op":"run-action","value":value["value"]}));
+                    } else if let Some(url) = crate::features::resolve(self, text(&value, "value")) {
+                        self.address_query.clear();
+                        if self.menu == "suggest" {
+                            self.menu.clear();
+                        }
                         if op == "activate-result" && self.palette_new {
                             commands.push(
                                 json!({"op":"newTab","url":url,"parentID":self.palette_parent}),
@@ -372,13 +412,17 @@ impl Shell {
                 }
                 "panel" | "open-panel" => {
                     let value = text(&request, "value");
-                    if [
+                    let web = value.strip_prefix("web:").is_some_and(|id| {
+                        array(&self.snapshot["preferences"]["webPanels"]).iter().any(|p| text(p, "id") == id)
+                    });
+                    if web || [
                         "",
                         "bookmarks",
                         "history",
                         "downloads",
                         "notes",
                         "resources",
+                        "tabs",
                     ]
                     .contains(&value)
                     {
@@ -388,11 +432,59 @@ impl Shell {
                             } else {
                                 value.into()
                             };
-                        if self.panel != "resources" && self.panel != "closed" {
+                        if !["resources", "tabs", "closed"].contains(&self.panel.as_str()) && !self.panel.starts_with("web:") {
                             self.section = self.panel.clone();
                             commands.push(json!({"op":"projectLibrary","section":self.panel}));
                         }
                         self.screen = "browse".into();
+                    }
+                }
+                "panel-toggle" => {
+                    self.panel = if self.panel_key().is_empty() { "bookmarks".into() } else { "closed".into() };
+                    if self.panel == "bookmarks" {
+                        self.section = "bookmarks".into();
+                        commands.push(json!({"op":"projectLibrary","section":"bookmarks"}));
+                    }
+                    self.screen = "browse".into();
+                }
+                "zoom-step" => {
+                    let current = self.snapshot["zoom"].as_f64().unwrap_or(1.);
+                    let step: f64 = text(&request, "value").parse().unwrap_or(0.);
+                    let next = if step == 0. { 1. } else { ((current + step * 0.1) * 10.).round() / 10. };
+                    if !text(self.active(), "url").is_empty() {
+                        commands.push(json!({"op":"setZoom","value":next.clamp(0.5, 3.)}));
+                    }
+                }
+                "addSite" => {
+                    let input = self.name.trim();
+                    let candidate = if input.contains("://") { input.to_string() } else { format!("https://{input}") };
+                    if let Ok(url) = Url::parse(&candidate) {
+                        if ["http", "https"].contains(&url.scheme()) && url.host_str().is_some_and(|h| h.contains('.')) && !self.private() {
+                            let title = url.host_str().unwrap_or("").trim_start_matches("www.").to_string();
+                            commands.push(json!({"op":"addBookmark","url":url.as_str(),"title":title,"folder":if self.menu == "add-site:dial" {"Speed Dial"} else {""}}));
+                            self.menu.clear();
+                            self.name.clear();
+                        } else {
+                            self.notice = "Enter a website address, like example.com.".into();
+                        }
+                    }
+                }
+                "home" => {
+                    commands.push(json!({"op":"home"}));
+                    self.screen = "browse".into();
+                }
+                "shields-restore" => {
+                    let site = text(&request, "value");
+                    if array(&self.snapshot["preferences"]["shieldsDown"]).iter().any(|h| h.as_str() == Some(site)) {
+                        commands.push(json!({"op":"shieldsSite","host":site,"down":false}));
+                    }
+                }
+                "shields-site" => {
+                    let site = crate::render::host(text(self.active(), "url"));
+                    if !text(self.active(), "url").is_empty() && !self.private() {
+                        let down = array(&self.snapshot["preferences"]["shieldsDown"]).iter().any(|h| h.as_str() == Some(site.as_str()));
+                        commands.push(json!({"op":"shieldsSite","host":site,"down":!down}));
+                        self.menu.clear();
                     }
                 }
                 "setup-preset" => {
@@ -400,7 +492,25 @@ impl Shell {
                         self.setup["preset"] = request["value"].clone();
                         self.setup["appearance"] = c["theme"]["colorMode"].clone();
                         self.setup["accent"] = c["theme"]["accent"].clone();
+                        self.setup["accentHex"] = c["theme"]["accentHex"].clone();
                         self.setup["layout"] = c["layout"]["tabs"].clone();
+                    }
+                }
+                "setup-favorite" | "setup-tool" => {
+                    let value = text(&request, "value");
+                    let (key, allowed) = if op == "setup-favorite" {
+                        ("favorites", crate::appearance::FAVORITE_SITES.iter().any(|site| site.1 == value))
+                    } else {
+                        ("sidebarTools", crate::appearance::SIDEBAR_TOOLS.iter().any(|tool| tool.0 == value))
+                    };
+                    if allowed {
+                        let mut list: Vec<Value> = array(&self.setup[key]).to_vec();
+                        if let Some(index) = list.iter().position(|v| v == value) {
+                            list.remove(index);
+                        } else if list.len() < 12 {
+                            list.push(json!(value));
+                        }
+                        self.setup[key] = json!(list);
                     }
                 }
                 "editor-preset" => {
@@ -573,14 +683,25 @@ impl Shell {
                         if self.invalid_field == key {
                             self.invalid_field.clear();
                         }
-                    } else if ["blockTrackers", "blockPopups", "restoreSession"].contains(&key) {
+                    } else if key == "accentHex" && crate::appearance::hex(text(&request, "value")) {
+                        self.setup[key] = json!(text(&request, "value").trim_start_matches('#'));
+                    } else if key == "edition" && ["essentials", "classic", "full"].contains(&text(&request, "value")) {
+                        self.setup[key] = request["value"].clone();
+                    } else if key == "theme" {
+                        if let Some(t) = crate::appearance::VIVALDI_THEMES.iter().find(|t| t.0 == text(&request, "value")) {
+                            self.setup["theme"] = json!(t.0);
+                            self.setup["appearance"] = json!(t.2);
+                            self.setup["accentHex"] = json!(t.3);
+                        }
+                    } else if ["blockTrackers", "blockAds", "blockPopups", "restoreSession", "sounds"].contains(&key) {
                         if let Some(v) = request["value"].as_bool() {
                             self.setup[key] = json!(v);
                         }
                     }
                 }
                 "setup-next" => {
-                    if self.step == 1
+                    let flow = crate::appearance::setup_flow(text(&self.setup, "preset"));
+                    if flow.get(self.step) == Some(&"workspace")
                         && (text(&self.setup, "profile").is_empty()
                             || text(&self.setup, "space").is_empty())
                     {
@@ -591,27 +712,42 @@ impl Shell {
                         }
                         .into();
                     } else {
-                        self.step = (self.step + 1).min(6);
+                        self.step = (self.step + 1).min(flow.len() - 1);
                     }
                 }
                 "setup-back" => {
                     self.step = self.step.saturating_sub(1);
                 }
                 "setup-step" => {
-                    self.step = (request["value"].as_u64().unwrap_or(0) as usize).min(6);
+                    let last = crate::appearance::setup_flow(text(&self.setup, "preset")).len() - 1;
+                    self.step = (request["value"].as_u64().unwrap_or(0) as usize).min(last);
                 }
                 "setup-finish" => {
-                    if self.step == 6
+                    let last = crate::appearance::setup_flow(text(&self.setup, "preset")).len() - 1;
+                    if self.step == last
                         && !self.setup_busy
                         && !text(&self.setup, "profile").is_empty()
                         && !text(&self.setup, "space").is_empty()
                     {
-                        commands.push(json!({"op":"finishSetup","setup":self.setup}));
+                        commands.push(json!({"op":"finishSetup","setup":self.setup,"configuration":crate::appearance::setup_configuration(&self.setup)}));
                         self.setup_busy = true;
                     }
                 }
                 "importBookmarks" | "defaultBrowser" => {
                     commands.push(json!({"op":op}));
+                }
+                "importBrowser" => {
+                    let source = text(&request, "value");
+                    if crate::onboarding::IMPORT_SOURCES.iter().any(|(id, _)| *id == source) {
+                        commands.push(json!({"op":"importBrowser","value":source}));
+                    }
+                }
+                "setup-blocking" => {
+                    let level = text(&request, "value");
+                    if ["none", "trackers", "ads"].contains(&level) {
+                        self.setup["blockTrackers"] = json!(level != "none");
+                        self.setup["blockAds"] = json!(level == "ads");
+                    }
                 }
                 "editor-select" => {
                     if ["tabs", "navigation", "bookmarks", "panels"]
@@ -721,6 +857,7 @@ impl Shell {
                         "restoreSession",
                         "automaticUpdates",
                         "startGuideHidden",
+                        "blockAds",
                     ]
                     .contains(&key)
                         && value.is_boolean()
@@ -731,6 +868,7 @@ impl Shell {
                         && ["duckDuckGo", "google", "bing"].contains(&value.as_str().unwrap_or(""))
                     {
                         commands.push(json!({"op":op,"key":key,"value":value}));
+                        commands.push(json!({"op":op,"key":"defaultSearchID","value":""}));
                     }
                 }
                 "back" | "forward" | "reload" | "stop" | "bookmark" | "reopenTab" | "split"
@@ -816,6 +954,17 @@ impl Shell {
                         "reloadTab",
                         "toggleFocus",
                         "retryResources",
+                        "historyQuery",
+                        "bookmarkQuery",
+                        "removeHistory",
+                        "downloadRemove",
+                        "downloadClear",
+                        "chooseWallpaper",
+                        "removeWallpaper",
+                        "chooseDownloadFolder",
+                        "clearDownloadFolder",
+                        "importPasswords",
+                        "exportPasswords",
                     ]
                     .contains(&action)
                         && !(self.private()
@@ -827,6 +976,9 @@ impl Shell {
                                 "quoteSelection",
                                 "openNoteSource",
                                 "credentialDelete",
+                                "chooseWallpaper",
+                                "importPasswords",
+                                "exportPasswords",
                             ]
                             .contains(&action))
                     {
@@ -877,6 +1029,18 @@ impl Shell {
                         commands.push(json!({"op":"setModuleSetting","id":id,"key":key,"value":request["value"]}));
                     }
                 }
+                "summarize" => {
+                    if !text(self.active(), "url").is_empty() {
+                        self.screen = "assistant".into();
+                        self.menu.clear();
+                        if !self.snapshot["preferences"]["ai"].is_null() {
+                            commands.push(json!({"op":"assistant","value":"Summarize this page in five short bullet points.","selection":false}));
+                        }
+                    }
+                }
+                _ if crate::features::OPS.contains(&op) => {
+                    crate::features::dispatch(self, op, &request, &mut commands)
+                }
                 _ => {
                     self.notice = "That action is unavailable.".into();
                 }
@@ -885,7 +1049,7 @@ impl Shell {
         self.response(commands)
     }
     fn response(&self, commands: Vec<Value>) -> Value {
-        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"moduleSettingsID":if self.screen=="modules"{self.selected_module.as_str()}else{""},"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu(),"focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
+        json!({"html":crate::render::render(self).into_string(),"commands":commands,"editing":self.screen=="editor","screen":self.screen,"moduleSettingsID":if self.screen=="modules"{self.selected_module.as_str()}else{""},"librarySection":if self.screen=="library"{self.section.as_str()}else{self.visible_panel_key()},"commandRevision":self.palette_serial,"resourcesVisible":self.screen=="resources" || self.visible_panel_key()=="resources","context":format!("{}:{}",text(&self.snapshot["session"],"profileID"),text(&self.snapshot["session"],"spaceID")),"announce":self.notice,"undoAvailable":!self.order_undo.is_empty()||!self.tab_undo.is_empty(),"overlay":self.onboarding() || self.palette || !["browse","editor"].contains(&self.screen.as_str()) || self.modal_menu() || self.capture_select || self.rail_peek || flag(&self.snapshot,"breakMode"),"shortcuts":crate::features::shortcuts(self).into_iter().map(|(b,a)|json!([b,a])).collect::<Vec<_>>(),"findOpen":self.find_open,"performanceVisible":self.screen=="settings" && self.section=="performance","focusToken":self.focus_serial,"focus":if !self.invalid_field.is_empty() { return_focus(&self.invalid_field) } else { self.focus.as_str() }})
     }
     pub fn visible_panel_key(&self) -> &str {
         if ["browse", "editor"].contains(&self.screen.as_str()) {
@@ -906,7 +1070,7 @@ impl Shell {
         }
     }
     pub fn modal_menu(&self) -> bool {
-        ["discard-editor", "clear-history", "reset-modules"].contains(&self.menu.as_str())
+        ["discard-editor", "clear-history", "reset-modules", "clear-data"].contains(&self.menu.as_str())
             || self.menu.starts_with("delete-")
     }
     fn reorder(&mut self, r: &Value, commands: &mut Vec<Value>) {
@@ -980,9 +1144,8 @@ impl Shell {
             "accent" | "colorMode" | "density" | "reducedMotion" | "iconPack" | "iconStroke"
             | "cornerRadius" | "fontScale" | "spacingScale" | "typography" | "transparency"
             | "borderWidth" | "shadowStrength" | "accentHex" | "surfaceHex" | "textHex" => "theme",
-            "tabsWidth" | "treeTabs" | "bookmarksBar" | "sidebarWidth" | "secondaryPanel" => {
-                "layout"
-            }
+            "tabsWidth" | "treeTabs" | "bookmarksBar" | "sidebarWidth" | "secondaryPanel" | "toolbarItems"
+            | "panelBar" | "statusBar" | "split" => "layout",
             _ => return,
         };
         let valid = match key {
@@ -1008,6 +1171,8 @@ impl Shell {
                 "resources",
             ]
             .contains(&v.as_str().unwrap_or("")),
+            "toolbarItems" => v.as_array().is_some_and(|items| items.len() <= 14 && items.iter().all(|i| crate::render::TOOLBAR_ITEMS.iter().any(|t| Some(t.0) == i.as_str()))),
+            "split" => ["sideBySide", "stacked"].contains(&v.as_str().unwrap_or("")),
             "cornerRadius" => v.as_f64().is_some_and(|n| (0.0..=24.0).contains(&n)),
             "fontScale" => v.as_f64().is_some_and(|n| (0.85..=1.4).contains(&n)),
             "spacingScale" => v.as_f64().is_some_and(|n| (0.75..=1.5).contains(&n)),
@@ -1166,6 +1331,18 @@ impl Shell {
                 out.push(json!({"kind":"command","title":title,"detail":"Open","value":screen}));
             }
         }
+        if !query.is_empty() {
+            for (id, label, _, _) in crate::features::ACTIONS {
+                if label.to_lowercase().contains(&query) && out.iter().filter(|v| v["kind"] == "action").count() < 4 {
+                    out.push(json!({"kind":"action","title":label,"detail":"Action","value":id}));
+                }
+            }
+            for chain in array(&self.snapshot["preferences"]["commandChains"]) {
+                if text(chain, "name").to_lowercase().contains(&query) {
+                    out.push(json!({"kind":"action","title":chain["name"],"detail":"Command chain","value":chain["id"]}));
+                }
+            }
+        }
         for tab in self.tabs() {
             // An untouched blank tab is not a useful destination.
             if text(tab, "url").is_empty() && text(tab, "title") == "New tab" {
@@ -1182,6 +1359,10 @@ impl Shell {
             }
         }
         if !query.is_empty() {
+            let open: Vec<String> = self.tabs().iter().map(|t| text(t, "url").to_string()).collect();
+            for item in array(&self.snapshot["suggestions"]).iter().filter(|i| !open.iter().any(|u| u == text(i, "url"))).take(4) {
+                out.push(json!({"kind":"search","title":item["title"],"detail":text(item,"url"),"url":text(item,"url"),"value":text(item,"url"),"source":text(item,"kind")}));
+            }
             out.push(json!({"kind":"search","title":self.query,"detail":"Search or open website","value":self.query}));
             if self.palette_new {
                 out.rotate_right(1);

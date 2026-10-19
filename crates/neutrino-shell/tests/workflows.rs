@@ -497,7 +497,7 @@ fn utility_pages_preserve_browser_tools_and_routine_menus_are_nonmodal() {
     let mut s = shell();
     let r = s.dispatch(json!({"op":"screen","value":"modules"}));
     let html = r["html"].as_str().unwrap();
-    assert!(html.contains("rail-destinations"));
+    assert!(html.contains("rail-dock"));
     assert!(html.contains("data-screen=\"modules\""));
     assert!(!html.contains("screen-scrim"));
     s.dispatch(json!({"op":"screen","value":"browse"}));

@@ -24,7 +24,11 @@ struct BrowserWindowRoot: View {
         }
         .onOpenURL { url in
             guard !app.finalQuitDataFrozen, AddressResolver.isWebURL(url) else { return }
-            if let model, !model.isClosed { model.newTab(url: url) }
+            if let model, !model.isClosed {
+                // Arc opens links from other apps in a small window first.
+                if model.configuration.theme.preset == "arc" && app.library.preferences.littleArc != false { PeekWindow.show(url, model: model) }
+                else { model.newTab(url: url) }
+            }
             else { pendingURLs.append(url); if app.ready { createModel() } }
         }
         .onChange(of: app.ready) { _, ready in

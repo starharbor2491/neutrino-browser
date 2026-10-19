@@ -33,7 +33,8 @@ final class ChromiumTab: BrowserEngineTab {
     }
     private var page: UnsafeMutableRawPointer?
     private let hostView: NSView
-    private var pageURL: URL?
+    private var pageURL: URL? { didSet { if oldValue?.host != pageURL?.host { updateBlockingPolicy(); applyScriptPolicy() } } }
+    private var scriptsDisabled = false
     private var activePristine = true
     private var failedURL: URL?
     private var pageTitle: String?
@@ -225,22 +226,122 @@ final class ChromiumTab: BrowserEngineTab {
         command(Int(NEUTRINO_CEF_LOAD), text: url.absoluteString)
     }
     override func updateBlockingPolicy() {
-        command(Int(NEUTRINO_CEF_SET_BLOCKING), text: ContentBlocking.domains.joined(separator: "\n"), value: blockingEnabled ? 1 : 0)
+        // Chromium filters per browser group, so a site with Shields down turns
+        // blocking off for this tab while it shows that site.
+        let enabled = blockingEnabled && !ContentBlocking.isException(pageURL?.host, in: blockingExceptions)
+        command(Int(NEUTRINO_CEF_SET_BLOCKING), text: ContentBlocking.domains(ads: blockAds, custom: blockingCustom).joined(separator: "\n"), value: enabled ? 1 : 0)
     }
-    private func evaluateIsolated(_ expression: String) async throws -> Any {
+    private func evaluateIsolated(_ expression: String, userGesture: Bool = false) async throws -> Any {
         let revision = navigationRevision
         _ = try await request("Runtime.enable",parameters:[:])
         let tree = try await request("Page.getFrameTree", parameters: [:])
         guard let body = try JSONSerialization.jsonObject(with: tree) as? [String: Any], let frameTree = body["frameTree"] as? [String: Any], let frame = frameTree["frame"] as? [String: Any], let frameID = frame["id"] as? String else { throw ValidationError("The page is unavailable.") }
         let world = try await request("Page.createIsolatedWorld", parameters: ["frameId": frameID, "worldName": "org.neutrino.reader"])
         guard navigationRevision == revision, let value = try JSONSerialization.jsonObject(with: world) as? [String: Any], let contextID = value["executionContextId"] as? Int, let unique = readerContexts[contextID] else { throw ValidationError("The page changed. Try again.") }
-        let result = try await request("Runtime.evaluate", parameters: ["expression": expression, "returnByValue": true, "uniqueContextId": unique, "timeout": 5000])
+        let result = try await request("Runtime.evaluate", parameters: ["expression": expression, "returnByValue": true, "uniqueContextId": unique, "timeout": 5000, "userGesture": userGesture])
         guard navigationRevision == revision, let response = try JSONSerialization.jsonObject(with: result) as? [String: Any], response["exceptionDetails"] == nil, let object = response["result"] as? [String: Any] else { throw ValidationError("The page could not complete this request.") }
         return object["value"] ?? ""
     }
     override func pageText() async throws -> String { try await evaluateIsolated("(document.body?.innerText ?? '').slice(0, 40000)") as? String ?? "" }
     override func selectedText() async throws -> String { try await evaluateIsolated("(window.getSelection()?.toString() ?? '').slice(0, 8000)") as? String ?? "" }
     override func fillCredential(_ credential: LocalCredential) async throws { _ = try await evaluateIsolated("(() => { " + credential.autofillScript + " })()") }
+    override func runPageScript(_ source: String, userGesture: Bool = false) async throws -> String {
+        try await evaluateIsolated(source, userGesture: userGesture) as? String ?? ""
+    }
+    /// Chromium mutes the whole page, Web Audio included.
+    override func setMuted(_ value: Bool) { command(Int(NEUTRINO_CEF_MUTE), value: value ? 1 : 0) }
+    private func chromeCommand(_ name: String) { command(Int(NEUTRINO_CEF_CHROME_COMMAND), text: name) }
+    override func printPage() { chromeCommand("IDC_PRINT") }
+    override func showDeveloperTools() { chromeCommand("IDC_DEV_TOOLS") }
+    private func object(_ data: Data) throws -> [String: Any] {
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ValidationError("Chromium returned an unexpected response.") }
+        return value
+    }
+    override func pagePDF() async throws -> Data {
+        let result = try object(try await request("Page.printToPDF", parameters: ["printBackground": true, "preferCSSPageSize": true], timeout: .seconds(30)))
+        guard let encoded = result["data"] as? String, encoded.utf8.count <= 90 * 1024 * 1024, let pdf = Data(base64Encoded: encoded) else {
+            throw ValidationError("Chromium could not save this page as a PDF.")
+        }
+        return pdf
+    }
+    override func fullPageCapture() async throws -> (data: Data, type: String) {
+        let metrics = try object(try await request("Page.getLayoutMetrics", parameters: [:]))
+        let size = (metrics["cssContentSize"] ?? metrics["contentSize"]) as? [String: Any]
+        let width = min(8192, max(1, size?["width"] as? Double ?? 1280)), height = min(16384, max(1, size?["height"] as? Double ?? 800))
+        let result = try object(try await request("Page.captureScreenshot", parameters: ["format": "png", "captureBeyondViewport": true,
+            "clip": ["x": 0, "y": 0, "width": width, "height": height, "scale": 1]], timeout: .seconds(30)))
+        guard let encoded = result["data"] as? String, encoded.utf8.count <= 90 * 1024 * 1024, let image = Data(base64Encoded: encoded),
+              image.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) else { throw ValidationError("Chromium could not capture the full page.") }
+        return (image, "png")
+    }
+    override func navigationEntries(back: Bool) async -> [[String: Any]] {
+        guard let history = try? object(try await request("Page.getNavigationHistory", parameters: [:])),
+              let current = history["currentIndex"] as? Int, let entries = history["entries"] as? [[String: Any]] else { return [] }
+        let indices = back ? Array(stride(from: current - 1, through: max(0, current - 15), by: -1)) : Array((current + 1)..<min(entries.count, current + 16))
+        return indices.compactMap { index in
+            guard entries.indices.contains(index), let url = entries[index]["url"] as? String, url.hasPrefix("http") else { return nil }
+            return ["offset": index - current, "title": entries[index]["title"] as? String ?? "", "url": url]
+        }
+    }
+    override func goToHistory(offset: Int) {
+        Task { @MainActor [weak self] in
+            guard let self, let history = try? self.object(try await self.request("Page.getNavigationHistory", parameters: [:])),
+                  let current = history["currentIndex"] as? Int, let entries = history["entries"] as? [[String: Any]],
+                  entries.indices.contains(current + offset), let id = entries[current + offset]["id"] as? Int else { return }
+            _ = try? await self.request("Page.navigateToHistoryEntry", parameters: ["entryId": id])
+        }
+    }
+    override func applyScriptPolicy() {
+        guard let site = ContentBlocking.site(pageURL) else { return }
+        let blocked = scriptsBlocked?(site) == true
+        guard blocked != scriptsDisabled else { return }
+        scriptsDisabled = blocked
+        Task { @MainActor [weak self] in
+            // The setting applies from the next document; reload so this page follows it.
+            _ = try? await self?.request("Emulation.setScriptExecutionDisabled", parameters: ["value": blocked])
+            self?.reload()
+        }
+    }
+    override func setNetworkLimit(bytesPerSecond: Int) {
+        Task { @MainActor [weak self] in
+            _ = try? await self?.request("Network.enable", parameters: [:])
+            let rate = bytesPerSecond > 0 ? bytesPerSecond : -1
+            _ = try? await self?.request("Network.emulateNetworkConditions", parameters: ["offline": false, "latency": 0, "downloadThroughput": rate, "uploadThroughput": rate])
+        }
+    }
+    override func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool) {
+        command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: httpsOnly ? 1 : 0)
+        command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: blockThirdPartyCookies ? 1 : 0)
+    }
+    /// Cookies and cached files of this tab's Chromium profile, for all time.
+    override func clearWebsiteData(cookies: Bool, cache: Bool) async {
+        if cookies { _ = try? await request("Network.clearBrowserCookies", parameters: [:]) }
+        if cache { _ = try? await request("Network.clearBrowserCache", parameters: [:]) }
+    }
+    override func clearSiteData(host: String) async {
+        for origin in ["https://" + host, "https://www." + host, "http://" + host] {
+            _ = try? await request("Storage.clearDataForOrigin", parameters: ["origin": origin, "storageTypes": "all"])
+        }
+    }
+    override func cookieDomains() async -> [String] {
+        guard let result = try? object(try await request("Storage.getCookies", parameters: [:])),
+              let cookies = result["cookies"] as? [[String: Any]] else { return [] }
+        var domains = Set<String>()
+        for cookie in cookies.prefix(5000) {
+            guard var domain = cookie["domain"] as? String else { continue }
+            if domain.hasPrefix(".") { domain.removeFirst() }
+            if domain.hasPrefix("www.") { domain.removeFirst(4) }
+            domains.insert(domain)
+        }
+        return Array(domains).sorted()
+    }
+    override func resourceUsage() async -> (memoryMB: Double, cpuSeconds: Double)? {
+        _ = try? await request("Performance.enable", parameters: [:], timeout: .seconds(3))
+        guard let result = try? object(try await request("Performance.getMetrics", parameters: [:], timeout: .seconds(3))),
+              let metrics = result["metrics"] as? [[String: Any]] else { return nil }
+        let value = { (name: String) in metrics.first { $0["name"] as? String == name }?["value"] as? Double ?? 0 }
+        return (value("JSHeapTotalSize") / 1_048_576, value("TaskDuration"))
+    }
     override func performNativeTabCommand(_ command: NativeTabCommand) -> Bool {
         guard !disposing, let page, let api = runtime.api,
               hasNativeNavigationChrome || (isAuxiliary && chromeWindow?.isVisible == true) else { return false }
@@ -414,6 +515,7 @@ final class ChromiumTab: BrowserEngineTab {
             if let value = value["canGoForward"] as? Bool { canGoForward = value }
             if let value = value["zoom"] as? Double, value.isFinite, value > 0, zoom != value { zoom = value }
             onChange?(event == Int32(NEUTRINO_CEF_FINISHED))
+            if event == Int32(NEUTRINO_CEF_FINISHED) { onPageLoaded?() }
         case Int32(NEUTRINO_CEF_ERROR):
             errorMessage = value["message"] as? String
             loading = false; progress = 0

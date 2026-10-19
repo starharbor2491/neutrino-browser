@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
+import Darwin
 import SwiftUI
 import NeutrinoCore
 
@@ -35,6 +36,22 @@ class BrowserEngineTab: NSObject, ObservableObject {
     var onActivate: (() -> Void)?
     var onBrowserCommand: ((String) -> Void)?
     var allowPopups: (() -> Bool)? { didSet { updatePopupPolicy() } }
+    /// Set before `blockingEnabled`, whose assignment applies the whole policy.
+    var blockAds = true
+    var blockingExceptions: [String] = []
+    var blockingCustom: [String] = []
+    /// Called after each page finishes loading, so per-site tools can be reapplied.
+    var onPageLoaded: (() -> Void)?
+    /// Shift-clicked links open in a floating preview when this returns true.
+    var onPeek: ((URL) -> Bool)?
+    /// Remembers a camera or microphone answer: site, "camera"/"microphone", "allow"/"block".
+    var onSitePermission: ((String, String, String) -> Void)?
+    /// The saved answer for a site and permission, if any.
+    var sitePermission: ((String, String) -> String?)?
+    /// Whether scripts are turned off for a site.
+    var scriptsBlocked: ((String) -> Bool)?
+    var upgradesToHTTPS = true
+    var stripsTracking = true
     var blockingEnabled = true { didSet { updateBlockingPolicy() } }
     var hasNativeNavigationChrome: Bool { false }
     func focusAddressBar() -> Bool { false }
@@ -69,7 +86,52 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func find(_ text: String, backwards: Bool = false) { preconditionFailure("An engine must implement find") }
     func pageHTML() async throws -> String { throw ValidationError("This engine cannot capture page HTML.") }
     func capturePNG() async throws -> Data { throw ValidationError("This engine cannot capture the page.") }
+    /// Runs one of the shared page scripts in an isolated world. Scripts return strings.
+    func runPageScript(_ source: String, userGesture: Bool = false) async throws -> String { throw ValidationError("This engine cannot run page tools.") }
+    func setMuted(_ value: Bool) {
+        guard let script = PageScript.source("mute", ["value": value]) else { return }
+        Task { _ = try? await runPageScript(script) }
+    }
+    func printPage() { onNotice?("Printing is unavailable for this page.") }
+    func pagePDF() async throws -> Data { throw ValidationError("This engine cannot save a PDF.") }
+    func pageArchive() async throws -> (data: Data, type: String) { (Data(try await pageHTML().utf8), "html") }
+    func fullPageCapture() async throws -> (data: Data, type: String) { (try await capturePNG(), "png") }
+    func showDeveloperTools() { onNotice?("Developer tools are unavailable for this page.") }
+    func navigationEntries(back: Bool) async -> [[String: Any]] { [] }
+    func goToHistory(offset: Int) {}
+    func applyScriptPolicy() {}
+    func setNetworkLimit(bytesPerSecond: Int) {}
+    func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool) {}
+    func clearWebsiteData(cookies: Bool, cache: Bool) async {}
+    func clearSiteData(host: String) async {}
+    func cookieDomains() async -> [String] { [] }
+    /// Memory in megabytes and processor time in seconds, when the engine reports them.
+    func resourceUsage() async -> (memoryMB: Double, cpuSeconds: Double)? { nil }
     var hasActiveDownloads: Bool { false }
     func requestClose() { onClose?() }
-    func dispose() { faviconTask?.cancel(); faviconTask = nil; onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil }
+    func dispose() { faviconTask?.cancel(); faviconTask = nil; onChange = nil; onCreateWindow = nil; onClose = nil; onNotice = nil; onActivate = nil; onBrowserCommand = nil; allowPopups = nil; onPageLoaded = nil; onPeek = nil; onSitePermission = nil; sitePermission = nil; scriptsBlocked = nil }
+}
+
+/// Page scripts are generated in Rust so both engines run the same code.
+enum PageScript {
+    static func source(_ kind: String, _ values: [String: Any] = [:]) -> String? {
+        var request = values; request["op"] = "pageScript"; request["kind"] = kind
+        return try? RustCore.request(request) as? String
+    }
+}
+
+/// Memory footprint and processor time of one process, from the kernel.
+enum ProcessUsage {
+    static func sample(_ pid: Int32) -> (memoryMB: Double, cpuSeconds: Double)? {
+        var info = rusage_info_v2()
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V2, $0) }
+        }
+        guard result == 0 else { return nil }
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let ticks = Double(info.ri_user_time + info.ri_system_time)
+        let nanoseconds = timebase.denom == 0 ? ticks : ticks * Double(timebase.numer) / Double(timebase.denom)
+        return (Double(info.ri_phys_footprint) / 1_048_576, nanoseconds / 1_000_000_000)
+    }
 }

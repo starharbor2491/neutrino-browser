@@ -3,10 +3,13 @@
 //! this crate owns presentation, interaction state, editing and workspace transforms.
 mod appearance;
 mod bookmarks;
+mod browser_import;
 mod core;
+mod features;
 mod icons;
 mod module_repository;
 mod modules;
+mod onboarding;
 mod policy;
 mod storage;
 mod uninstall;
@@ -15,6 +18,7 @@ pub mod workers;
 pub use core::request as core_request;
 mod render;
 mod state;
+mod views;
 pub use state::{Shell, Snapshot};
 use std::ffi::{c_char, CStr, CString};
 

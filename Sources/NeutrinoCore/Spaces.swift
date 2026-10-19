@@ -5,6 +5,8 @@ public struct TabFolder: Identifiable, Codable, Equatable, Sendable {
   public var id: UUID
   public var name: String
   public var collapsed: Bool
+  /// One of the tab-group colors: grey, blue, red, yellow, green, pink, purple, cyan.
+  public var color: String?
   public init(id: UUID = UUID(), name: String, collapsed: Bool = false) {
     self.id = id
     self.name = name
@@ -23,6 +25,10 @@ public struct BrowserSpace: Identifiable, Codable, Equatable, Sendable {
   public var tabs: [BrowserTab]
   public var folders: [TabFolder]
   public var archivedTabs: [BrowserTab]
+  /// A letter or emoji shown for the Space instead of its initial.
+  public var emoji: String?
+  /// Two hex colors for the Space's background, top to bottom.
+  public var gradient: [String]?
   public init(
     id: UUID = UUID(), name: String, symbol: String = "circle.grid.2x2", profileID: UUID,
     tabs: [BrowserTab] = []

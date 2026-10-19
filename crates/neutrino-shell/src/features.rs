@@ -1,0 +1,999 @@
+// SPDX-License-Identifier: MPL-2.0
+//! Everyday browser features every style shares: tab actions, find, address
+//! suggestions, page tools, per-site settings, library collections, performance
+//! limits and keyboard shortcuts. Requests are validated here; the host performs
+//! the resulting commands.
+use crate::render::host;
+use crate::state::{array, bound, flag, resolve_address, text, Shell};
+use serde_json::{json, Value};
+use url::Url;
+
+/// Operations handled by this module.
+pub const OPS: &[&str] = &[
+    "tab-action", "rename-tab", "select-index", "tab-step", "reopen-closed", "find-open", "find-query",
+    "find-step", "find-close", "address-input", "suggest-move", "suggest-accept", "page-command",
+    "nav-history", "go-history", "site-setting", "clear-data", "site-data", "edit-bookmark", "reading",
+    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
+    "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
+    "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio",
+];
+
+/// Actions offered by the command bar, shortcuts and command chains:
+/// identifier, label, glyph, default shortcut.
+pub const ACTIONS: &[(&str, &str, &str, &str)] = &[
+    ("new-tab", "New tab", "plus", "cmd+t"),
+    ("new-window", "New window", "plus", "cmd+n"),
+    ("private-window", "New private window", "shield", "shift+cmd+n"),
+    ("reopen-tab", "Reopen closed tab", "undo", "shift+cmd+t"),
+    ("close-tab", "Close tab", "close", "cmd+w"),
+    ("next-tab", "Next tab", "forward", "ctrl+tab"),
+    ("previous-tab", "Previous tab", "back", "ctrl+shift+tab"),
+    ("duplicate-tab", "Duplicate tab", "copy", ""),
+    ("pin-tab", "Pin or unpin tab", "pin", ""),
+    ("mute-tab", "Mute or unmute tab", "volume", "ctrl+m"),
+    ("sleep-tab", "Put tab to sleep", "moon", ""),
+    ("split", "Split view", "split", ""),
+    ("find", "Find on page", "search", "cmd+f"),
+    ("reader", "Reader view", "book", ""),
+    ("print", "Print", "print", "cmd+p"),
+    ("save-pdf", "Save as PDF", "download", ""),
+    ("save-page", "Save page as", "download", "cmd+s"),
+    ("view-source", "View page source", "code", "alt+cmd+u"),
+    ("dev-tools", "Developer tools", "code", "alt+cmd+i"),
+    ("copy-url", "Copy page address", "copy", "shift+cmd+c"),
+    ("share", "Share page", "external", ""),
+    ("pip", "Picture in picture", "pip", ""),
+    ("capture", "Capture page", "camera", "shift+cmd+s"),
+    ("bookmark", "Bookmark page", "bookmark", "cmd+d"),
+    ("reading-add", "Add to Reading List", "book", "shift+cmd+d"),
+    ("bookmarks", "Bookmarks", "bookmark", "alt+cmd+b"),
+    ("history", "History", "history", "cmd+y"),
+    ("downloads", "Downloads", "download", "alt+cmd+l"),
+    ("reading-list", "Reading List", "book", ""),
+    ("sessions", "Saved sessions", "folder", ""),
+    ("boards", "Boards", "grid", ""),
+    ("settings", "Settings", "settings", "cmd+,"),
+    ("customize", "Customize", "appearance", ""),
+    ("extensions", "Extensions", "plug", ""),
+    ("modules", "Modules", "grid", ""),
+    ("task-manager", "Task manager", "activity", "shift+esc"),
+    ("clear-data", "Clear browsing data", "trash", "shift+cmd+delete"),
+    ("sidebar", "Show or hide sidebar", "sidebar", "cmd+b"),
+    ("focus", "Focus mode", "focus", ""),
+    ("zoom-in", "Zoom in", "plus", "cmd+="),
+    ("zoom-out", "Zoom out", "minus", "cmd+-"),
+    ("zoom-reset", "Actual size", "search", "cmd+0"),
+    ("home", "Start page", "home", "shift+cmd+h"),
+    ("save-session", "Save tabs as a session", "folder", ""),
+    ("break", "Take a break", "pause", ""),
+    ("panic", "Panic button", "shield", "ctrl+alt+cmd+p"),
+    ("summarize", "Summarize page", "spark", ""),
+    ("palette", "Command bar", "search", "cmd+k"),
+];
+
+pub fn action_label(id: &str) -> &'static str {
+    ACTIONS.iter().find(|a| a.0 == id).map(|a| a.1).unwrap_or("")
+}
+
+/// Shortcut bindings: defaults, then the person's own additions.
+pub fn shortcuts(s: &Shell) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = ACTIONS
+        .iter()
+        .filter(|a| !a.3.is_empty())
+        .map(|a| (a.3.to_string(), a.0.to_string()))
+        .collect();
+    if let Some(custom) = s.snapshot["preferences"]["shortcuts"].as_object() {
+        for (action, binding) in custom {
+            if let Some(binding) = binding.as_str().filter(|b| valid_binding(b)) {
+                if ACTIONS.iter().any(|a| a.0 == action) {
+                    out.retain(|(b, _)| b != binding);
+                    out.push((binding.to_string(), action.clone()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// "ctrl+alt+shift+cmd+key": at least one modifier unless it is a function key.
+pub fn valid_binding(binding: &str) -> bool {
+    let parts: Vec<&str> = binding.split('+').collect();
+    let Some((key, modifiers)) = parts.split_last() else { return false };
+    let order = ["ctrl", "alt", "shift", "cmd"];
+    let mut last = None;
+    for m in modifiers {
+        let Some(i) = order.iter().position(|o| o == m) else { return false };
+        if last.is_some_and(|l| i <= l) {
+            return false;
+        }
+        last = Some(i);
+    }
+    let function = key.len() > 1 && key.starts_with('f') && key[1..].parse::<u8>().is_ok_and(|n| (1..=19).contains(&n));
+    let named = ["tab", "esc", "delete", "enter", "space", "up", "down", "left", "right"].contains(key);
+    let printable = key.chars().count() == 1 && !key.chars().any(char::is_whitespace);
+    binding.len() <= 40 && (function || ((named || printable) && !modifiers.is_empty()))
+}
+
+/// The request an action performs.
+pub fn action_request(s: &Shell, id: &str) -> Option<Value> {
+    let tab = s.active()["id"].clone();
+    Some(match id {
+        "new-tab" => json!({"op":"newTab"}),
+        "new-window" => json!({"op":"newWindow"}),
+        "private-window" => json!({"op":"privateWindow"}),
+        "reopen-tab" => json!({"op":"reopenTab"}),
+        "close-tab" => json!({"op":"closeCurrent"}),
+        "next-tab" => json!({"op":"tab-step","value":1}),
+        "previous-tab" => json!({"op":"tab-step","value":-1}),
+        "duplicate-tab" => json!({"op":"duplicateTab","id":tab}),
+        "pin-tab" => json!({"op":"pinTab","id":tab}),
+        "mute-tab" => json!({"op":"tab-action","id":tab,"value":"mute"}),
+        "sleep-tab" => json!({"op":"tab-action","id":tab,"value":"sleep"}),
+        "split" => json!({"op":"menu","value":"split-choose"}),
+        "find" => json!({"op":"find-open"}),
+        "reader" => json!({"op":"reader"}),
+        "print" | "save-pdf" | "save-page" | "view-source" | "dev-tools" | "copy-url" | "share" | "pip" | "panic" => {
+            json!({"op":"page-command","value":id})
+        }
+        "break" => json!({"op":"page-command","value":"break"}),
+        "capture" => json!({"op":"menu","value":"capture"}),
+        "bookmark" => json!({"op":"bookmark"}),
+        "reading-add" => json!({"op":"reading","value":"add"}),
+        "bookmarks" | "history" | "downloads" => json!({"op":"screen","value":"library","section":id}),
+        "reading-list" => json!({"op":"screen","value":"library","section":"reading"}),
+        "sessions" => json!({"op":"screen","value":"library","section":"sessions"}),
+        "boards" => json!({"op":"screen","value":"library","section":"boards"}),
+        "settings" | "extensions" | "modules" => json!({"op":"screen","value":id}),
+        "customize" => json!({"op":"screen","value":"editor"}),
+        "task-manager" => json!({"op":"screen","value":"settings","section":"performance"}),
+        "clear-data" => json!({"op":"menu","value":"clear-data"}),
+        "sidebar" => json!({"op":"sidebar"}),
+        "focus" => json!({"op":"native","action":"toggleFocus"}),
+        "zoom-in" => json!({"op":"zoom-step","value":"1"}),
+        "zoom-out" => json!({"op":"zoom-step","value":"-1"}),
+        "zoom-reset" => json!({"op":"zoom-step","value":"0"}),
+        "home" => json!({"op":"home"}),
+        "save-session" => json!({"op":"menu","value":"save-session"}),
+        "summarize" => json!({"op":"summarize"}),
+        "palette" => json!({"op":"palette"}),
+        _ => return None,
+    })
+}
+
+/// Query parameters that only identify a click or a campaign.
+pub const TRACKING_PARAMETERS: &[&str] = &[
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "utm_name",
+    "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "mc_cid", "mc_eid", "igshid", "yclid",
+    "_hsenc", "_hsmi", "mkt_tok", "oly_anon_id", "oly_enc_id", "vero_id", "wickedid", "twclid",
+    "ttclid", "srsltid", "ref_src", "si",
+];
+
+/// The address without click and campaign identifiers, when any were removed.
+pub fn strip_tracking(address: &str) -> Option<String> {
+    let mut url = Url::parse(address).ok()?;
+    if !["http", "https"].contains(&url.scheme()) || url.query().is_none() {
+        return None;
+    }
+    let pairs: Vec<(String, String)> = url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+    // "si" is only a tracker on a few share links; keep it everywhere else.
+    let share = url.host_str().is_some_and(|h| h.ends_with("youtube.com") || h.ends_with("youtu.be") || h.ends_with("spotify.com"));
+    let kept: Vec<&(String, String)> = pairs
+        .iter()
+        .filter(|(k, _)| !TRACKING_PARAMETERS.contains(&k.to_ascii_lowercase().as_str()) || k == "si" && !share)
+        .collect();
+    if kept.len() == pairs.len() {
+        return None;
+    }
+    if kept.is_empty() {
+        url.set_query(None);
+    } else {
+        url.query_pairs_mut().clear().extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    }
+    Some(url.to_string())
+}
+
+/// Domains from pasted or imported filter text: plain domains, hosts-file lines
+/// and network rules of the form `||example.com^`. Other rule types are skipped.
+pub fn parse_rules(source: &str) -> Vec<String> {
+    let mut out = vec![];
+    for line in source.lines().take(200_000) {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('!') || line.starts_with('#') || line.starts_with('[') || line.contains("##") || line.starts_with("@@") {
+            continue;
+        }
+        let candidate = if let Some(rule) = line.strip_prefix("||") {
+            let end = rule.find(['^', '/', '$']).unwrap_or(rule.len());
+            if rule[end..].contains('$') || rule[end..].trim_start_matches('^').contains('/') {
+                continue;
+            }
+            &rule[..end]
+        } else if let Some(rest) = line.strip_prefix("0.0.0.0 ").or_else(|| line.strip_prefix("127.0.0.1 ")) {
+            rest.split_whitespace().next().unwrap_or("")
+        } else if !line.contains(' ') && !line.contains('/') {
+            line
+        } else {
+            continue;
+        };
+        let domain = candidate.trim_start_matches("*.").trim_end_matches('.').to_ascii_lowercase();
+        if domain.contains('.')
+            && domain.len() <= 253
+            && !["localhost", "local", "0.0.0.0"].contains(&domain.as_str())
+            && domain.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+            && !out.contains(&domain)
+        {
+            out.push(domain);
+            if out.len() == 5000 {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// A web address the person typed into one of the forms, if it is usable.
+fn web_address(input: &str) -> Option<String> {
+    let input = input.trim();
+    let candidate = if input.contains("://") { input.to_string() } else { format!("https://{input}") };
+    let url = Url::parse(&candidate).ok()?;
+    (["http", "https"].contains(&url.scheme()) && url.host_str().is_some_and(|h| h.contains('.') || h == "localhost") && url.username().is_empty())
+        .then(|| url.to_string())
+}
+
+/// Search engines: built-in ones, then the person's own.
+pub fn search_engines(s: &Shell) -> Vec<(String, String, String, String)> {
+    let mut out: Vec<(String, String, String, String)> = [
+        ("duckDuckGo", "DuckDuckGo", "d", "https://duckduckgo.com/?q=%s"),
+        ("google", "Google", "g", "https://www.google.com/search?q=%s"),
+        ("bing", "Bing", "b", "https://www.bing.com/search?q=%s"),
+        ("wikipedia", "Wikipedia", "w", "https://en.wikipedia.org/w/index.php?search=%s"),
+        ("brave", "Brave Search", "br", "https://search.brave.com/search?q=%s"),
+        ("startpage", "Startpage", "sp", "https://www.startpage.com/do/search?q=%s"),
+        ("ecosia", "Ecosia", "e", "https://www.ecosia.org/search?q=%s"),
+        ("youtube", "YouTube", "yt", "https://www.youtube.com/results?search_query=%s"),
+    ]
+    .iter()
+    .map(|(a, b, c, d)| (a.to_string(), b.to_string(), c.to_string(), d.to_string()))
+    .collect();
+    for e in array(&s.snapshot["preferences"]["searchEngines"]) {
+        out.push((text(e, "id").into(), text(e, "name").into(), text(e, "keyword").into(), text(e, "url").into()));
+    }
+    out
+}
+
+/// Typed text to an address: "keyword terms" uses that engine; otherwise the default.
+pub fn resolve(s: &Shell, input: &str) -> Option<String> {
+    let engines = search_engines(s);
+    let input = input.trim();
+    if let Some((keyword, terms)) = input.split_once(' ') {
+        if let Some(engine) = engines.iter().find(|e| !e.2.is_empty() && e.2.eq_ignore_ascii_case(keyword)) {
+            if !terms.trim().is_empty() {
+                return Some(engine.3.replace("%s", &urlencode(terms.trim())));
+            }
+        }
+    }
+    let default = text(&s.snapshot["preferences"], "defaultSearchID");
+    let resolved = if let Some(engine) = engines.iter().skip(3).find(|e| e.0 == default) {
+        resolve_address(input, "duckDuckGo").map(|address| {
+            if address.starts_with("https://duckduckgo.com/?q=") && !input.contains("duckduckgo.com") {
+                engine.3.replace("%s", &urlencode(input))
+            } else {
+                address
+            }
+        })
+    } else {
+        resolve_address(input, text(&s.snapshot["preferences"], "search"))
+    }?;
+    Some(if s.snapshot["preferences"]["stripTracking"].as_bool().unwrap_or(true) {
+        strip_tracking(&resolved).unwrap_or(resolved)
+    } else {
+        resolved
+    })
+}
+
+fn urlencode(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>().replace('+', "%20")
+}
+
+/// Visible tabs in strip order, for ⌘1–9 and keyboard cycling.
+fn ordered_tabs(s: &Shell) -> Vec<Value> {
+    s.tabs()
+        .iter()
+        .filter(|t| crate::render::tab_visible(t, s) || t["id"] == s.active()["id"])
+        .cloned()
+        .collect()
+}
+
+fn site_of_active(s: &Shell) -> Option<String> {
+    let url = text(s.active(), "url");
+    (!url.is_empty()).then(|| host(url))
+}
+
+/// Preference keys set with the generic "setting" request, with their validation.
+fn valid_setting(key: &str, v: &Value) -> bool {
+    let int = |min: i64, max: i64| v.as_i64().is_some_and(|n| (min..=max).contains(&n));
+    match key {
+        "sleepAfterMinutes" => [0, 15, 30, 60, 120, 240].contains(&v.as_i64().unwrap_or(-1)),
+        "memoryLimitMB" => [0, 1024, 2048, 4096, 8192].contains(&v.as_i64().unwrap_or(-1)),
+        "cpuLimit" => [0, 25, 50, 75].contains(&v.as_i64().unwrap_or(-1)),
+        "networkLimitKBps" => [0, 256, 1024, 5120, 10240].contains(&v.as_i64().unwrap_or(-1)),
+        "autoArchiveDays" => [0, 1, 7, 14, 30].contains(&v.as_i64().unwrap_or(-1)),
+        "batterySaver" | "hideCookieBanners" | "blockThirdPartyCookies" | "httpsUpgrade" | "stripTracking"
+        | "littleArc" | "peek" | "tabIslands" | "keyboardSounds" | "backgroundMusic" | "askWhereToSave"
+        | "interfaceSounds" => v.is_boolean(),
+        "musicVolume" => v.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)),
+        "defaultSearchID" => v.as_str().is_some_and(|id| id.len() <= 64),
+        "interfaceCSS" => v.as_str().is_some_and(|css| css.len() <= 65_536 && !css.contains('<')),
+        "startupPages" => v.as_array().is_some_and(|pages| pages.len() <= 20 && pages.iter().all(|p| p.as_str().and_then(web_address).is_some())),
+        "startupMode" => ["restore", "start", "pages"].contains(&v.as_str().unwrap_or("")),
+        "startPage" => v.as_object().is_some_and(|o| o.len() <= 6 && o.iter().all(|(k, v)| ["clock", "sites", "search", "stats", "wallpaper"].contains(&k.as_str()) && v.is_boolean())),
+        "themeSchedule" => v.as_object().is_some_and(|o| {
+            let time = |k: &str| o.get(k).and_then(Value::as_str).is_some_and(|t| t.len() == 5 && t.as_bytes()[2] == b':' && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60));
+            o.get("enabled").is_some_and(Value::is_boolean) && time("light") && time("dark")
+        }),
+        "readerStyle" => v.as_object().is_some_and(|o| {
+            o.get("size").and_then(Value::as_i64).is_some_and(|n| (14..=28).contains(&n))
+                && ["light", "sepia", "dark", "auto"].contains(&o.get("theme").and_then(Value::as_str).unwrap_or(""))
+                && ["serif", "sans"].contains(&o.get("font").and_then(Value::as_str).unwrap_or(""))
+        }),
+        "downloadFolder" => v.is_null(),
+        _ => int(i64::MIN, i64::MIN),
+    }
+}
+
+pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
+    let id = r["id"].clone();
+    let value = text(r, "value");
+    let tab = s.tabs().iter().find(|t| t["id"] == id).cloned();
+    let regular = !s.private();
+    match op {
+        "tab-action" => {
+            let Some(t) = tab else { return };
+            let url = text(&t, "url").to_string();
+            match value {
+                "reload" if !url.is_empty() => commands.push(json!({"op":"reloadTab","id":id})),
+                "mute" => commands.push(json!({"op":"muteTab","id":id,"value":!flag(&t,"muted")})),
+                "copy" if !url.is_empty() => {
+                    commands.push(json!({"op":"copyText","value":url}));
+                    s.notice = "Link copied.".into();
+                }
+                "bookmark" if !url.is_empty() && regular => commands.push(json!({"op":"addBookmark","url":url,"title":t["title"]})),
+                "sleep" if !url.is_empty() && id != s.active()["id"] => commands.push(json!({"op":"sleepTab","id":id})),
+                "new-right" => commands.push(json!({"op":"newTabAfter","id":id})),
+                "close-others" | "close-right" => {
+                    let others: Vec<Value> = if value == "close-others" {
+                        s.tabs().iter().filter(|x| x["id"] != id && !flag(x, "pinned")).map(|x| x["id"].clone()).collect()
+                    } else {
+                        let at = s.tabs().iter().position(|x| x["id"] == id).unwrap_or(0);
+                        s.tabs().iter().skip(at + 1).filter(|x| !flag(x, "pinned")).map(|x| x["id"].clone()).collect()
+                    };
+                    if !others.is_empty() {
+                        commands.push(json!({"op":"closeTabs","ids":others}));
+                    }
+                }
+                "reset-pinned" if !text(&t, "pinnedURL").is_empty() => commands.push(json!({"op":"resetPinnedTab","id":id})),
+                "favorite" if !url.is_empty() && regular => commands.push(json!({"op":"addFavorite","id":id})),
+                "split" if !url.is_empty() && id != s.active()["id"] => commands.push(json!({"op":"splitWith","id":id})),
+                "rename" => {
+                    s.menu = format!("rename-tab:{}", text(&t, "id"));
+                    s.name = text(&t, "customTitle").to_string();
+                    return;
+                }
+                _ => return,
+            }
+            s.menu.clear();
+        }
+        "rename-tab" => {
+            if tab.is_some() {
+                commands.push(json!({"op":"renameTab","id":id,"name":bound(&s.name, 120)}));
+                s.menu.clear();
+                s.name.clear();
+            }
+        }
+        "select-index" => {
+            let tabs = ordered_tabs(s);
+            let n = r["value"].as_u64().unwrap_or(0) as usize;
+            let target = if n == 9 { tabs.last() } else if n >= 1 { tabs.get(n - 1) } else { None };
+            if let Some(t) = target {
+                commands.push(json!({"op":"selectTab","id":t["id"]}));
+                s.palette = false;
+            }
+        }
+        "tab-step" => {
+            let step = r["value"].as_i64().unwrap_or(1).signum();
+            // Opera and Vivaldi cycle in the order tabs were last used.
+            let mut tabs = ordered_tabs(s);
+            if ["gx", "vivaldi"].contains(&crate::render::style(s)) && tabs.iter().all(|t| t["lastUsedAt"].is_number()) {
+                tabs.sort_by(|a, b| b["lastUsedAt"].as_f64().unwrap_or(0.).total_cmp(&a["lastUsedAt"].as_f64().unwrap_or(0.)));
+            }
+            if let Some(i) = tabs.iter().position(|t| t["id"] == s.active()["id"]) {
+                if tabs.len() > 1 {
+                    let next = (i as i64 + step).rem_euclid(tabs.len() as i64) as usize;
+                    commands.push(json!({"op":"selectTab","id":tabs[next]["id"]}));
+                }
+            }
+        }
+        "reopen-closed" => {
+            let index = r["index"].as_u64().unwrap_or(0) as usize;
+            if index < array(&s.snapshot["closedTabs"]).len() {
+                commands.push(json!({"op":"reopenClosed","index":index}));
+                s.menu.clear();
+            }
+        }
+        "find-open" => {
+            if !text(s.active(), "url").is_empty() {
+                s.find_open = true;
+                s.focus = "find-input".into();
+                s.menu.clear();
+                if !s.find_query.is_empty() {
+                    commands.push(json!({"op":"findCount","value":s.find_query}));
+                }
+            }
+        }
+        "find-query" => {
+            s.find_query = bound(value, 1024);
+            s.find_index = usize::from(!s.find_query.is_empty());
+            commands.push(json!({"op":"find","value":s.find_query,"backwards":false}));
+            commands.push(json!({"op":"findCount","value":s.find_query}));
+        }
+        "find-step" => {
+            if !s.find_query.is_empty() {
+                let back = r["value"].as_i64().unwrap_or(1) < 0;
+                let count = s.snapshot["findResult"]["count"].as_u64().unwrap_or(0) as usize;
+                if count > 0 {
+                    s.find_index = if back { if s.find_index <= 1 { count } else { s.find_index - 1 } } else if s.find_index >= count { 1 } else { s.find_index + 1 };
+                }
+                commands.push(json!({"op":"find","value":s.find_query,"backwards":back}));
+            }
+        }
+        "find-close" => {
+            s.find_open = false;
+            commands.push(json!({"op":"find","value":"","backwards":false}));
+        }
+        "address-input" => {
+            s.address_query = bound(value, 2048);
+            s.suggest_index = 0;
+            if s.address_query.is_empty() {
+                if s.menu == "suggest" {
+                    s.menu.clear();
+                }
+            } else {
+                s.menu = "suggest".into();
+                commands.push(json!({"op":"suggest","value":s.address_query}));
+            }
+        }
+        "suggest-move" => {
+            let count = suggestions(s).len();
+            if count > 0 {
+                let step = r["value"].as_i64().unwrap_or(1);
+                s.suggest_index = ((s.suggest_index as i64 + step).rem_euclid(count as i64 + 1)) as usize;
+            }
+        }
+        "suggest-accept" => {
+            let list = suggestions(s);
+            let choice = r["index"].as_u64().map(|i| i as usize + 1).unwrap_or(s.suggest_index);
+            if let Some(item) = choice.checked_sub(1).and_then(|i| list.get(i)) {
+                if text(item, "kind") == "tab" {
+                    commands.push(json!({"op":"selectTab","id":item["id"]}));
+                } else if let Some(url) = resolve(s, text(item, "url")) {
+                    commands.push(json!({"op":"navigate","url":url}));
+                }
+            } else if let Some(url) = resolve(s, &s.address_query.clone()) {
+                commands.push(json!({"op":"navigate","url":url}));
+            }
+            s.menu.clear();
+            s.address_query.clear();
+            s.suggest_index = 0;
+        }
+        "page-command" => {
+            let blank = text(s.active(), "url").is_empty();
+            let page_only = ["print", "save-pdf", "save-page", "view-source", "dev-tools", "copy-url", "share", "pip"];
+            if page_only.contains(&value) && blank {
+                s.notice = "Open a page first.".into();
+                return;
+            }
+            let command = match value {
+                "print" => "print",
+                "save-pdf" => "savePDF",
+                "save-page" => "savePage",
+                "view-source" => {
+                    s.screen = "source".into();
+                    "viewSource"
+                }
+                "dev-tools" => "devTools",
+                "copy-url" => {
+                    s.notice = "Address copied.".into();
+                    commands.push(json!({"op":"copyText","value":text(s.active(),"url")}));
+                    s.menu.clear();
+                    return;
+                }
+                "share" => "share",
+                "pip" => "pip",
+                "media" => "mediaToggle",
+                "break" => "breakMode",
+                "panic" => "panic",
+                _ => return,
+            };
+            commands.push(json!({"op":command,"id":if id.is_null() {s.active()["id"].clone()} else {id}}));
+            s.menu.clear();
+        }
+        "nav-history" => {
+            if ["back", "forward"].contains(&value) && !text(s.active(), "url").is_empty() {
+                s.menu = format!("nav-history:{value}");
+                commands.push(json!({"op":"navigationList","direction":value}));
+            }
+        }
+        "go-history" => {
+            if let Some(offset) = r["offset"].as_i64().filter(|o| *o != 0 && o.abs() <= 50) {
+                commands.push(json!({"op":"goToHistory","offset":offset}));
+                s.menu.clear();
+            }
+        }
+        "site-setting" => {
+            let key = text(r, "key");
+            let Some(site) = site_of_active(s) else { return };
+            let valid = match key {
+                "blockScripts" | "allowPopups" | "muted" => r["value"].is_boolean(),
+                "camera" | "microphone" => ["ask", "allow", "block"].contains(&value),
+                "filter" => ["", "dark", "grayscale", "sepia", "invert", "contrast", "noimages"].contains(&value),
+                _ => false,
+            };
+            if valid && regular {
+                commands.push(json!({"op":"siteSetting","host":site,"key":key,"value":r["value"]}));
+            }
+        }
+        "clear-data" => {
+            let range = text(r, "range");
+            let items = |k: &str| array(&r["items"]).iter().any(|v| v == k);
+            if ["hour", "day", "week", "month", "all"].contains(&range) && ["history", "cookies", "cache", "downloads"].iter().any(|k| items(k)) {
+                commands.push(json!({"op":"clearBrowsingData","range":range,"history":items("history"),"cookies":items("cookies"),"cache":items("cache"),"downloads":items("downloads")}));
+                s.menu.clear();
+                s.notice = "Browsing data cleared.".into();
+            } else {
+                s.notice = "Choose what to clear.".into();
+            }
+        }
+        "site-data" => match value {
+            "load" => commands.push(json!({"op":"loadSiteData"})),
+            "remove" if text(r, "host").len() <= 253 && !text(r, "host").is_empty() => commands.push(json!({"op":"clearSiteData","host":text(r,"host")})),
+            _ => {}
+        },
+        "edit-bookmark" => {
+            let title = bound(text(r, "title"), 512);
+            let folder = bound(text(r, "folder"), 80);
+            match web_address(text(r, "url")) {
+                Some(url) if regular && array(&s.snapshot["bookmarkIndex"]).iter().any(|b| b["id"] == id) => {
+                    commands.push(json!({"op":"editBookmark","id":id,"title":if title.is_empty() {host(&url)} else {title},"url":url,"folder":folder}));
+                    s.menu.clear();
+                }
+                _ => s.notice = "Enter a website address, like example.com.".into(),
+            }
+        }
+        "reading" => match value {
+            "add" | "playlist" if regular => {
+                let t = s.active().clone();
+                if !text(&t, "url").is_empty() {
+                    commands.push(json!({"op":"addReadingItem","url":t["url"],"title":t["title"],"media":value=="playlist"}));
+                    s.notice = if value == "playlist" { "Added to Playlist." } else { "Added to Reading List." }.into();
+                    s.menu.clear();
+                }
+            }
+            "read" | "unread" | "remove" if array(&s.snapshot["preferences"]["readingList"]).iter().any(|i| i["id"] == id) => {
+                commands.push(json!({"op":"readingItem","id":id,"value":value}));
+            }
+            _ => {}
+        },
+        "session" => match value {
+            "save" if regular && !s.name.trim().is_empty() => {
+                commands.push(json!({"op":"saveSession","name":bound(&s.name,80)}));
+                s.menu.clear();
+                s.name.clear();
+                s.notice = "Session saved. Open it from Library → Sessions.".into();
+            }
+            "open" | "delete" if array(&s.snapshot["preferences"]["savedSessions"]).iter().any(|v| v["id"] == id) => {
+                commands.push(json!({"op":if value=="open"{"openSession"}else{"deleteSession"},"id":id}));
+                s.menu.clear();
+                if value == "open" {
+                    s.screen = "browse".into();
+                }
+            }
+            _ => {}
+        },
+        "board" => {
+            let board = text(r, "board");
+            let boards = array(&s.snapshot["preferences"]["boards"]);
+            let exists = boards.iter().any(|b| text(b, "id") == board);
+            match value {
+                "create" if regular && !s.name.trim().is_empty() => {
+                    commands.push(json!({"op":"createBoard","name":bound(&s.name,80)}));
+                    s.menu.clear();
+                    s.name.clear();
+                }
+                "delete" if exists => {
+                    commands.push(json!({"op":"deleteBoard","id":board}));
+                    s.board.clear();
+                    s.menu.clear();
+                }
+                "add-page" if exists && !text(s.active(), "url").is_empty() => {
+                    commands.push(json!({"op":"boardAdd","board":board,"kind":"link","title":s.active()["title"],"url":s.active()["url"],"text":""}));
+                    s.menu.clear();
+                }
+                "add-note" if exists && !s.name.trim().is_empty() => {
+                    commands.push(json!({"op":"boardAdd","board":board,"kind":"note","title":"","url":"","text":bound(&s.name,2000)}));
+                    s.name.clear();
+                    s.menu.clear();
+                }
+                "move" if exists => {
+                    let x = r["x"].as_f64().unwrap_or(0.).clamp(0., 4000.);
+                    let y = r["y"].as_f64().unwrap_or(0.).clamp(0., 4000.);
+                    commands.push(json!({"op":"boardMove","board":board,"item":text(r,"item"),"x":x.round(),"y":y.round()}));
+                }
+                "remove" if exists => commands.push(json!({"op":"boardRemove","board":board,"item":text(r,"item")})),
+                _ => {}
+            }
+        }
+        "board-select" => s.board = bound(value, 64),
+        "web-panel" => match value {
+            "add" => match web_address(&s.name) {
+                Some(url) if regular => {
+                    let title = text(r, "title");
+                    commands.push(json!({"op":"addWebPanel","url":url,"title":if title.is_empty() {host(&url)} else {bound(title,80)}}));
+                    s.menu.clear();
+                    s.name.clear();
+                }
+                _ => s.notice = "Enter a website address, like web.whatsapp.com.".into(),
+            },
+            "preset" => {
+                if let Some((title, url)) = WEB_PANEL_SITES.iter().find(|p| p.1 == text(r, "url")) {
+                    commands.push(json!({"op":"addWebPanel","url":url,"title":title}));
+                    s.menu.clear();
+                }
+            }
+            "remove" | "reload" | "tab" if array(&s.snapshot["preferences"]["webPanels"]).iter().any(|p| p["id"] == id) => {
+                commands.push(json!({"op":match value {"remove"=>"removeWebPanel","reload"=>"reloadWebPanel",_=>"webPanelAsTab"},"id":id}));
+                if value == "remove" && s.panel == format!("web:{}", id.as_str().unwrap_or("")) {
+                    s.panel = "closed".into();
+                }
+                s.menu.clear();
+            }
+            _ => {}
+        },
+        "favorite" => match value {
+            "open" | "remove" if array(&s.snapshot["preferences"]["favorites"]).iter().any(|f| f["id"] == id) => {
+                commands.push(json!({"op":if value=="open"{"openFavorite"}else{"removeFavorite"},"id":id}));
+                s.menu.clear();
+            }
+            _ => {}
+        },
+        "space-appearance" => {
+            let target = text(&s.snapshot["session"], "spaceID").to_string();
+            let emoji = bound(text(r, "emoji"), 8);
+            let gradient: Vec<&str> = array(&r["gradient"]).iter().filter_map(Value::as_str).filter(|h| crate::appearance::hex(h)).take(2).collect();
+            if regular && (emoji.chars().count() <= 2) {
+                commands.push(json!({"op":"setSpaceAppearance","id":target,"emoji":emoji,"gradient":gradient}));
+            }
+        }
+        "folder-color" => {
+            if array(&s.snapshot["folders"]).iter().any(|f| f["id"] == id) && FOLDER_COLORS.iter().any(|c| c.0 == value) {
+                commands.push(json!({"op":"folderColor","id":id,"value":value}));
+                s.menu.clear();
+            }
+        }
+        "delete-space" => {
+            let spaces = array(&s.snapshot["spaces"]).iter().filter(|v| v["profileID"] == s.snapshot["session"]["profileID"]).count();
+            if regular && spaces > 1 && array(&s.snapshot["spaces"]).iter().any(|v| v["id"] == id) {
+                commands.push(json!({"op":"deleteSpace","id":id}));
+                s.menu.clear();
+            } else if spaces <= 1 {
+                s.notice = "A Profile keeps at least one Space.".into();
+            }
+        }
+        "delete-profile" => {
+            if regular && array(&s.snapshot["profiles"]).len() > 1 && array(&s.snapshot["profiles"]).iter().any(|p| p["id"] == id) {
+                commands.push(json!({"op":"deleteProfile","id":id}));
+                s.menu.clear();
+            }
+        }
+        "capture-mode" => {
+            if text(s.active(), "url").is_empty() {
+                return;
+            }
+            match value {
+                "visible" | "copy" | "full" => {
+                    commands.push(json!({"op":"captureImage","mode":value}));
+                    s.menu.clear();
+                }
+                "area" => {
+                    s.capture_select = true;
+                    s.menu.clear();
+                }
+                "cancel" => s.capture_select = false,
+                _ => {}
+            }
+        }
+        "capture-area" => {
+            let n = |k: &str| r[k].as_f64().filter(|v| v.is_finite() && *v >= 0. && *v <= 20_000.);
+            if let (Some(x), Some(y), Some(w), Some(h)) = (n("x"), n("y"), n("width"), n("height")) {
+                if w >= 4. && h >= 4. {
+                    commands.push(json!({"op":"captureArea","x":x,"y":y,"width":w,"height":h,"copy":flag(r,"copy")}));
+                }
+            }
+            s.capture_select = false;
+        }
+        "split-axis" => {
+            if ["sideBySide", "stacked"].contains(&value) {
+                commands.push(json!({"op":"splitAxis","value":value}));
+                s.menu.clear();
+            }
+        }
+        "custom-rules" => match value {
+            "import" => commands.push(json!({"op":"importRules"})),
+            "clear" => commands.push(json!({"op":"customRules","domains":[]})),
+            _ => {
+                let domains = parse_rules(text(r, "rules"));
+                s.notice = format!("{} {} blocked from your rules.", domains.len(), if domains.len() == 1 { "site is" } else { "sites are" });
+                commands.push(json!({"op":"customRules","domains":domains}));
+            }
+        },
+        "search-engine" => match value {
+            "save" => {
+                let name = bound(text(r, "name"), 60);
+                let keyword = bound(text(r, "keyword"), 20).to_lowercase();
+                let address = text(r, "url").trim();
+                let usable = address.contains("%s") && web_address(&address.replace("%s", "test")).is_some_and(|u| u.starts_with("https://"));
+                if !name.is_empty() && usable && !keyword.contains(' ') && !search_engines(s).iter().any(|e| !keyword.is_empty() && e.2 == keyword) {
+                    commands.push(json!({"op":"saveSearchEngine","name":name,"keyword":keyword,"url":address}));
+                } else {
+                    s.notice = "Enter a name, an unused keyword and an HTTPS address containing %s where the search terms go.".into();
+                }
+            }
+            "remove" => commands.push(json!({"op":"removeSearchEngine","id":id})),
+            _ => {}
+        },
+        "address-book" => match value {
+            "save" => {
+                let fields = ["name", "organization", "street", "city", "region", "postalCode", "country", "email", "phone"];
+                let mut entry = json!({});
+                for f in fields {
+                    entry[f] = json!(bound(text(&r["fields"], f), 200));
+                }
+                if fields.iter().any(|f| !text(&entry, f).is_empty()) && regular {
+                    commands.push(json!({"op":"saveAddress","fields":entry}));
+                }
+            }
+            "remove" => commands.push(json!({"op":"removeAddress","id":id})),
+            "fill" if !text(s.active(), "url").is_empty() => {
+                commands.push(json!({"op":"fillAddress","id":id}));
+                s.menu.clear();
+            }
+            _ => {}
+        },
+        "record-shortcut" => s.recording = bound(value, 40),
+        "shortcut" => {
+            let action = text(r, "action");
+            if ACTIONS.iter().any(|a| a.0 == action) {
+                if value.is_empty() {
+                    commands.push(json!({"op":"setShortcut","action":action,"value":Value::Null}));
+                } else if valid_binding(value) {
+                    commands.push(json!({"op":"setShortcut","action":action,"value":value}));
+                } else {
+                    s.notice = "Use at least one of ⌃ ⌥ ⇧ ⌘ with a key, or a function key.".into();
+                }
+            }
+            s.recording.clear();
+        }
+        "chain" => match value {
+            "save" => {
+                let steps: Vec<&str> = array(&r["steps"]).iter().filter_map(Value::as_str).filter(|a| ACTIONS.iter().any(|x| x.0 == *a)).take(10).collect();
+                if !s.name.trim().is_empty() && steps.len() >= 2 {
+                    commands.push(json!({"op":"saveChain","name":bound(&s.name,60),"steps":steps}));
+                    s.name.clear();
+                } else {
+                    s.notice = "Name the chain and choose at least two steps.".into();
+                }
+            }
+            "remove" => commands.push(json!({"op":"removeChain","id":id})),
+            _ => {}
+        },
+        "run-action" => {
+            let chain = array(&s.snapshot["preferences"]["commandChains"]).iter().find(|c| c["id"] == r["value"]).cloned();
+            let steps: Vec<String> = match &chain {
+                Some(c) => array(&c["steps"]).iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                None => vec![value.to_string()],
+            };
+            s.palette = false;
+            for step in steps.iter().take(10) {
+                if let Some(request) = action_request(s, step) {
+                    let result = s.dispatch(request);
+                    commands.extend(array(&result["commands"]).iter().cloned());
+                }
+            }
+        }
+        "rail-peek" => s.rail_peek = r["value"].as_bool().unwrap_or(false) && s.sidebar_hidden,
+        "setting" => {
+            let key = text(r, "key");
+            let v = &r["value"];
+            if valid_setting(key, v) {
+                commands.push(json!({"op":"preference","key":key,"value":v}));
+            }
+        }
+        "library-filter" => s.library_filter = bound(value, 80),
+        "boost" => {
+            let Some(site) = site_of_active(s) else { return };
+            let css = text(r, "css");
+            let hide: Vec<String> = text(r, "hide").lines().map(str::trim).filter(|l| !l.is_empty()).take(50).map(str::to_string).collect();
+            let safe = |v: &str| !v.contains('<') && !v.contains('{') && !v.contains('}') && v.len() <= 200;
+            if !regular {
+                return;
+            }
+            if css.len() > 20_000 || css.contains('<') || !hide.iter().all(|h| safe(h)) {
+                s.notice = "Site styles can’t contain “<”, and each hidden element needs a plain CSS selector.".into();
+                return;
+            }
+            commands.push(json!({"op":"siteBoost","host":site,"css":css,"hide":hide}));
+            s.menu.clear();
+            s.notice = format!("Styles saved for {site}.");
+        }
+        "startup-pages" => {
+            let pages: Vec<String> = value.lines().map(str::trim).filter(|l| !l.is_empty()).take(20).filter_map(web_address).collect();
+            commands.push(json!({"op":"preference","key":"startupPages","value":pages}));
+            commands.push(json!({"op":"preference","key":"restoreSession","value":false}));
+        }
+        "split-ratio" => {
+            if let Some(v) = r["value"].as_f64().filter(|v| (0.2..=0.8).contains(v)) {
+                commands.push(json!({"op":"splitRatio","value":v}));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Address suggestions: open tabs, then bookmarks and history the host found.
+pub fn suggestions(s: &Shell) -> Vec<Value> {
+    let query = s.address_query.to_lowercase();
+    if query.is_empty() {
+        return vec![];
+    }
+    let mut out = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for t in s.tabs() {
+        let url = text(t, "url");
+        if !url.is_empty() && t["id"] != s.active()["id"] && (text(t, "title").to_lowercase().contains(&query) || url.to_lowercase().contains(&query)) && seen.insert(url.to_string()) {
+            out.push(json!({"kind":"tab","id":t["id"],"title":t["title"],"url":url}));
+        }
+        if out.len() == 2 {
+            break;
+        }
+    }
+    for item in array(&s.snapshot["suggestions"]) {
+        let url = text(item, "url");
+        if !url.is_empty() && seen.insert(url.to_string()) {
+            out.push(item.clone());
+        }
+        if out.len() == 7 {
+            break;
+        }
+    }
+    out
+}
+
+/// Common consent-banner containers, hidden when the person turns that on.
+const COOKIE_BANNERS: &[&str] = &[
+    "#onetrust-consent-sdk", "#onetrust-banner-sdk", "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay",
+    ".qc-cmp2-container", "#qc-cmp2-container", "#didomi-host", "#usercentrics-root", ".fc-consent-root",
+    "#cmpbox", "#cmpwrapper", ".cc-window", ".cc-banner", "#cookie-law-info-bar", "#cookie-notice",
+    "#cookie-banner", ".cookie-banner", "#gdpr-cookie-message", "#truste-consent-track", ".truste_box_overlay",
+    ".truste_overlay", "[id^='sp_message_container_']", "#BorlabsCookieBox", "#iubenda-cs-banner",
+    ".osano-cm-window", "#termly-code-snippet-support", "#_evidon_banner", ".evidon-banner", "#consent_blackbar",
+    "#cookiescript_injected", "#hs-eu-cookie-confirmation", "#axeptio_overlay", "#tarteaucitronRoot",
+    "#cookie-consent-banner", "[aria-label='cookieconsent']", ".cookie-consent-banner",
+];
+
+/// Scripts the host runs in an isolated world on a page. Each returns a string.
+pub fn page_script(r: &Value) -> Option<String> {
+    let quote = |v: &str| serde_json::to_string(v).unwrap_or_else(|_| "\"\"".into());
+    Some(match text(r, "kind") {
+        "style" => {
+            let settings = &r["settings"];
+            let mut css = match text(settings, "filter") {
+                "dark" => "html{filter:invert(1) hue-rotate(180deg)!important;background:#fff!important}img,video,picture,canvas,iframe,embed,object{filter:invert(1) hue-rotate(180deg)!important}".to_string(),
+                "grayscale" => "html{filter:grayscale(1)!important}".into(),
+                "sepia" => "html{filter:sepia(.7)!important}".into(),
+                "invert" => "html{filter:invert(1)!important}".into(),
+                "contrast" => "html{filter:contrast(1.35)!important}".into(),
+                "noimages" => "img,picture,video,svg image,[role=img]{visibility:hidden!important}".into(),
+                _ => String::new(),
+            };
+            for selector in array(&settings["hide"]).iter().filter_map(Value::as_str).take(50) {
+                if !selector.contains(['<', '{', '}']) && selector.len() <= 200 {
+                    css.push_str(&format!("{selector}{{display:none!important}}"));
+                }
+            }
+            let custom = text(settings, "css");
+            if custom.len() <= 20_000 && !custom.contains('<') {
+                css.push_str(custom);
+            }
+            if flag(r, "cookieBanners") {
+                for selector in COOKIE_BANNERS {
+                    css.push_str(&format!("{selector}{{display:none!important}}"));
+                }
+            }
+            format!("(()=>{{const id='neutrino-page-style';let s=document.getElementById(id);const css={};if(!css){{s?.remove();return 'none'}}if(!s){{s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s)}}if(s.textContent!==css)s.textContent=css;return 'applied'}})()", quote(&css))
+        }
+        "mute" => format!("(()=>{{const m={};window.__neutrinoMuted=m;const all=()=>document.querySelectorAll('video,audio').forEach(e=>{{if(m)e.muted=true;else if(e.dataset.neutrinoMuted)e.muted=false;if(m)e.dataset.neutrinoMuted='1';else delete e.dataset.neutrinoMuted}});all();if(!window.__neutrinoMuteObserver){{window.__neutrinoMuteObserver=true;document.addEventListener('play',e=>{{if(window.__neutrinoMuted&&e.target instanceof HTMLMediaElement){{e.target.muted=true;e.target.dataset.neutrinoMuted='1'}}}},true)}}return String(m)}})()", flag(r, "value")),
+        "mediaState" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended&&m.readyState>2);return JSON.stringify({audible:!!p&&!p.muted&&p.volume>0,playing:!!p,media:ms.length>0,title:(navigator.mediaSession&&navigator.mediaSession.metadata&&navigator.mediaSession.metadata.title)||''})})()".into(),
+        "mediaToggle" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended);if(p){p.pause();return 'paused'}const q=ms.find(m=>m.currentTime>0&&!m.ended)||ms[0];if(q){q.play();return 'playing'}return 'none'})()".into(),
+        "pauseAll" => "(()=>{document.querySelectorAll('video,audio').forEach(m=>m.pause());return 'paused'})()".into(),
+        "pip" => "(()=>{if(document.pictureInPictureElement){document.exitPictureInPicture();return 'exit'}const vs=[...document.querySelectorAll('video')].filter(v=>v.readyState>0).sort((a,b)=>b.clientWidth*b.clientHeight-a.clientWidth*a.clientHeight);const v=vs.find(v=>!v.paused)||vs[0];if(!v)return 'none';if(v.requestPictureInPicture){v.disablePictureInPicture=false;v.requestPictureInPicture();return 'pip'}if(v.webkitSetPresentationMode){v.webkitSetPresentationMode('picture-in-picture');return 'pip'}return 'none'})()".into(),
+        "findCount" => format!("(()=>{{const q={}.toLowerCase();if(!q)return '0';const t=(document.body&&document.body.innerText||'').toLowerCase();let n=0,i=0;while((i=t.indexOf(q,i))!==-1&&n<9999){{n++;i+=q.length}}return String(n)}})()", quote(text(r, "query"))),
+        "fillAddress" => {
+            let a = &r["address"];
+            let fields = json!({
+                "name": text(a, "name"), "organization": text(a, "organization"), "street-address": text(a, "street"),
+                "address-line1": text(a, "street"), "address-level2": text(a, "city"), "address-level1": text(a, "region"),
+                "postal-code": text(a, "postalCode"), "country-name": text(a, "country"), "country": text(a, "country"),
+                "email": text(a, "email"), "tel": text(a, "phone")
+            });
+            format!("(()=>{{const f={fields};const guess=e=>{{const k=((e.name||'')+' '+(e.id||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.placeholder||'')).toLowerCase();if(/e-?mail/.test(k))return 'email';if(/phone|tel/.test(k))return 'tel';if(/zip|postal/.test(k))return 'postal-code';if(/city|town/.test(k))return 'address-level2';if(/state|region|province|county/.test(k))return 'address-level1';if(/country/.test(k))return 'country-name';if(/address|street/.test(k))return 'street-address';if(/company|organi/.test(k))return 'organization';if(/name/.test(k))return 'name';return ''}};let n=0;document.querySelectorAll('input,textarea,select').forEach(e=>{{if(e.disabled||e.readOnly||e.type==='hidden'||e.type==='password')return;const token=(e.autocomplete||'').split(' ').pop();const key=f[token]!==undefined?token:guess(e);const v=f[key];if(!v)return;const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e),'value')?.set;setter?setter.call(e,v):e.value=v;e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));n++}});return String(n)}})()")
+        }
+        _ => return None,
+    })
+}
+
+pub const WEB_PANEL_SITES: &[(&str, &str)] = &[
+    ("WhatsApp", "https://web.whatsapp.com/"),
+    ("Telegram", "https://web.telegram.org/"),
+    ("Messenger", "https://www.messenger.com/"),
+    ("Discord", "https://discord.com/app"),
+    ("X", "https://x.com/"),
+    ("Instagram", "https://www.instagram.com/"),
+    ("Spotify", "https://open.spotify.com/"),
+    ("Twitch", "https://www.twitch.tv/"),
+    ("YouTube Music", "https://music.youtube.com/"),
+    ("Gmail", "https://mail.google.com/"),
+    ("Calendar", "https://calendar.google.com/"),
+    ("ChatGPT", "https://chatgpt.com/"),
+];
+
+pub const FOLDER_COLORS: &[(&str, &str)] = &[
+    ("grey", "Grey"), ("blue", "Blue"), ("red", "Red"), ("yellow", "Yellow"),
+    ("green", "Green"), ("pink", "Pink"), ("purple", "Purple"), ("cyan", "Cyan"),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_campaign_parameters_and_keeps_the_rest() {
+        assert_eq!(strip_tracking("https://example.com/a?utm_source=x&id=7&fbclid=1").as_deref(), Some("https://example.com/a?id=7"));
+        assert_eq!(strip_tracking("https://example.com/?gclid=1").as_deref(), Some("https://example.com/"));
+        assert_eq!(strip_tracking("https://example.com/?q=rust"), None);
+        assert_eq!(strip_tracking("https://youtu.be/abc?si=share").as_deref(), Some("https://youtu.be/abc"));
+    }
+
+    #[test]
+    fn reads_domains_from_filter_lists_and_hosts_files() {
+        let rules = "! comment\n||ads.example.com^\n0.0.0.0 tracker.example.net\nplain.example.org\n##.banner\n||cdn.example.com^$script\n@@||good.example.com^\nlocalhost\n";
+        assert_eq!(parse_rules(rules), vec!["ads.example.com", "tracker.example.net", "plain.example.org"]);
+    }
+
+    #[test]
+    fn page_scripts_embed_values_as_json() {
+        let script = page_script(&json!({"kind":"findCount","query":"a\"b</script>"})).unwrap();
+        assert!(script.contains(r#""a\"b</script>""#));
+        let style = page_script(&json!({"kind":"style","settings":{"filter":"dark","hide":[".ad","bad{"]},"cookieBanners":true})).unwrap();
+        assert!(style.contains(".ad{display:none!important}") && !style.contains("bad{{") && style.contains("onetrust"));
+        assert!(page_script(&json!({"kind":"unknown"})).is_none());
+    }
+
+    #[test]
+    fn shortcut_bindings_need_ordered_modifiers() {
+        assert!(valid_binding("cmd+k"));
+        assert!(valid_binding("ctrl+shift+tab"));
+        assert!(valid_binding("f12"));
+        assert!(!valid_binding("k"));
+        assert!(!valid_binding("cmd+ctrl+k"));
+        assert!(!valid_binding("hyper+k"));
+    }
+}
