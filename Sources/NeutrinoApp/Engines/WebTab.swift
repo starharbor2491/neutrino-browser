@@ -100,7 +100,23 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
             if let pendingLoadURL { load(pendingLoadURL) }
             return
         }
-        guard let (identifier, rules) = RuleListCache.source(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom, subscribed: blockingSubscribed) else { return }
+        // Subscribed lists WebKit couldn't take are left out, so browsing never stops on them.
+        let allSubscribed = blockingSubscribed
+        var subscribed = RuleListCache.usable(allSubscribed)
+        var source = RuleListCache.source(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom, subscribed: subscribed)
+        if source == nil, !subscribed.isEmpty {
+            RuleListCache.reject(allSubscribed); subscribed = []
+            source = RuleListCache.source(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom, subscribed: [])
+        }
+        guard let (identifier, rules) = source else {
+            blockingReady = false; compilingRules = false
+            onNotice?("Content blocking could not load.")
+            if let url = pendingLoadURL {
+                failedNavigationURL = url; pendingLoadURL = nil; loading = false
+                errorMessage = "Blocking rules could not load. Retry or change blocking in Settings."; onChange?(false)
+            }
+            return
+        }
         if let compiled = RuleListCache.compiled[identifier] {
             if let previous = blockingRuleList, previous !== compiled { controller.remove(previous) }
             if blockingRuleList !== compiled { controller.add(compiled) }
@@ -109,6 +125,7 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
             return
         }
         blockingReady = blockingRuleList != nil; compilingRules = true
+        let includesSubscribed = !subscribed.isEmpty
         let finish: @MainActor (WKContentRuleList?, (any Error)?) -> Void = { [weak self] list, error in
             guard let self, !self.disposed, self.blockingEnabled, self.blockingRevision == revision else { return }
             self.compilingRules = false
@@ -118,6 +135,10 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
                 if let previous = self.blockingRuleList { controller.remove(previous) }
                 controller.add(list); self.blockingRuleList = list; self.blockingReady = true
                 if let url = self.pendingLoadURL { self.load(url) }
+            } else if includesSubscribed {
+                RuleListCache.reject(allSubscribed)
+                self.onNotice?("WebKit couldn’t load your subscribed filter lists, so WebKit tabs use the built-in blocking for now.")
+                self.updateBlockingPolicy()
             } else {
                 self.onNotice?(error?.localizedDescription ?? "Content blocking could not load.")
                 if let url = self.pendingLoadURL {
@@ -528,6 +549,10 @@ enum RuleListCache {
     private static var lastKey: [String]?
     private static var last: (identifier: String, source: String)?
     static var compiled: [String: WKContentRuleList] = [:]
+    /// Subscribed rules WebKit couldn't compile; left out until the lists change.
+    private static var rejectedSubscribed: Int?
+    static func usable(_ subscribed: [String]) -> [String] { !subscribed.isEmpty && rejectedSubscribed == subscribed.hashValue ? [] : subscribed }
+    static func reject(_ subscribed: [String]) { rejectedSubscribed = subscribed.hashValue }
     static func source(ads: Bool, exceptions: [String], custom: [String], subscribed: [String]) -> (String, String)? {
         let key = [ads ? "ads" : "trackers", exceptions.joined(separator: ","), custom.joined(separator: ","), String(subscribed.count), String(subscribed.hashValue)]
         if key == lastKey, let last { return (last.identifier, last.source) }

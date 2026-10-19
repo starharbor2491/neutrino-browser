@@ -193,7 +193,7 @@ fn step(s: &Shell, id: &str) -> Markup {
         },
         "vivaldi-blocking" => html! {
             (heading("Tracker and ad blocking", "Choose how much to block. You can change this for each site."))
-            (blocking(s, [("none", "No blocking", "Load every page as its owner intended."), ("trackers", "Block trackers", "Stop sites following you around."), ("ads", "Block trackers and ads", "Also remove most advertising.")]))
+            (blocking(s, [("none", "No blocking", "Load every page as its owner intended."), ("trackers", "Block trackers", "Stop sites following you around."), ("ads", "Block trackers and ads", "Also block common ad networks. Add filter lists such as EasyList in Settings for more.")]))
         },
         "vivaldi-done" => html! {(heading("You’re all set", "Your browser is ready. Open Settings any time to change your choices."))(default_browser(s))},
         // Brave
