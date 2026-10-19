@@ -259,10 +259,22 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     private func estimateBlocked() {
         estimatedBlocked = nil
         guard blockingEnabled, !ContentBlocking.isException(url?.host, in: blockingExceptions),
-              let script = PageScript.source("blockedCount", ["domains": ContentBlocking.domains(ads: blockAds, custom: blockingCustom)]) else { return }
+              let script = PageScript.source("resourceHosts") else { return }
         let page = url
+        let blocked = RuleListCache.blockedDomains(ads: blockAds, custom: blockingCustom, subscribed: RuleListCache.usable(blockingSubscribed))
         Task { @MainActor [weak self] in
-            guard let value = try? await self?.runPageScript(script), let count = Int(value), let self, self.url == page else { return }
+            guard let value = try? await self?.runPageScript(script), let data = value.data(using: .utf8),
+                  let hosts = try? JSONSerialization.jsonObject(with: data) as? [String: Int], let self, self.url == page else { return }
+            // A host counts when it or a parent domain is blocked, as the rules match.
+            let count = hosts.reduce(0) { total, entry in
+                var host = Substring(entry.key)
+                while !host.isEmpty {
+                    if blocked.contains(String(host)) { return total + entry.value }
+                    guard let dot = host.firstIndex(of: ".") else { break }
+                    host = host[host.index(after: dot)...]
+                }
+                return total
+            }
             self.estimatedBlocked = count; self.estimatedBlockedTotal += count; self.onChange?(false)
         }
     }
@@ -551,6 +563,15 @@ enum RuleListCache {
     static var compiled: [String: WKContentRuleList] = [:]
     /// Subscribed rules WebKit couldn't compile; left out until the lists change.
     private static var rejectedSubscribed: Int?
+    private static var domainSet: (key: [Int], set: Set<String>)?
+    /// Every blocked domain, subscribed lists included, for counting what a page tried to load.
+    static func blockedDomains(ads: Bool, custom: [String], subscribed: [String]) -> Set<String> {
+        let key = [ads ? 1 : 0, custom.hashValue, subscribed.count, subscribed.hashValue]
+        if let domainSet, domainSet.key == key { return domainSet.set }
+        let set = Set(ContentBlocking.domains(ads: ads, custom: custom, subscribed: subscribed))
+        domainSet = (key, set)
+        return set
+    }
     static func usable(_ subscribed: [String]) -> [String] { !subscribed.isEmpty && rejectedSubscribed == subscribed.hashValue ? [] : subscribed }
     static func reject(_ subscribed: [String]) { rejectedSubscribed = subscribed.hashValue }
     static func source(ads: Bool, exceptions: [String], custom: [String], subscribed: [String]) -> (String, String)? {
