@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
+import AVFoundation
 import Combine
 import NeutrinoCore
 import NeutrinoRust
@@ -157,6 +158,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var importedFrom = ""
     private var defaultStatus = ""
     private var assistantResponse = ""
+    /// The article's images for Reader, fetched and downsized: [{src (data URL), alt, anchor}].
+    private var readerImages: [[String: String]] = []
+    private var readerVoice: ReaderVoice?
     private var assistantTask: Task<Void, Never>?
     private var assistantGeneration = UUID()
     private var previewStep: Int?
@@ -369,7 +373,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         if projectedProfileID != profileID {
             projectedProfileID = profileID; assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
-            assistantResponse = ""; credentialMetadata = []; selectedNoteID = nil; libraryPage = 0; notesQuery=""; allNotes=false
+            assistantResponse = ""; readerImages = []; readerVoice?.stop(); credentialMetadata = []; selectedNoteID = nil; libraryPage = 0; notesQuery=""; allNotes=false
             noteSearchCache.removeAll()
         }
         if noteSearchQuery != notesQuery { noteSearchQuery = notesQuery; noteSearchCache.removeAll() }
@@ -471,8 +475,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 for engine in engines { engine.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in:&engineObservations) }
             }
             let document = model.session.selectedTabID.uuidString + ":" + tab.navigationRevision.uuidString
-            if let responseDocument, responseDocument != document { assistantResponse = ""; self.responseDocument = nil }
+            if let responseDocument, responseDocument != document { assistantResponse = ""; readerImages = []; readerVoice?.stop(); self.responseDocument = nil }
             snapshot["assistantResponse"] = assistantResponse
+            snapshot["readerImages"] = readerImages
+            snapshot["readerSpeaking"] = readerVoice?.speaking == true
             features.snapshot(into: &snapshot, model: model)
 
         }
@@ -1053,6 +1059,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard let model else { return }; if model.focusMode { model.exitFocus() } else { model.enterFocus() }
         case "retryResources":
             resourcesOpen = false; scheduleSync()
+        case "readerSpeak":
+            if command["value"] as? String == "stop" { readerVoice?.stop(); break }
+            if readerVoice == nil { readerVoice = ReaderVoice { [weak self] in self?.scheduleSync() } }
+            readerVoice?.speak(assistantResponse)
         case "reader":
             guard let model else { return }; assistantTask?.cancel()
             let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID
@@ -1065,7 +1075,10 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                           model.activeWebTab === tab, tab.navigationRevision == revision,
                           app.library.profiles.contains(where: { $0.id == profile }) else { return }
                     responseDocument = model.session.selectedTabID.uuidString + ":" + revision.uuidString
-                    assistantResponse = content; sendAction(["op": "screen", "value": "reader"])
+                    assistantResponse = content; readerImages = []; sendAction(["op": "screen", "value": "reader"])
+                    let images = await ReaderImages.load(from: tab)
+                    guard assistantGeneration == generation, tab.navigationRevision == revision, !images.isEmpty else { return }
+                    readerImages = images
                 } catch is CancellationError {} catch { if !Task.isCancelled && model.session.profileID == profile { app.notice = error.localizedDescription } }
             }
         case "capture":
@@ -1238,5 +1251,63 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 guard !Task.isCancelled, assistantGeneration == generation, model.session.profileID == profile, model.activeWebTab === tab, tab.navigationRevision == revision else { return }; responseDocument = model.session.selectedTabID.uuidString + ":" + revision.uuidString; assistantResponse = answer
             } catch is CancellationError {} catch { app.notice = error.localizedDescription }
         }
+    }
+}
+
+/// Reads the Reader text aloud with the system voice, as Edge's Read aloud does.
+@MainActor
+final class ReaderVoice: NSObject, AVSpeechSynthesizerDelegate {
+    private let synthesizer = AVSpeechSynthesizer()
+    private let changed: @MainActor () -> Void
+    private(set) var speaking = false
+    init(changed: @escaping @MainActor () -> Void) {
+        self.changed = changed
+        super.init()
+        synthesizer.delegate = self
+    }
+    func speak(_ text: String) {
+        stop()
+        let words = String(text.prefix(100_000)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty else { return }
+        synthesizer.speak(AVSpeechUtterance(string: words))
+        speaking = true; changed()
+    }
+    func stop() {
+        guard speaking || synthesizer.isSpeaking else { return }
+        synthesizer.stopSpeaking(at: .immediate)
+        speaking = false; changed()
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.speaking = false; self.changed() }
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.speaking = false; self.changed() }
+    }
+}
+
+/// The article's images for Reader: fetched without cookies, downsized to JPEG and capped,
+/// so the interface shows them from data addresses and never loads remote content itself.
+@MainActor
+enum ReaderImages {
+    static func load(from tab: BrowserEngineTab) async -> [[String: String]] {
+        guard let script = PageScript.source("readerImages"), let raw = try? await tab.runPageScript(script),
+              let data = raw.data(using: .utf8), let items = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else { return [] }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 15
+        configuration.httpCookieStorage = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+        var out: [[String: String]] = [], total = 0
+        for item in items.prefix(12) {
+            guard let address = item["src"], let url = URL(string: address), ["https", "http"].contains(url.scheme ?? ""),
+                  let result = try? await session.data(from: url), (result.1 as? HTTPURLResponse)?.statusCode == 200,
+                  result.0.count <= 8_000_000, let image = NSImage(data: result.0),
+                  let jpeg = BrowserFeatures.jpeg(image, maxWidth: 1000) else { continue }
+            total += jpeg.count
+            guard total <= 3_000_000 else { break }
+            out.append(["src": "data:image/jpeg;base64," + jpeg.base64EncodedString(),
+                        "alt": String((item["alt"] ?? "").prefix(200)), "anchor": String((item["anchor"] ?? "").prefix(80))])
+        }
+        return out
     }
 }

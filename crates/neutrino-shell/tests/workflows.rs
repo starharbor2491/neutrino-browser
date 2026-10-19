@@ -361,6 +361,23 @@ fn listed_sites_can_be_edited_from_privacy_settings() {
     assert!(commands(&s.dispatch(json!({"op":"site-setting","host":"other.example","key":"camera","value":"allow"}))).is_empty());
 }
 #[test]
+fn reader_places_images_after_their_paragraph_and_reads_aloud() {
+    let mut s = shell();
+    s.snapshot["assistantResponse"] = json!("A title\n\nFirst   paragraph of the story, with more words.\n\nSecond paragraph follows here.");
+    s.snapshot["readerImages"] = json!([
+        {"src":"data:image/jpeg;base64,AAAA","alt":"A harbor","anchor":"First paragraph of the story"},
+        {"src":"data:image/jpeg;base64,BBBB","alt":"","anchor":""},
+        {"src":"https://tracker.example/x.png","alt":"remote","anchor":""}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = s.dispatch(json!({"op":"screen","value":"reader"}))["html"].as_str().unwrap().to_string();
+    let first = html.find("First").unwrap();
+    let harbor = html.find("base64,AAAA").unwrap();
+    assert!(first < harbor && harbor < html.find("Second paragraph").unwrap());
+    assert!(html.find("base64,BBBB").unwrap() < first && !html.contains("tracker.example"));
+    let r = s.dispatch(json!({"op":"reader-speak","value":"start"}));
+    assert_eq!(commands(&r)[0], json!({"op":"readerSpeak","value":"start"}));
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

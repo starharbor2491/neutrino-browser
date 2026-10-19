@@ -744,7 +744,9 @@ pub fn reader_controls(s: &Shell) -> Markup {
         next[key] = value;
         next.to_string()
     };
+    let speaking = flag(&s.snapshot, "readerSpeaking");
     html! {div class="reader-controls" role="toolbar" aria-label="Reader"{
+        button class="button quiet" data-op="reader-speak" data-value=(if speaking {"stop"} else {"start"}) aria-pressed=(speaking.to_string()){(icon(if speaking {"pause"} else {"volume"}))(if speaking {"Stop reading"} else {"Read aloud"})}
         button class="icon-button" data-op="setting" data-key="readerStyle" data-json=(with("size", json!((size - 1).max(14)))) aria-label="Smaller text" disabled[size<=14]{"A−"}
         button class="icon-button" data-op="setting" data-key="readerStyle" data-json=(with("size", json!((size + 1).min(28)))) aria-label="Larger text" disabled[size>=28]{"A+"}
         @for (value, label) in [("serif","Serif"),("sans","Sans")] {button class=(if font==value {"chip selected"} else {"chip"}) data-op="setting" data-key="readerStyle" data-json=(with("font", json!(value)))aria-pressed=((font==value).to_string()){(label)}}

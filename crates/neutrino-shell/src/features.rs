@@ -13,7 +13,7 @@ pub const OPS: &[&str] = &[
     "tab-action", "rename-tab", "select-index", "tab-step", "reopen-closed", "find-open", "find-query",
     "find-step", "find-close", "address-input", "suggest-move", "suggest-accept", "page-command",
     "nav-history", "go-history", "site-setting", "clear-data", "site-data", "edit-bookmark", "reading",
-    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "fake-history", "delete-space",
+    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "fake-history", "reader-speak", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
@@ -945,6 +945,14 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 commands.push(json!({"op":"setSpaceAppearance","id":target,"emoji":emoji,"gradient":gradient}));
             }
         }
+        // Reads the Reader text aloud with the system voice.
+        "reader-speak" => {
+            if value == "stop" {
+                commands.push(json!({"op":"readerSpeak","value":"stop"}));
+            } else if s.screen == "reader" && !text(&s.snapshot, "assistantResponse").is_empty() {
+                commands.push(json!({"op":"readerSpeak","value":"start"}));
+            }
+        }
         // Opera GX's Fake My History: ordinary visits of one kind, dated over the last day by the host.
         "fake-history" => {
             if let Some((_, _, sites)) = FAKE_HISTORY.iter().find(|c| c.0 == value) {
@@ -1414,6 +1422,8 @@ pub fn page_script(r: &Value) -> Option<String> {
             let domains: Vec<&str> = array(&r["domains"]).iter().filter_map(Value::as_str).filter(|d| d.len() <= 253 && d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')).take(20_000).collect();
             format!("(()=>{{const d=new Set({});const hit=h=>{{for(let p=h.toLowerCase();p;){{if(d.has(p))return true;const i=p.indexOf('.');if(i<0)return false;p=p.slice(i+1)}}return false}};const seen=new Set();for(const e of document.querySelectorAll('script[src],img[src],iframe[src],link[href][rel~=stylesheet],embed[src],source[src],video[src],audio[src]')){{try{{const x=new URL(e.getAttribute('src')||e.getAttribute('href'),location.href);if(x.hostname!==location.hostname&&hit(x.hostname))seen.add(x.href)}}catch(_){{}}}}return String(seen.size)}})()", serde_json::to_string(&domains).unwrap_or_else(|_| "[]".into()))
         }
+        // The article's large images for Reader, each with the start of the paragraph it follows.
+        "readerImages" => "(()=>{const root=document.querySelector('article')||document.querySelector('main')||document.body;if(!root)return '[]';const blocks=new Set(['P','H1','H2','H3','H4','H5','H6','LI','BLOCKQUOTE','PRE']);const out=[];const seen=new Set();for(const img of root.querySelectorAll('img')){if(out.length>=12)break;const src=img.currentSrc||img.src;if(!/^https?:/.test(src)||seen.has(src))continue;const w=img.naturalWidth||img.width,h=img.naturalHeight||img.height,shown=img.getBoundingClientRect();if(w<200||h<120||shown.width<100||shown.height<60||img.closest('nav,footer,aside,form'))continue;seen.add(src);let anchor='';const walk=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT);walk.currentNode=img;while(walk.previousNode()){const e=walk.currentNode;if(blocks.has(e.tagName)&&!e.contains(img)){const t=(e.innerText||'').trim().replace(/\\s+/g,' ');if(t){anchor=t.slice(0,80);break}}}out.push({src,alt:(img.alt||'').slice(0,200),anchor})}return JSON.stringify(out)})()".into(),
         // Third-party hosts the page loads resources from, with how many each: {host: count}.
         "resourceHosts" => "(()=>{const out={};const seen=new Set();for(const e of document.querySelectorAll('script[src],img[src],iframe[src],link[href][rel~=stylesheet],embed[src],source[src],video[src],audio[src]')){try{const x=new URL(e.getAttribute('src')||e.getAttribute('href'),location.href);if(x.hostname===location.hostname||seen.has(x.href))continue;seen.add(x.href);const h=x.hostname.toLowerCase();if(!(h in out)&&Object.keys(out).length>=500)continue;out[h]=(out[h]||0)+1}catch(_){}}return JSON.stringify(out)})()".into(),
         // The RSS or Atom feed a page advertises in its head, or "".

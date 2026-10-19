@@ -1009,9 +1009,18 @@ fn utility(s: &Shell) -> Markup {
         "assistant" => assistant(s),
         "reader" => {
             let r = &s.snapshot["preferences"]["readerStyle"];
+            // Images follow the paragraph they came after on the page; unplaced ones follow the title.
+            let squash = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+            let images: Vec<(String, &Value)> = array(&s.snapshot["readerImages"]).iter().filter(|i| text(i, "src").starts_with("data:image/")).map(|i| (squash(text(i, "anchor")).chars().take(40).collect(), i)).collect();
+            let blocks: Vec<&str> = text(&s.snapshot,"assistantResponse").split("\n\n").filter(|b| !b.trim().is_empty()).take(4000).collect();
+            let placed = |i: usize| -> Vec<&Value> {
+                let block = squash(blocks[i]);
+                images.iter().filter(|(anchor, _)| if anchor.is_empty() { i == 0 } else { block.starts_with(anchor.as_str()) && !blocks[..i].iter().any(|b| squash(b).starts_with(anchor.as_str())) }).map(|(_, img)| *img).collect()
+            };
             html! {article class="reader-content" data-theme=(r["theme"].as_str().unwrap_or("auto")) data-font=(r["font"].as_str().unwrap_or("serif")) style=(crate::views::reader_style(s)) {
-                @for (i, block) in text(&s.snapshot,"assistantResponse").split("\n\n").filter(|b| !b.trim().is_empty()).enumerate().take(4000) {
+                @for (i, block) in blocks.iter().enumerate() {
                     @if i == 0 {h1{(block.trim())}} @else if block.trim().len() < 90 && !block.trim().ends_with('.') {h2{(block.trim())}} @else {p{(block.trim())}}
+                    @for img in placed(i) {figure class="reader-figure"{img src=(text(img,"src")) alt=(text(img,"alt")) loading="lazy";@if !text(img,"alt").is_empty() {figcaption{(text(img,"alt"))}}}}
                 }
             }}
         }
