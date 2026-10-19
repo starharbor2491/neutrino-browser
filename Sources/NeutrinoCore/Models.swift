@@ -294,6 +294,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var memoryLimitMB: Int?
     public var cpuLimit: Int?
     public var networkLimitKBps: Int?
+    /// Trackers and ads blocked since install, for Brave's start page.
+    public var blockedLifetime: Int?
     public var batterySaver: Bool?
     public var hideCookieBanners: Bool?
     public var blockThirdPartyCookies: Bool?

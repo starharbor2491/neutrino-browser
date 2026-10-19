@@ -46,6 +46,7 @@ final class BrowserFeatures {
     var credentialsChanged = false
     private var loop: Task<Void, Never>?
     private var cpu: [UUID: (seconds: Double, at: Date)] = [:]
+    private var blockedSeen: [UUID: Int] = [:]
     private var firstSeen: [UUID: Date] = [:]
     private var overLimit = 0
     private var breakMuted = Set<UUID>()
@@ -65,6 +66,7 @@ final class BrowserFeatures {
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
                 guard let self, let model = self.model, !model.isClosed else { return }
                 await self.sampleMedia(model, includeChromium: tick % 3 == 0)
+                if !model.isPrivate { self.countBlocked(model) }
                 if tick % 10 == 0 { self.sleepIdleTabs(model); await self.captureThumbnail(model) }
                 if tick % 200 == 0 { self.archiveIdleTabs(model) }
                 if tick % 600 == 0, self.app.feature("feeds"), !model.isPrivate { await self.app.refreshFeeds(force: false) }
@@ -114,7 +116,8 @@ final class BrowserFeatures {
             snapshot["passwordPrompt"] = ["origin": prompt.credential.origin, "username": prompt.credential.username, "update": prompt.update]
         }
         let counted = model.liveEngineTabs.compactMap { $0.page.blockedTotal }
-        if !counted.isEmpty { snapshot["shieldsStats"] = ["blocked": counted.reduce(0, +)] }
+        let lifetime = model.isPrivate ? 0 : app.library.preferences.blockedLifetime ?? 0
+        if !counted.isEmpty || lifetime > 0 { snapshot["shieldsStats"] = ["blocked": counted.reduce(0, +), "lifetime": lifetime] }
         snapshot["onBattery"] = Self.onBattery
         snapshot["now"] = Date().timeIntervalSinceReferenceDate
         snapshot["historyQuery"] = historyQuery
@@ -184,6 +187,18 @@ final class BrowserFeatures {
         guard app.feature("media-controls"), !model.isPrivate, let media, model.liveEngineTab(media.id) != nil,
               let tab = model.session.tabs.first(where: { $0.id == media.id }) else { NowPlaying.clear(self); return }
         NowPlaying.show(self, title: tab.customTitle ?? tab.title, site: tab.url?.host ?? "", playing: media.playing)
+    }
+    /// Brave's start page counts every tracker and ad blocked, not only those in open tabs.
+    private func countBlocked(_ model: BrowserModel) {
+        var added = 0
+        for (id, page) in model.liveEngineTabs {
+            guard let total = page.blockedTotal else { continue }
+            // A page that was closed and reopened starts counting again from zero.
+            let previous = blockedSeen[id] ?? 0
+            added += total >= previous ? total - previous : total
+            blockedSeen[id] = total
+        }
+        if added > 0 { app.library.preferences.blockedLifetime = min(Int.max / 2, (app.library.preferences.blockedLifetime ?? 0) + added) }
     }
     /// A media key: toggles the page that is playing or was last paused.
     fileprivate func mediaKey(play: Bool?) {

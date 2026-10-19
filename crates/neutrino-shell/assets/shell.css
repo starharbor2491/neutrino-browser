@@ -4333,6 +4333,9 @@ details.start-guide > .guide-keys {
 .brave-stats small {
   color: #ffffffb3;
 }
+.brave-stats div + div strong {
+  color: #fff;
+}
 .brave-clock {
   font-size: 34px;
   font-weight: 300;

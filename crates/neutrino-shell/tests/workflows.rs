@@ -455,6 +455,17 @@ fn a_tab_dragged_onto_the_page_can_open_in_split_view() {
     assert!(!html.contains("split-drop"));
 }
 #[test]
+fn brave_start_page_counts_every_block_and_the_time_saved() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("brave");
+    s.snapshot["session"]["selectedTabID"] = json!("b");
+    s.snapshot["preferences"]["startPage"] = json!({"stats": true});
+    s.snapshot["shieldsStats"] = json!({"blocked": 12, "lifetime": 90_000});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("<strong>90000</strong><small>Trackers &amp; ads blocked</small>"), "{html}");
+    assert!(html.contains("<strong>1 hour</strong><small>Estimated time saved</small>"));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

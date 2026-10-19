@@ -384,9 +384,13 @@ fn vacant_page(s: &Shell) -> Markup {
         }}},
         "brave" => html! {section class="start-page brave-start" aria-label="New tab"{
             div class="brave-top"{
-                @if s.snapshot["shieldsStats"].is_object() && crate::views::start_option(s, "stats") {div class="brave-stats"{
-                    div{strong{(s.snapshot["shieldsStats"]["blocked"].as_u64().unwrap_or(0))}small{"Trackers & ads blocked in open tabs"}}
-                }}
+                @if s.snapshot["shieldsStats"].is_object() && crate::views::start_option(s, "stats") {
+                    @let blocked = s.snapshot["shieldsStats"]["lifetime"].as_u64().unwrap_or(0).max(s.snapshot["shieldsStats"]["blocked"].as_u64().unwrap_or(0));
+                    div class="brave-stats" title="Chromium tabs count blocked requests; WebKit tabs count blocked addresses found on each page."{
+                        div{strong{(blocked)}small{"Trackers & ads blocked"}}
+                        div title="Brave’s estimate: 50 milliseconds per blocked request."{strong{(time_saved(blocked))}small{"Estimated time saved"}}
+                    }
+                }
                 span class="spacer"{}
                 @if clock {time class="brave-clock" data-clock="true"{}}
             }
@@ -422,6 +426,17 @@ fn vacant_page(s: &Shell) -> Markup {
             }}}
         }
     }
+}
+/// Brave's "time saved": 50 milliseconds for each blocked request.
+pub(crate) fn time_saved(blocked: u64) -> String {
+    let seconds = blocked.saturating_mul(50) / 1000;
+    let (n, word) = match seconds {
+        0..=59 => (seconds, "second"),
+        60..=3599 => (seconds / 60, "minute"),
+        3600..=86_399 => (seconds / 3600, "hour"),
+        _ => (seconds / 86_400, "day"),
+    };
+    if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
 }
 fn private_note(s: &Shell) -> Markup {
     html! {@if s.private(){p class="start-private"{(icon("shield"))"Private window. History, cookies and site data from this window are erased when you close it."}}}
