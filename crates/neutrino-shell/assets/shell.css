@@ -7039,3 +7039,23 @@ body.split-armed .split-drop {
 .workspace-panel .library-actions .library-search {
   flex: 1 1 100%;
 }
+/* Vivaldi's tab thumbnails: the page's picture above the tab's title. */
+.tab-select:has(.tab-thumb) {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.tab-thumb {
+  flex: 1 0 100%;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top;
+  border-radius: calc(6px * var(--sq));
+  background: var(--hover);
+}
+.horizontal-group .tab-select:has(.tab-thumb) {
+  min-height: 0;
+}
+.horizontal-group .tab-select:has(.tab-thumb) > span:not(.site-icon) {
+  flex: 1;
+}

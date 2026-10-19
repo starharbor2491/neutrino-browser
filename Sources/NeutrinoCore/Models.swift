@@ -249,6 +249,8 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
     public var splitRatio: Double?
     /// The tab sidebar shows site icons only.
     public var compactRail: Bool?
+    /// Tabs show a picture of their page, as Vivaldi's tab bar thumbnails do.
+    public var tabThumbnails: Bool?
     public init() {}
     public mutating func normalize() {
         if let normalized = try? RustCore.transform(self, operation: "normalizeLayout") { self = normalized }

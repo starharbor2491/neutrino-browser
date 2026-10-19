@@ -160,7 +160,8 @@ pub(crate) fn tab_row(t: &Value, s: &Shell, preview: bool) -> Markup {
     let sleeping = crate::views::sleeping(s, text(t, "id"));
     html! {div class=(format!("tab-row{}{}",if selected{" active"}else{""},if sleeping{" sleeping"}else{""})) data-tab=(text(t,"id")) data-group=(group) data-folder=(text(t,"folderID")) draggable=((!preview).to_string()) {
         @if children {button class="branch" data-op="toggleBranch" data-id=(text(t,"id")) aria-label=(format!("{} {}",if flag(t,"collapsed"){"Expand"}else{"Collapse"},text(t,"title"))) {(icon(if flag(t,"collapsed"){"forward"}else{"down"}))}}
-        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::title(t)) title=[(!crate::features::on(s, "tab-previews")).then(|| crate::views::hover_card(s,t))] {(site(t)) span{(crate::views::title(t))}}
+        @let thumb = s.snapshot["tabThumbnails"][text(t,"id")].as_str().filter(|v| flag(&s.config()["layout"], "tabThumbnails") && v.starts_with("data:image/jpeg;base64,") && v.len() <= 60_000);
+        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::title(t)) title=[(!crate::features::on(s, "tab-previews")).then(|| crate::views::hover_card(s,t))] {@if let Some(src) = thumb {img class="tab-thumb" src=(src) alt="";}(site(t)) span{(crate::views::title(t))}}
         (crate::views::tab_audio(s, t))
         button class="tab-close" data-op="closeTab" data-id=(text(t,"id")) title="Close tab (⌘W)" aria-label=(format!("Close {}",crate::views::title(t))) {(icon("close"))}
         button class="tab-menu" data-op="menu" data-value=(format!("tab:{}",text(t,"id"))) title="Tab options" aria-label=(format!("Options for {}",crate::views::title(t))) {(icon("more"))}
@@ -1058,7 +1059,7 @@ fn editor_extra(s: &Shell) -> Markup {
                 @let next: Vec<&str> = if shown { hidden.iter().copied().chain([*key]).collect() } else { hidden.iter().copied().filter(|h| h != key).collect() };
                 button class="toggle-row" data-op="editor-value" data-key="hiddenButtons" data-json=(serde_json::to_string(&next).unwrap_or_default()) role="switch" aria-checked=(shown.to_string()){span{(label)}span class=(if shown {"switch on"} else {"switch"}){span{}}}
             }
-            @for (key, label) in [("panelBar","Panel bar"),("statusBar","Status bar"),("compactRail","Icon-only sidebar")] {button class="toggle-row" data-op="editor-value" data-key=(key) data-value=((!flag(layout,key)).to_string()) data-type="bool" role="switch" aria-checked=(flag(layout,key).to_string()){span{(label)}span class=(if flag(layout,key){"switch on"}else{"switch"}){span{}}}}
+            @for (key, label) in [("panelBar","Panel bar"),("statusBar","Status bar"),("compactRail","Icon-only sidebar"),("tabThumbnails","Tab thumbnails")] {button class="toggle-row" data-op="editor-value" data-key=(key) data-value=((!flag(layout,key)).to_string()) data-type="bool" role="switch" aria-checked=(flag(layout,key).to_string()){span{(label)}span class=(if flag(layout,key){"switch on"}else{"switch"}){span{}}}}
             label class="control-label"{"Split view"}(segments("editor-value","split",if text(layout,"split").is_empty(){"sideBySide"}else{text(layout,"split")},&[("sideBySide","Side by side"),("stacked","Stacked")]))
         }
     }

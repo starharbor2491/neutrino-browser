@@ -588,6 +588,17 @@ fn subscribed_address_rules_reach_webkit_and_not_the_domain_list() {
     assert!(domains.as_array().unwrap().iter().all(|d| !d.as_str().unwrap().contains('|')));
 }
 #[test]
+fn tab_thumbnails_show_page_pictures_when_turned_on() {
+    let mut s = shell();
+    s.snapshot["tabThumbnails"] = json!({"a":"data:image/jpeg;base64,/9j/AA==","c":"javascript:alert(1)"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("tab-thumb"));
+    s.snapshot["configuration"]["layout"]["tabThumbnails"] = json!(true);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert_eq!(html.matches(r#"class="tab-thumb""#).count(), 1);
+    assert!(!html.contains("javascript:alert"));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

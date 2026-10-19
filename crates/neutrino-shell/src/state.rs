@@ -1214,7 +1214,7 @@ impl Shell {
             | "cornerRadius" | "fontScale" | "spacingScale" | "typography" | "transparency"
             | "borderWidth" | "shadowStrength" | "accentHex" | "surfaceHex" | "textHex" => "theme",
             "tabsWidth" | "treeTabs" | "bookmarksBar" | "sidebarWidth" | "secondaryPanel" | "toolbarItems"
-            | "panelBar" | "statusBar" | "split" | "compactRail" | "hiddenButtons" => "layout",
+            | "panelBar" | "statusBar" | "split" | "compactRail" | "hiddenButtons" | "tabThumbnails" => "layout",
             _ => return,
         };
         let valid = match key {

@@ -25,6 +25,8 @@ final class BrowserFeatures {
     private var cardOffer: UUID?
     /// Small pictures of tabs' pages for hover previews, taken while each tab was showing.
     private var thumbnails: [UUID: NSImage] = [:]
+    /// The same pictures as small JPEG data addresses, for tab thumbnails in the tab bar.
+    private var thumbnailData: [UUID: String] = [:]
     /// The address each Chromium thumbnail shows; Chromium pages are pictured once per page.
     private var thumbnailURLs: [UUID: URL] = [:]
     private lazy var preview = TabPreviewPanel()
@@ -125,6 +127,9 @@ final class BrowserFeatures {
         }
         if let queue = playlist, !model.isPrivate, let item = app.library.preferences.readingList?.first(where: { $0.id == queue.items[queue.position] }) {
             snapshot["playlist"] = ["position": queue.position + 1, "count": queue.items.count, "title": item.title]
+        }
+        if model.configuration.layout.tabThumbnails == true, !model.isPrivate {
+            snapshot["tabThumbnails"] = Dictionary(uniqueKeysWithValues: thumbnailData.prefix(60).map { ($0.key.uuidString, $0.value) })
         }
         if throttled.remove(model.session.selectedTabID) != nil { model.liveEngineTab(model.session.selectedTabID)?.setProcessorThrottle(1) }
         let counted = model.liveEngineTabs.compactMap { $0.page.blockedTotal }
@@ -313,7 +318,7 @@ final class BrowserFeatures {
     }
     /// Pictures the selected tab while it is showing, for its hover preview later.
     private func captureThumbnail(_ model: BrowserModel) async {
-        guard app.feature("tab-previews") else { thumbnails.removeAll(); return }
+        guard app.feature("tab-previews") || model.configuration.layout.tabThumbnails == true else { thumbnails.removeAll(); thumbnailData.removeAll(); return }
         let id = model.session.selectedTabID
         guard let page = model.liveEngineTab(id), let url = page.url, !page.loading, page.nativeView.window != nil,
               page.engineID == .webkit || thumbnailURLs[id] != url,
@@ -325,8 +330,13 @@ final class BrowserFeatures {
         image.draw(in: NSRect(origin: .zero, size: NSSize(width: width, height: image.size.height * scale)).offsetBy(dx: 0, dy: small.size.height - image.size.height * scale))
         small.unlockFocus()
         thumbnails[id] = small
+        if model.configuration.layout.tabThumbnails == true, let tiff = small.tiffRepresentation,
+           let jpeg = NSBitmapImageRep(data: tiff)?.representation(using: .jpeg, properties: [.compressionFactor: 0.6]), jpeg.count <= 40_000 {
+            thumbnailData[id] = "data:image/jpeg;base64," + jpeg.base64EncodedString(); refresh()
+        }
         let open = Set(model.session.tabs.map(\.id))
         thumbnails = thumbnails.filter { open.contains($0.key) }
+        thumbnailData = thumbnailData.filter { open.contains($0.key) }
         thumbnailURLs = thumbnailURLs.filter { open.contains($0.key) }
     }
     /// Arc archives tabs left unused for the chosen number of days, as it does at launch.
