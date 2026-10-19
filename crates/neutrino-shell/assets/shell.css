@@ -1214,10 +1214,29 @@ li.done .guide-check {
   display: flex;
   flex: none;
   gap: 4px;
-  overflow: auto;
-  scrollbar-width: none;
+  overflow: hidden;
   min-height: 40px;
   padding: 0 4px 4px;
+}
+.horizontal-tab-scroll {
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.horizontal-tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+.horizontal-tabs > .icon-button {
+  flex: none;
+}
+.strip-spacer {
+  flex: 1 0 8px;
+  align-self: stretch;
 }
 .horizontal-group {
   display: flex;
@@ -4461,7 +4480,7 @@ details.start-guide > .guide-keys {
   background: var(--accent);
 }
 .style-vivaldi .horizontal-group .tab-row,
-.style-vivaldi .horizontal-tabs > .stack-tab {
+.style-vivaldi .horizontal-tab-scroll > .stack-tab {
   width: 200px;
   min-height: 30px;
   border-radius: calc(5px * var(--sq)) calc(5px * var(--sq)) 0 0;
@@ -4473,7 +4492,7 @@ details.start-guide > .guide-keys {
 .style-vivaldi .horizontal-tabs .new-tab {
   color: #fff;
 }
-.style-vivaldi .horizontal-tabs > .stack-tab.active,
+.style-vivaldi .horizontal-tab-scroll > .stack-tab.active,
 .style-vivaldi .horizontal-group .tab-row.active {
   background: var(--bg);
   color: var(--ink);
@@ -4483,7 +4502,8 @@ details.start-guide > .guide-keys {
 .style-vivaldi .tab-strip-lead .workspace-switch .icon {
   color: #fff;
 }
-.style-vivaldi .horizontal-tabs > .horizontal-group > .icon-button {
+.style-vivaldi .horizontal-tab-scroll > .horizontal-group > .icon-button,
+.style-vivaldi .horizontal-tabs > .icon-button {
   color: #fff;
 }
 .style-vivaldi .page-toolbar {

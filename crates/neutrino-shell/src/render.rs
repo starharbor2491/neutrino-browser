@@ -678,6 +678,8 @@ fn horizontal_tabs(s: &Shell, preview: bool) -> Markup {
     let islands = style(s) == "gx" && crate::features::on(s, "tab-islands");
     html! {div class="horizontal-tabs" {
         div class="tab-strip-lead" data-window-drag="true" {@if style(s) != "safari" && text(&s.config()["layout"],"tabs") != "bottom" {div class="traffic-clearance"{}}@if !s.private() {(workspace_button(s, false))}}
+        // Only the tabs scroll; the Space switcher and New tab stay in view however many tabs are open.
+        div class="horizontal-tab-scroll" {
         div class="horizontal-group" data-drop-group="pinned" {
             span class="horizontal-group-label" title="Pinned tabs"{(icon("pin"))}
             @for t in s.tabs().iter().filter(|t|flag(t,"pinned")&&tab_visible(t,s)){(tab_row(t,s,preview))}
@@ -701,8 +703,10 @@ fn horizontal_tabs(s: &Shell, preview: bool) -> Markup {
         div class="horizontal-group" data-drop-group="today" {
             @let loose: Vec<&Value> = s.tabs().iter().filter(|t|!flag(t,"pinned")&&text(t,"folderID").is_empty()&&tab_visible(t,s)).collect();
             @if islands {(crate::views::islands(s, &loose, preview))} @else {@for t in loose {(tab_row(t,s,preview))}}
-            (button("New tab","newTab","plus"))
         }
+        }
+        (button("New tab","newTab","plus"))
+        div class="strip-spacer" data-window-drag="true" data-drop-group="today" {}
     }
     @if stacks {(crate::views::stack_row(s, preview))}
     }

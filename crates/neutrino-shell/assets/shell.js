@@ -258,7 +258,7 @@
         : null;
     const scrolls = [
       ...root.querySelectorAll(
-        ".tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list,.start-surface,.horizontal-tabs,.modules-content,.module-details",
+        ".tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list,.start-surface,.horizontal-tab-scroll,.modules-content,.module-details",
       ),
     ].map((e) => [e.className, e.scrollTop, e.scrollLeft]);
     const openDetails = [...root.querySelectorAll("details[open]")].map(
@@ -1548,7 +1548,7 @@
       if (!frame || drag) return;
       const candidates = [
         ...frame.querySelectorAll(
-          ".tabs-scroll,.library-content,.note-list,.horizontal-tabs,.start-surface",
+          ".tabs-scroll,.library-content,.note-list,.horizontal-tab-scroll,.start-surface",
         ),
       ].filter((el) => {
         const r = el.getBoundingClientRect();

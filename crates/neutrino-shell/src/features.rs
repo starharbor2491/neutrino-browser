@@ -523,7 +523,7 @@ fn valid_setting(key: &str, v: &Value) -> bool {
         "interfaceCSS" => v.as_str().is_some_and(|css| css.len() <= 65_536 && !css.contains('<')),
         "startupPages" => v.as_array().is_some_and(|pages| pages.len() <= 20 && pages.iter().all(|p| p.as_str().and_then(web_address).is_some())),
         "startupMode" => ["restore", "start", "pages"].contains(&v.as_str().unwrap_or("")),
-        "startPage" => v.as_object().is_some_and(|o| o.len() <= 6 && o.iter().all(|(k, v)| ["clock", "sites", "search", "stats", "wallpaper"].contains(&k.as_str()) && v.is_boolean())),
+        "startPage" => v.as_object().is_some_and(|o| o.len() <= 6 && o.iter().all(|(k, v)| ["clock", "sites", "search", "stats", "wallpaper", "reading"].contains(&k.as_str()) && v.is_boolean())),
         "themeSchedule" => v.as_object().is_some_and(|o| {
             let time = |k: &str| o.get(k).and_then(Value::as_str).is_some_and(|t| t.len() == 5 && t.as_bytes()[2] == b':' && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60));
             o.get("enabled").is_some_and(Value::is_boolean) && time("light") && time("dark")
