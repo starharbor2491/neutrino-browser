@@ -139,6 +139,7 @@ pub fn site_menu(s: &Shell) -> Markup {
     let shields = blocking && !crate::render::shields_lowered(s);
     let zoom = (s.snapshot["zoom"].as_f64().unwrap_or(1.) * 100.).round();
     let chromium = text(s.active(), "engineID") != "webkit";
+    let hidden = array(&settings["hide"]).len();
     html! {
         div class="site-info"{
             strong{(site)}
@@ -155,6 +156,8 @@ pub fn site_menu(s: &Shell) -> Markup {
             @if chromium {p class="field-help"{"Chromium tabs ask for camera and microphone with Chrome’s own prompt."}}
             div class="menu-separator"{}
             @if zoom != 100. {button class="menu-item" data-op="zoom-step" data-value="0"{(icon("search"))span{"Reset zoom ("(zoom)"%)"}}}
+            button class="menu-item" data-op="page-command" data-value="pick-element"{(icon("focus"))span{"Block an element"}}
+            @if hidden > 0 {button class="menu-item" data-op="site-setting" data-key="hide" data-value=""{(icon("undo"))span{"Show "(hidden)(if hidden == 1 {" hidden element"} else {" hidden elements"})}}}
             button class="menu-item" data-op="site-data" data-value="remove" data-host=(site){(icon("trash"))span{"Clear data for this site"}}
             button class="menu-item" data-op="screen" data-value="settings" data-section="privacy"{(icon("settings"))span{"Privacy settings"}}
         }
@@ -183,6 +186,7 @@ pub fn page_menu(s: &Shell) -> Markup {
             button class="menu-item" data-op="page-command" data-value="pip" disabled[blank]{(icon("pip"))span{"Picture in picture"}}
             button class="menu-item" data-op="menu" data-value="page-style" disabled[blank]{(icon("appearance"))span{(if gx {"Page shaders"} else {"Page style"})}}
             button class="menu-item" data-op="menu" data-value="boost" disabled[blank || s.private()]{(icon("edit"))span{(if arc {"Boost this site"} else {"Site CSS"})}}
+            button class="menu-item" data-op="page-command" data-value="pick-element" disabled[blank || s.private()]{(icon("focus"))span{(if arc {"Zap an element"} else {"Hide an element"})}}
             @if enabled("focusMode"){button class="menu-item" data-op="native" data-action="toggleFocus"{(icon("focus"))span{"Focus mode"}}}
         }
         div class="menu-separator"{}
@@ -722,7 +726,7 @@ pub fn pretty(binding: &str) -> String {
 
 pub fn privacy_extra(s: &Shell) -> Markup {
     let p = prefs(s);
-    let rules = array(&p["customBlockList"]).len();
+    let rules = array(&p["customBlockList"]).len() + array(&p["customCosmetic"]).len();
     html! {
         div class="settings-group"{
             (setting_toggle("Upgrade connections to HTTPS", "Load the secure version of sites when one exists.", "httpsUpgrade", p["httpsUpgrade"].as_bool().unwrap_or(true)))
@@ -730,8 +734,8 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             (setting_toggle("Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer.", "hideCookieBanners", p["hideCookieBanners"].as_bool().unwrap_or(true)))
         }
         details class="credential-disclosure"{summary{"Custom blocking rules"@if rules > 0 {" ("(rules)")"}}form data-form="custom-rules"{
-            p class="field-help"{"Paste domains, hosts-file lines or rules like ||ads.example.com^. Element-hiding rules aren’t supported here; use Site CSS from the page menu."}
-            textarea name="rules" rows="5" spellcheck="false" placeholder="||ads.example.com^"{(array(&p["customBlockList"]).iter().filter_map(Value::as_str).take(200).collect::<Vec<_>>().join("\n"))}
+            p class="field-help"{"Paste domains, hosts-file lines, rules like ||ads.example.com^ or element rules like example.com##.banner."}
+            textarea name="rules" rows="5" spellcheck="false" placeholder="||ads.example.com^\nexample.com##.banner"{(array(&p["customBlockList"]).iter().chain(array(&p["customCosmetic"])).filter_map(Value::as_str).take(400).collect::<Vec<_>>().join("\n"))}
             div class="button-row"{button class="button" type="button" data-op="custom-rules" data-value="import"{"Import list file…"}@if rules > 0 {button class="button" type="button" data-op="custom-rules" data-value="clear"{"Remove all"}}button class="button primary" type="submit"{"Save rules"}}
         }}
         div class="settings-group"{

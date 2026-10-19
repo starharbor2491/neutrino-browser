@@ -235,22 +235,22 @@ final class ChromiumTab: BrowserEngineTab {
         let enabled = blockingEnabled && !ContentBlocking.isException(pageURL?.host, in: blockingExceptions)
         command(Int(NEUTRINO_CEF_SET_BLOCKING), text: ContentBlocking.domains(ads: blockAds, custom: blockingCustom).joined(separator: "\n"), value: enabled ? 1 : 0)
     }
-    private func evaluateIsolated(_ expression: String, userGesture: Bool = false) async throws -> Any {
+    private func evaluateIsolated(_ expression: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> Any {
         let revision = navigationRevision
         _ = try await request("Runtime.enable",parameters:[:])
         let tree = try await request("Page.getFrameTree", parameters: [:])
         guard let body = try JSONSerialization.jsonObject(with: tree) as? [String: Any], let frameTree = body["frameTree"] as? [String: Any], let frame = frameTree["frame"] as? [String: Any], let frameID = frame["id"] as? String else { throw ValidationError("The page is unavailable.") }
         let world = try await request("Page.createIsolatedWorld", parameters: ["frameId": frameID, "worldName": "org.neutrino.reader"])
         guard navigationRevision == revision, let value = try JSONSerialization.jsonObject(with: world) as? [String: Any], let contextID = value["executionContextId"] as? Int, let unique = readerContexts[contextID] else { throw ValidationError("The page changed. Try again.") }
-        let result = try await request("Runtime.evaluate", parameters: ["expression": expression, "returnByValue": true, "uniqueContextId": unique, "timeout": 5000, "userGesture": userGesture])
+        let result = try await request("Runtime.evaluate", parameters: ["expression": expression, "returnByValue": true, "uniqueContextId": unique, "timeout": 5000, "userGesture": userGesture, "awaitPromise": wait != nil], timeout: wait ?? .seconds(15))
         guard navigationRevision == revision, let response = try JSONSerialization.jsonObject(with: result) as? [String: Any], response["exceptionDetails"] == nil, let object = response["result"] as? [String: Any] else { throw ValidationError("The page could not complete this request.") }
         return object["value"] ?? ""
     }
     override func pageText() async throws -> String { try await evaluateIsolated("(document.body?.innerText ?? '').slice(0, 40000)") as? String ?? "" }
     override func selectedText() async throws -> String { try await evaluateIsolated("(window.getSelection()?.toString() ?? '').slice(0, 8000)") as? String ?? "" }
     override func fillCredential(_ credential: LocalCredential) async throws { _ = try await evaluateIsolated("(() => { " + credential.autofillScript + " })()") }
-    override func runPageScript(_ source: String, userGesture: Bool = false) async throws -> String {
-        try await evaluateIsolated(source, userGesture: userGesture) as? String ?? ""
+    override func runPageScript(_ source: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> String {
+        try await evaluateIsolated(source, userGesture: userGesture, wait: wait) as? String ?? ""
     }
     /// Chromium mutes the whole page, Web Audio included.
     override func setMuted(_ value: Bool) { command(Int(NEUTRINO_CEF_MUTE), value: value ? 1 : 0) }

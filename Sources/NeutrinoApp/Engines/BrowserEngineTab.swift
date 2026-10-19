@@ -87,7 +87,8 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func pageHTML() async throws -> String { throw ValidationError("This engine cannot capture page HTML.") }
     func capturePNG() async throws -> Data { throw ValidationError("This engine cannot capture the page.") }
     /// Runs one of the shared page scripts in an isolated world. Scripts return strings.
-    func runPageScript(_ source: String, userGesture: Bool = false) async throws -> String { throw ValidationError("This engine cannot run page tools.") }
+    /// Runs a generated page script; `wait` allows a script that returns a promise to settle later.
+    func runPageScript(_ source: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> String { throw ValidationError("This engine cannot run page tools.") }
     func setMuted(_ value: Bool) {
         guard let script = PageScript.source("mute", ["value": value]) else { return }
         Task { _ = try? await runPageScript(script) }

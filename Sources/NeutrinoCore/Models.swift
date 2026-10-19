@@ -300,6 +300,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var httpsUpgrade: Bool?
     public var stripTracking: Bool?
     public var customBlockList: [String]?
+    /// Element-hiding rules such as "example.com##.banner" or "##.banner".
+    public var customCosmetic: [String]?
     public var startupPages: [String]?
     /// Extra keyboard shortcuts: action identifier to "ctrl+alt+shift+cmd+key".
     public var shortcuts: [String: String]?

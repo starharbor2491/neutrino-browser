@@ -273,6 +273,21 @@ final class BrowserFeatures {
                 self?.refresh()
             }
         case "devTools": model?.activeWebTab.showDeveloperTools()
+        case "pickElement":
+            guard regular, let model, let site = ContentBlocking.site(model.activeWebTab.url) else { break }
+            let label = model.configuration.theme.preset == "arc" ? "Click an element to zap it. Press Esc to cancel." : "Click an element to hide it on this site. Press Esc to cancel."
+            guard let script = PageScript.source("pick", ["label": label]) else { break }
+            let tab = model.activeWebTab
+            tab.focus()
+            Task { @MainActor [weak self] in
+                guard let selector = try? await tab.runPageScript(script, wait: .seconds(110)), !selector.isEmpty, selector.count <= 200, let self else { return }
+                var all = self.app.library.preferences.siteSettings ?? [:], settings = all[site] ?? SiteSettings()
+                settings.hide = Array(((settings.hide ?? []).filter { $0 != selector } + [selector]).suffix(50))
+                all[site] = settings
+                self.app.library.preferences.siteSettings = all
+                self.applySite(site, reloadWebKit: false)
+                self.app.notice = "Hidden on \(site). Show it again from the site menu."
+            }
         case "share":
             guard let model, let url = model.selectedTab.url, let view = window()?.contentView else { break }
             NSSharingServicePicker(items: [url]).show(relativeTo: NSRect(x: view.bounds.maxX - 140, y: view.bounds.maxY - 56, width: 1, height: 1), of: view, preferredEdge: .minY)
@@ -338,6 +353,7 @@ final class BrowserFeatures {
                 case "camera": settings.camera = choice
                 case "microphone": settings.microphone = choice
                 case "filter": settings.filter = choice
+                case "hide": settings.hide = nil
                 default: return true
                 }
             }
@@ -519,19 +535,26 @@ final class BrowserFeatures {
             app.applyConfiguration(configuration, to: model.session.spaceID)
         case "customRules":
             let domains = Array((command["domains"] as? [String] ?? []).prefix(5000))
+            let cosmetic = Array((command["cosmetic"] as? [String] ?? []).prefix(5000))
             app.library.preferences.customBlockList = domains.isEmpty ? nil : domains
+            app.library.preferences.customCosmetic = cosmetic.isEmpty ? nil : cosmetic
             for window in app.windows.values { window.model?.updateBlockingPolicy() }
+            restyleOpenPages()
         case "importRules":
             let panel = NSOpenPanel(); panel.message = "Choose a filter list or hosts file."
             guard panel.runModal() == .OK, let url = panel.url,
                   (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max <= 20_000_000,
                   let text = try? String(contentsOf: url, encoding: .utf8) else { break }
-            let found = ContentBlocking.parseRules(text)
-            var merged = app.library.preferences.customBlockList ?? []
+            let found = ContentBlocking.parseRules(text), elements = ContentBlocking.parseCosmetic(text)
+            var merged = app.library.preferences.customBlockList ?? [], hiding = app.library.preferences.customCosmetic ?? []
             for domain in found where !merged.contains(domain) && merged.count < 5000 { merged.append(domain) }
+            for rule in elements where !hiding.contains(rule) && hiding.count < 5000 { hiding.append(rule) }
             app.library.preferences.customBlockList = merged.isEmpty ? nil : merged
+            app.library.preferences.customCosmetic = hiding.isEmpty ? nil : hiding
             for window in app.windows.values { window.model?.updateBlockingPolicy() }
-            app.notice = "\(found.count) sites from \(url.lastPathComponent) are now blocked."
+            restyleOpenPages()
+            app.notice = elements.isEmpty ? "\(found.count) sites from \(url.lastPathComponent) are now blocked."
+                : "\(found.count) sites blocked and \(elements.count) element rules added from \(url.lastPathComponent)."
         case "saveSearchEngine":
             guard let name = command["name"] as? String, let url = command["url"] as? String else { break }
             app.library.preferences.searchEngines = Array(((app.library.preferences.searchEngines ?? []) + [SearchEngine(name: String(name.prefix(60)), keyword: String((command["keyword"] as? String ?? "").prefix(20)), url: String(url.prefix(2048)))]).suffix(40))
@@ -605,6 +628,12 @@ final class BrowserFeatures {
         return true
     }
     /// Reapplies site tools to open pages of a site after its settings change.
+    /// Reapplies page styles in every open tab, after element rules change.
+    private func restyleOpenPages() {
+        for model in app.windows.values.compactMap(\.model) {
+            for (tabID, page) in model.liveEngineTabs { model.pageLoaded(page, id: tabID) }
+        }
+    }
     private func applySite(_ host: String, reloadWebKit: Bool) {
         for model in app.windows.values.compactMap(\.model) {
             for (tabID, page) in model.liveEngineTabs where ContentBlocking.site(page.url) == host {
@@ -778,7 +807,9 @@ extension BrowserModel {
         if let filter = settings?.filter { style["filter"] = filter }
         if let hide = settings?.hide { style["hide"] = hide }
         if let css = settings?.css { style["css"] = css }
-        if let script = PageScript.source("style", ["settings": style, "cookieBanners": preferences.hideCookieBanners != false]) {
+        let shields = preferences.blockTrackers != false && !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? [])
+        let cosmetic = shields ? preferences.customCosmetic ?? [] : []
+        if let script = PageScript.source("style", ["settings": style, "cookieBanners": preferences.hideCookieBanners != false, "site": site, "cosmetic": cosmetic]) {
             Task { _ = try? await tab.runPageScript(script) }
         }
         if let limit = preferences.networkLimitKBps, limit > 0, tab.engineID == .chromium { tab.setNetworkLimit(bytesPerSecond: limit * 1024) }

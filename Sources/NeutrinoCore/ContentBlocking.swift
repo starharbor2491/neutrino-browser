@@ -22,6 +22,10 @@ public enum ContentBlocking {
   public static func parseRules(_ text: String) -> [String] {
     (try? RustCore.request(["op": "parseBlockRules", "value": text]) as? [String]) ?? []
   }
+  /// Element-hiding rules in filter text, normalized to "hosts##selector".
+  public static func parseCosmetic(_ text: String) -> [String] {
+    (try? RustCore.request(["op": "parseCosmeticRules", "value": text]) as? [String]) ?? []
+  }
   /// The site key used for per-site settings: the host without "www.".
   public static func site(_ url: URL?) -> String? {
     guard let host = url?.host?.lowercased(), !host.isEmpty else { return nil }

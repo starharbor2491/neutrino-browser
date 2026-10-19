@@ -218,6 +218,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         "pageScript" => json!(crate::features::page_script(&r).ok_or("Unknown page script.")?),
         "stripTracking" => json!(crate::features::strip_tracking(text(&r, "url"))),
         "parseBlockRules" => json!(crate::features::parse_rules(text(&r, "value"))),
+        "parseCosmeticRules" => json!(crate::features::parse_cosmetic(text(&r, "value"))),
         "webKitRules" => webkit_rules(&r),
         "reader" => json!(reader(text(&r,"html"))?),
         "validateOrganization" => {

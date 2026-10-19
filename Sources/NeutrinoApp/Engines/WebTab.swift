@@ -100,8 +100,8 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
             }
         }
     }
-    private func extractText(_ expression: String) async throws -> String {
-        let id=UUID(), request=WebPageSnapshotRequest()
+    private func extractText(_ expression: String, timeout: Duration = .seconds(8)) async throws -> String {
+        let id=UUID(), request=WebPageSnapshotRequest(timeout: timeout)
         pageSnapshots[id]=request
         defer {pageSnapshots.removeValue(forKey:id)}
         return try await request.capture { [weak self] completion in
@@ -111,7 +111,7 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     }
     override func pageText() async throws -> String {try await extractText("(document.body?.innerText ?? '').slice(0, 40000)")}
     // WebKit runs evaluated scripts as a user action, which picture in picture needs.
-    override func runPageScript(_ source: String, userGesture: Bool = false) async throws -> String { try await extractText(source) }
+    override func runPageScript(_ source: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> String { try await extractText(source, timeout: wait ?? .seconds(8)) }
     override func printPage() {
         let operation = webView.printOperation(with: NSPrintInfo.shared)
         operation.view?.frame = webView.bounds

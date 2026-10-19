@@ -193,6 +193,55 @@ pub fn strip_tracking(address: &str) -> Option<String> {
     Some(url.to_string())
 }
 
+/// Element-hiding rules from filter text, as `example.com,~shop.example.com##.ad`
+/// or `##.ad`. Exceptions, scriptlets and procedural selectors are skipped.
+pub fn parse_cosmetic(source: &str) -> Vec<String> {
+    const PROCEDURAL: [&str; 9] = [":has-text(", ":-abp-", ":xpath(", ":matches-css", ":upward(", ":remove(", ":style(", ":min-text-length(", ":watch-attr("];
+    let mut out: Vec<String> = vec![];
+    for line in source.lines().take(200_000) {
+        let line = line.trim();
+        let Some((hosts, selector)) = line.split_once("##") else { continue };
+        let selector = selector.trim();
+        if line.starts_with('!') || hosts.contains(['#', '@', '$', '?', '/', ' ']) || !cosmetic_selector(selector) || PROCEDURAL.iter().any(|p| selector.contains(p)) {
+            continue;
+        }
+        let hosts: Vec<String> = hosts.split(',').map(|h| h.trim().to_ascii_lowercase()).filter(|h| !h.is_empty()).collect();
+        if !hosts.iter().all(|h| h.trim_start_matches('~').bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'*')) {
+            continue;
+        }
+        let rule = format!("{}##{selector}", hosts.join(","));
+        if !out.contains(&rule) {
+            out.push(rule);
+            if out.len() == 5000 {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn cosmetic_selector(selector: &str) -> bool {
+    !selector.is_empty() && selector.len() <= 300 && !selector.starts_with(['+', '@']) && !selector.contains(['<', '{', '}', '\\']) && !selector.contains("/*")
+}
+
+/// The element-hiding selectors from stored rules that apply on a site.
+pub fn cosmetic_for<'a>(rules: &'a [Value], site: &str) -> Vec<&'a str> {
+    let matches = |host: &str| !host.is_empty() && (site == host || site.ends_with(&format!(".{host}")));
+    rules
+        .iter()
+        .filter_map(Value::as_str)
+        .filter_map(|rule| rule.split_once("##"))
+        .filter(|(hosts, selector)| {
+            let hosts: Vec<&str> = hosts.split(',').filter(|h| !h.is_empty()).collect();
+            let excluded = hosts.iter().filter_map(|h| h.strip_prefix('~')).any(matches);
+            let included: Vec<&&str> = hosts.iter().filter(|h| !h.starts_with('~')).collect();
+            cosmetic_selector(selector) && !excluded && (included.is_empty() || included.iter().any(|h| matches(h)))
+        })
+        .map(|(_, selector)| selector)
+        .take(5000)
+        .collect()
+}
+
 /// Domains from pasted or imported filter text: plain domains, hosts-file lines
 /// and network rules of the form `||example.com^`. Other rule types are skipped.
 pub fn parse_rules(source: &str) -> Vec<String> {
@@ -487,7 +536,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         }
         "page-command" => {
             let blank = text(s.active(), "url").is_empty();
-            let page_only = ["print", "save-pdf", "save-page", "view-source", "dev-tools", "copy-url", "share", "pip"];
+            let page_only = ["print", "save-pdf", "save-page", "view-source", "dev-tools", "copy-url", "share", "pip", "pick-element"];
             if page_only.contains(&value) && blank {
                 s.notice = "Open a page first.".into();
                 return;
@@ -509,6 +558,8 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 }
                 "share" => "share",
                 "pip" => "pip",
+                "pick-element" if !regular => return,
+                "pick-element" => "pickElement",
                 "media" => "mediaToggle",
                 "break" => "breakMode",
                 "panic" => "panic",
@@ -536,6 +587,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 "blockScripts" | "allowPopups" | "muted" => r["value"].is_boolean(),
                 "camera" | "microphone" => ["ask", "allow", "block"].contains(&value),
                 "filter" => ["", "dark", "grayscale", "sepia", "invert", "contrast", "noimages"].contains(&value),
+                "hide" => value.is_empty(),
                 _ => false,
             };
             if valid && regular {
@@ -728,11 +780,17 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         }
         "custom-rules" => match value {
             "import" => commands.push(json!({"op":"importRules"})),
-            "clear" => commands.push(json!({"op":"customRules","domains":[]})),
+            "clear" => commands.push(json!({"op":"customRules","domains":[],"cosmetic":[]})),
             _ => {
                 let domains = parse_rules(text(r, "rules"));
-                s.notice = format!("{} {} blocked from your rules.", domains.len(), if domains.len() == 1 { "site is" } else { "sites are" });
-                commands.push(json!({"op":"customRules","domains":domains}));
+                let cosmetic = parse_cosmetic(text(r, "rules"));
+                let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+                s.notice = match (domains.len(), cosmetic.len()) {
+                    (_, 0) => format!("{} blocked from your rules.", plural(domains.len(), "site is", "sites are")),
+                    (0, c) => format!("{} saved.", plural(c, "element rule", "element rules")),
+                    (d, c) => format!("{} blocked and {} saved.", plural(d, "site", "sites"), plural(c, "element rule", "element rules")),
+                };
+                commands.push(json!({"op":"customRules","domains":domains,"cosmetic":cosmetic}));
             }
         },
         "search-engine" => match value {
@@ -927,10 +985,38 @@ pub fn page_script(r: &Value) -> Option<String> {
                     css.push_str(&format!("{selector}{{display:none!important}}"));
                 }
             }
+            for selector in cosmetic_for(array(&r["cosmetic"]), text(r, "site")) {
+                css.push_str(&format!("{selector}{{display:none!important}}"));
+            }
             format!("(()=>{{const id='neutrino-page-style';let s=document.getElementById(id);const css={};if(!css){{s?.remove();return 'none'}}if(!s){{s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s)}}if(s.textContent!==css)s.textContent=css;return 'applied'}})()", quote(&css))
         }
         "mute" => format!("(()=>{{const m={};window.__neutrinoMuted=m;const all=()=>document.querySelectorAll('video,audio').forEach(e=>{{if(m)e.muted=true;else if(e.dataset.neutrinoMuted)e.muted=false;if(m)e.dataset.neutrinoMuted='1';else delete e.dataset.neutrinoMuted}});all();if(!window.__neutrinoMuteObserver){{window.__neutrinoMuteObserver=true;document.addEventListener('play',e=>{{if(window.__neutrinoMuted&&e.target instanceof HTMLMediaElement){{e.target.muted=true;e.target.dataset.neutrinoMuted='1'}}}},true)}}return String(m)}})()", flag(r, "value")),
-        "mediaState" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended&&m.readyState>2);return JSON.stringify({audible:!!p&&!p.muted&&p.volume>0,playing:!!p,media:ms.length>0,title:(navigator.mediaSession&&navigator.mediaSession.metadata&&navigator.mediaSession.metadata.title)||''})})()".into(),
+        // Resolves with a selector for the element the person clicks, or "" on Escape.
+        "pick" => {
+            let label = match text(r, "label") {
+                "" => "Click an element to hide it on this site. Press Esc to cancel.",
+                other => other,
+            };
+            format!(
+                "new Promise(done=>{{const d=document,root=d.documentElement,ok=/^[A-Za-z_][\\w-]*$/,box=d.createElement('div'),tip=d.createElement('div');\
+box.style.cssText='position:fixed;z-index:2147483647;pointer-events:none;box-sizing:border-box;border:2px solid #3b82f6;background:rgba(59,130,246,.14);border-radius:4px;transition:left .06s,top .06s,width .06s,height .06s;left:0;top:0;width:0;height:0';\
+tip.textContent={};tip.style.cssText='position:fixed;z-index:2147483647;left:50%;top:12px;transform:translateX(-50%);padding:6px 12px;border-radius:8px;background:rgba(20,20,22,.9);color:#fff;font:13px -apple-system,system-ui,sans-serif;pointer-events:none';\
+root.append(box,tip);let target=null;\
+const same=e=>[...(e.parentElement?.children||[])].filter(x=>x.localName===e.localName);\
+const name=e=>{{if(e.id&&ok.test(e.id)&&d.querySelectorAll('#'+e.id).length===1)return '#'+e.id;let s=e.localName;const c=[...e.classList].filter(x=>ok.test(x)).slice(0,2);if(c.length)s+='.'+c.join('.');const sib=same(e);if(sib.length>1)s+=':nth-of-type('+(sib.indexOf(e)+1)+')';return s}};\
+const path=e=>{{const parts=[];for(let n=e;n&&n!==d.body&&n!==root&&parts.length<6;n=n.parentElement){{const part=name(n);parts.unshift(part);if(part[0]==='#'||d.querySelectorAll(parts.join(' > ')).length===1)break}}return parts.join(' > ')}};\
+const move=e=>{{const t=e.target;if(!(t instanceof Element)||t===box||t===tip)return;target=t;const r=t.getBoundingClientRect();Object.assign(box.style,{{left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'}})}};\
+const stop=e=>{{e.preventDefault();e.stopPropagation();e.stopImmediatePropagation()}};\
+const kinds=['mousedown','mouseup','pointerdown','pointerup','auxclick','contextmenu'];\
+const end=v=>{{removeEventListener('mousemove',move,true);kinds.forEach(k=>removeEventListener(k,stop,true));removeEventListener('click',click,true);removeEventListener('keydown',key,true);clearTimeout(timer);box.remove();tip.remove();done(v)}};\
+const click=e=>{{stop(e);end(target&&target!==root&&target!==d.body?path(target):'')}};\
+const key=e=>{{if(e.key==='Escape'){{stop(e);end('')}}}};\
+addEventListener('mousemove',move,true);kinds.forEach(k=>addEventListener(k,stop,true));addEventListener('click',click,true);addEventListener('keydown',key,true);\
+const timer=setTimeout(()=>end(''),100000)}})",
+                quote(label)
+            )
+        }
+        "mediaState" =>"(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended&&m.readyState>2);return JSON.stringify({audible:!!p&&!p.muted&&p.volume>0,playing:!!p,media:ms.length>0,title:(navigator.mediaSession&&navigator.mediaSession.metadata&&navigator.mediaSession.metadata.title)||''})})()".into(),
         "mediaToggle" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended);if(p){p.pause();return 'paused'}const q=ms.find(m=>m.currentTime>0&&!m.ended)||ms[0];if(q){q.play();return 'playing'}return 'none'})()".into(),
         // Hold Option and drag: left goes back, right forward, up then down reloads,
         // up or down scrolls to the top or bottom.
@@ -988,6 +1074,21 @@ mod tests {
     fn reads_domains_from_filter_lists_and_hosts_files() {
         let rules = "! comment\n||ads.example.com^\n0.0.0.0 tracker.example.net\nplain.example.org\n##.banner\n||cdn.example.com^$script\n@@||good.example.com^\nlocalhost\n";
         assert_eq!(parse_rules(rules), vec!["ads.example.com", "tracker.example.net", "plain.example.org"]);
+    }
+
+    #[test]
+    fn element_hiding_rules_apply_by_site() {
+        let rules = "##.banner\nnews.example,~shop.news.example##.promo\nexample.org#@#.keep\nexample.org##+js(noop)\nexample.org##div:has-text(Ad)\nbad##a{color:red}\n";
+        let parsed = parse_cosmetic(rules);
+        assert_eq!(parsed, vec!["##.banner", "news.example,~shop.news.example##.promo"]);
+        let stored: Vec<Value> = parsed.into_iter().map(Value::from).collect();
+        assert_eq!(cosmetic_for(&stored, "www.news.example"), vec![".banner", ".promo"]);
+        assert_eq!(cosmetic_for(&stored, "shop.news.example"), vec![".banner"]);
+        assert_eq!(cosmetic_for(&stored, "other.example"), vec![".banner"]);
+        let style = page_script(&json!({"kind":"style","settings":{},"site":"news.example","cosmetic":stored})).unwrap();
+        assert!(style.contains(".promo{display:none!important}"));
+        let pick = page_script(&json!({"kind":"pick","label":"Zap \"it\""})).unwrap();
+        assert!(pick.starts_with("new Promise(") && pick.contains(r#""Zap \"it\"""#));
     }
 
     #[test]
