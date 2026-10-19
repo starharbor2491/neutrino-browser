@@ -388,7 +388,7 @@ final class BrowserFeatures {
                 guard let self else { return }
                 let matching = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
                 store.removeData(ofTypes: all, for: matching) {
-                    self.siteData?.removeAll { $0["host"] == host }; self.refresh()
+                    Task { @MainActor in self.siteData?.removeAll { $0["host"] == host }; self.refresh() }
                 }
             }
             for page in model.liveEngineTabs.map(\.page) where page.engineID == .chromium { Task { await page.clearSiteData(host: host) }; break }
