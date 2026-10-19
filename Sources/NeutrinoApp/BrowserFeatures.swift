@@ -18,6 +18,11 @@ final class BrowserFeatures {
     private(set) var navigationList: [String: Any] = [:]
     private(set) var source: [String: Any] = [:]
     private(set) var siteData: [[String: String]]?
+    /// Small pictures of tabs' pages for hover previews, taken while each tab was showing.
+    private var thumbnails: [UUID: NSImage] = [:]
+    /// The address each Chromium thumbnail shows; Chromium pages are pictured once per page.
+    private var thumbnailURLs: [UUID: URL] = [:]
+    private lazy var preview = TabPreviewPanel()
     /// A sign-in waiting for Save, Never or Not now. The password never reaches the interface.
     private var passwordPrompt: (profileID: UUID, credential: LocalCredential, update: Bool)?
     private(set) var tabResources: [[String: Any]] = []
@@ -53,7 +58,7 @@ final class BrowserFeatures {
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
                 guard let self, let model = self.model, !model.isClosed else { return }
                 await self.sampleMedia(model, includeChromium: tick % 3 == 0)
-                if tick % 10 == 0 { self.sleepIdleTabs(model) }
+                if tick % 10 == 0 { self.sleepIdleTabs(model); await self.captureThumbnail(model) }
                 if tick % 200 == 0 { self.archiveIdleTabs(model) }
                 if self.sampleResources || self.limitsEnabled { await self.sampleUsage(model) }
                 tick += 1
@@ -206,6 +211,24 @@ final class BrowserFeatures {
             model.sleepTab(id)
             if model.liveEngineTab(id) == nil { firstSeen.removeValue(forKey: id) }
         }
+    }
+    /// Pictures the selected tab while it is showing, for its hover preview later.
+    private func captureThumbnail(_ model: BrowserModel) async {
+        guard app.feature("tab-previews") else { thumbnails.removeAll(); return }
+        let id = model.session.selectedTabID
+        guard let page = model.liveEngineTab(id), let url = page.url, !page.loading, page.nativeView.window != nil,
+              page.engineID == .webkit || thumbnailURLs[id] != url,
+              let png = try? await page.capturePNG(), let image = NSImage(data: png) else { return }
+        thumbnailURLs[id] = url
+        let width: CGFloat = 320, scale = width / max(1, image.size.width)
+        let small = NSImage(size: NSSize(width: width, height: min(240, image.size.height * scale)))
+        small.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: NSSize(width: width, height: image.size.height * scale)).offsetBy(dx: 0, dy: small.size.height - image.size.height * scale))
+        small.unlockFocus()
+        thumbnails[id] = small
+        let open = Set(model.session.tabs.map(\.id))
+        thumbnails = thumbnails.filter { open.contains($0.key) }
+        thumbnailURLs = thumbnailURLs.filter { open.contains($0.key) }
     }
     /// Arc archives tabs left unused for the chosen number of days, as it does at launch.
     private func archiveIdleTabs(_ model: BrowserModel) {
@@ -607,6 +630,12 @@ final class BrowserFeatures {
             for window in app.windows.values { window.model?.updateBlockingPolicy() }
             restyleOpenPages()
         case "filterList": app.filterListCommand(command)
+        case "tabPreview":
+            guard let model, let id, let tab = model.session.tabs.first(where: { $0.id == id }),
+                  let rect = command["rect"] as? [String: Double], let window = window() else { preview.hide(); break }
+            preview.show(title: tab.customTitle ?? tab.title, address: tab.url?.host ?? "", image: thumbnails[id],
+                         anchor: CGRect(x: rect["x"] ?? 0, y: rect["y"] ?? 0, width: rect["w"] ?? 0, height: rect["h"] ?? 0),
+                         placement: command["placement"] as? String ?? "below", in: window)
         case "passwordPrompt":
             guard let prompt = passwordPrompt else { break }
             passwordPrompt = nil
@@ -1012,5 +1041,64 @@ final class PeekWindow: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         tab.dispose()
         PeekWindow.open.removeAll { $0 === self }
+    }
+}
+
+/// The hover preview beside a tab: its page picture, title and site, in a panel
+/// above the page so the web view never covers it.
+@MainActor
+final class TabPreviewPanel {
+    private let panel: NSPanel
+    private let imageView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let addressLabel = NSTextField(labelWithString: "")
+    private lazy var imageHeight = imageView.heightAnchor.constraint(equalToConstant: 135)
+    init() {
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 240), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+        panel.level = .floating; panel.ignoresMouseEvents = true; panel.isReleasedWhenClosed = false
+        let effect = NSVisualEffectView()
+        effect.material = .popover; effect.state = .active; effect.wantsLayer = true
+        effect.layer?.cornerRadius = 10; effect.layer?.cornerCurve = .continuous; effect.layer?.masksToBounds = true
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true; imageView.layer?.cornerRadius = 6; imageView.layer?.cornerCurve = .continuous; imageView.layer?.masksToBounds = true
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold); titleLabel.lineBreakMode = .byTruncatingTail
+        addressLabel.font = .systemFont(ofSize: 11); addressLabel.textColor = .secondaryLabelColor; addressLabel.lineBreakMode = .byTruncatingTail
+        let stack = NSStackView(views: [imageView, titleLabel, addressLabel])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 4
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: effect.leadingAnchor), stack.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: effect.topAnchor), stack.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 240), titleLabel.widthAnchor.constraint(equalToConstant: 240), addressLabel.widthAnchor.constraint(equalToConstant: 240),
+            imageHeight
+        ])
+        panel.contentView = effect
+    }
+    func show(title: String, address: String, image: NSImage?, anchor: CGRect, placement: String, in window: NSWindow) {
+        guard let content = window.contentView else { return }
+        imageView.image = image; imageView.isHidden = image == nil
+        if let image { imageHeight.constant = min(150, 240 * image.size.height / max(1, image.size.width)) }
+        titleLabel.stringValue = title; addressLabel.stringValue = address
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let size = panel.contentView?.fittingSize ?? NSSize(width: 256, height: 60)
+        // Interface coordinates run down from the top of the window's content.
+        let height = content.bounds.height
+        var origin: NSPoint
+        switch placement {
+        case "beside": origin = NSPoint(x: anchor.maxX + 8, y: height - anchor.minY - size.height)
+        case "above": origin = NSPoint(x: anchor.minX, y: height - anchor.minY + 6)
+        default: origin = NSPoint(x: anchor.minX, y: height - anchor.maxY - 6 - size.height)
+        }
+        let screenOrigin = window.convertPoint(toScreen: content.convert(origin, to: nil))
+        panel.setFrame(NSRect(origin: screenOrigin, size: size), display: true)
+        if panel.parent == nil { window.addChildWindow(panel, ordered: .above) }
+        panel.orderFront(nil)
+    }
+    func hide() {
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
     }
 }

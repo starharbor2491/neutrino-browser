@@ -34,5 +34,5 @@ for path in sorted(root.glob("*/manifest.json")):
         definition = json.loads((path.parent / "definition.json").read_text())
         assert definition["formatVersion"] == 1, path
         counts["declarative"] += 1
-assert counts == {"native": 3, "behavior": 3, "declarative": 12, "feature": 31}, counts
+assert counts == {"native": 3, "behavior": 3, "declarative": 12, "feature": 32}, counts
 print(f"{len(found)} official packages validated: {counts['native']} native, {counts['behavior']} behavior, {counts['declarative']} declarative, {counts['feature']} built-in features.")

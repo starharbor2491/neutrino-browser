@@ -16,13 +16,14 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
 /// and the starting layouts that turn it on during setup ("*" for all).
 pub const MODULES: &[(&str, &str, &[&str])] = &[
     ("tab-sleep", "Tabs", &["*"]),
+    ("tab-previews", "Tabs", &["vivaldi", "gx", "brave", "chrome"]),
     ("tab-islands", "Tabs", &["gx"]),
     ("tab-stacks", "Tabs", &["vivaldi"]),
     ("favorites", "Tabs", &["arc"]),
@@ -1067,6 +1068,15 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             if regular && (p["siteSettings"][host].is_object() || p["siteZoom"][host].is_number()) {
                 commands.push(json!({"op":"siteReset","host":host}));
                 s.notice = format!("{host} uses your standard settings again.");
+            }
+        }
+        "tab-preview" => {
+            let known = s.tabs().iter().any(|t| t["id"] == id);
+            if on(s, "tab-previews") && (known || value == "hide") {
+                let rect = &r["rect"];
+                let valid = ["x", "y", "w", "h"].iter().all(|k| rect[k].as_f64().is_some_and(|v| v.is_finite() && v.abs() < 100_000.));
+                let placement = if !crate::render::horizontal(s) { "beside" } else if text(&s.config()["layout"], "tabs") == "bottom" { "above" } else { "below" };
+                commands.push(json!({"op":"tabPreview","id":if known {id.clone()} else {Value::Null},"rect":if valid {rect.clone()} else {Value::Null},"placement":placement}));
             }
         }
         "move-bookmark" => {

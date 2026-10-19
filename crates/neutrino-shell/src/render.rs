@@ -157,7 +157,7 @@ pub(crate) fn tab_row(t: &Value, s: &Shell, preview: bool) -> Markup {
     let sleeping = crate::views::sleeping(s, text(t, "id"));
     html! {div class=(format!("tab-row{}{}",if selected{" active"}else{""},if sleeping{" sleeping"}else{""})) data-tab=(text(t,"id")) data-group=(group) data-folder=(text(t,"folderID")) draggable=((!preview).to_string()) {
         @if children {button class="branch" data-op="toggleBranch" data-id=(text(t,"id")) aria-label=(format!("{} {}",if flag(t,"collapsed"){"Expand"}else{"Collapse"},text(t,"title"))) {(icon(if flag(t,"collapsed"){"forward"}else{"down"}))}}
-        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::title(t)) title=(crate::views::hover_card(s,t)) {(site(t)) span{(crate::views::title(t))}}
+        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::title(t)) title=[(!crate::features::on(s, "tab-previews")).then(|| crate::views::hover_card(s,t))] {(site(t)) span{(crate::views::title(t))}}
         (crate::views::tab_audio(s, t))
         button class="tab-close" data-op="closeTab" data-id=(text(t,"id")) title="Close tab (⌘W)" aria-label=(format!("Close {}",crate::views::title(t))) {(icon("close"))}
         button class="tab-menu" data-op="menu" data-value=(format!("tab:{}",text(t,"id"))) title="Tab options" aria-label=(format!("Options for {}",crate::views::title(t))) {(icon("more"))}

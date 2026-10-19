@@ -1347,6 +1347,29 @@
     clearTargets();
     scheduleGeometry();
   }
+  // Tab previews: after a short hover, the host shows a picture of the tab's page beside it.
+  let previewTimer = 0, previewing = "";
+  const hidePreview = () => {
+    clearTimeout(previewTimer);
+    if (previewing) send({ op: "tab-preview", value: "hide" });
+    previewing = "";
+  };
+  document.addEventListener("mouseover", (e) => {
+    const row = e.target.closest && e.target.closest("[data-tab]");
+    const id = row && row.dataset.tab;
+    if (!id || id === previewing || row.classList.contains("active") || drag) return;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      const r = row.getBoundingClientRect();
+      previewing = id;
+      send({ op: "tab-preview", id, rect: { x: r.left, y: r.top, w: r.width, h: r.height } });
+    }, previewing ? 120 : 600);
+  });
+  document.addEventListener("mouseout", (e) => {
+    const row = e.target.closest && e.target.closest("[data-tab]");
+    if (row && !(e.relatedTarget && row.contains(e.relatedTarget))) hidePreview();
+  });
+  ["mousedown", "wheel", "keydown"].forEach((type) => document.addEventListener(type, hidePreview, true));
   // Bookmarks: drop a row on another to reorder, or on a folder chip to move it there.
   let bookmarkDrag = null;
   document.addEventListener("dragstart", (e) => {
