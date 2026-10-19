@@ -271,6 +271,8 @@ final class ChromiumTab: BrowserEngineTab {
     override func pageText() async throws -> String { try await evaluateIsolated("(document.body?.innerText ?? '').slice(0, 40000)") as? String ?? "" }
     override func selectedText() async throws -> String { try await evaluateIsolated("(window.getSelection()?.toString() ?? '').slice(0, 8000)") as? String ?? "" }
     override func fillCredential(_ credential: LocalCredential) async throws { _ = try await evaluateIsolated("(() => { " + credential.autofillScript + " })()") }
+    /// Chromium removes tracking parameters as it starts each top-level navigation.
+    override var stripsTracking: Bool { didSet { command(Int(NEUTRINO_CEF_STRIP_TRACKING), value: stripsTracking ? 1 : 0) } }
     private var fingerprintProtectionInstalled = false
     override func installFingerprintProtection(_ source: String) {
         guard !fingerprintProtectionInstalled else { return }

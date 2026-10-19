@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 #include "NeutrinoEngineABI.h"
+#include "NeutrinoTrackingStrip.h"
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 #include "include/cef_application_mac.h"
@@ -374,6 +375,7 @@ struct Page {
   bool requested_close = false;
   bool navigated = false;
   bool popups = false;
+  bool strip_tracking = false;
   bool awaiting_context = true;
   bool pending_popup = false;
   bool management = false;
@@ -819,6 +821,14 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (auto client = ForBrowser(browser); client && client != this) return client->OnBeforeBrowse(browser,frame,request,gesture,redirect);
     const std::string url = request->GetURL().ToString();
     if (page_ && url.rfind("chrome://",0)==0) return false;
+    if (Allowed(url) && page_ && Group(page_)->strip_tracking && frame->IsMain() && !redirect) {
+      // Load the address without click and campaign identifiers instead, once CEF has left this callback.
+      if (const std::string clean = neutrino_tracking::StripTracking(url); !clean.empty() && clean != url) {
+        CefRefPtr<CefFrame> target = frame;
+        dispatch_async(dispatch_get_main_queue(), ^{ if (target->IsValid()) target->LoadURL(clean); });
+        return true;
+      }
+    }
     if (Allowed(url) || (page_ && page_->management && url.rfind("chrome://extensions/",0)==0) || (!frame->IsMain() &&
         (url.rfind("data:",0)==0 || url=="about:srcdoc"))) return false;
     if (page_ && frame->IsMain()) Message(page_,NEUTRINO_CEF_ERROR,"This Chromium adapter allows HTTP and HTTPS navigation only.");
@@ -1458,6 +1468,7 @@ void Command(void* opaque,int command,const char* text,double value) {
   }
   if (final_quit_frozen && command!=NEUTRINO_CEF_SYNC_ACTIVE) return;
   if (command==NEUTRINO_CEF_POPUPS) { owner->popups=value!=0; return; }
+  if (command==NEUTRINO_CEF_STRIP_TRACKING) { Group(owner)->strip_tracking=value!=0; return; }
   if (command==NEUTRINO_CEF_SET_BLOCKING) {
     std::vector<std::string> domains; std::string source=text ? text : "";
     // Subscribed filter lists bring tens of thousands of domains.
