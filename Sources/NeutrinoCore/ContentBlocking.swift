@@ -3,20 +3,25 @@ import Foundation
 
 public enum ContentBlocking {
   /// Hosts blocked at a level: trackers always, ads when `ads` is true, plus the person's rules.
-  public static func domains(ads: Bool = true, custom: [String] = []) -> [String] {
-    (try? RustCore.request(["op": "blockingDomains", "ads": ads, "custom": custom]) as? [String]) ?? []
+  public static func domains(ads: Bool = true, custom: [String] = [], subscribed: [String] = []) -> [String] {
+    (try? RustCore.request(["op": "blockingDomains", "ads": ads, "custom": custom, "subscribed": subscribed]) as? [String]) ?? []
   }
   public static func blocks(_ url: URL, topLevel: Bool = false, ads: Bool = true) -> Bool {
     (try? RustCore.request(["op": "blocks", "url": url.absoluteString, "topLevel": topLevel, "ads": ads]) as? Bool) ?? false
   }
   /// WebKit rules for a level; pages on `exceptions` (sites with Shields down) are exempt.
-  public static func webKitRules(ads: Bool = true, exceptions: [String] = [], custom: [String] = []) throws -> String {
-    let rules = try RustCore.request(["op": "webKitRules", "ads": ads, "exceptions": exceptions, "custom": custom])
+  public static func webKitRules(ads: Bool = true, exceptions: [String] = [], custom: [String] = [], subscribed: [String] = []) throws -> String {
+    let rules = try RustCore.request(["op": "webKitRules", "ads": ads, "exceptions": exceptions, "custom": custom, "subscribed": subscribed])
     return String(decoding: try JSONSerialization.data(withJSONObject: rules), as: UTF8.self)
   }
   /// The address without click and campaign identifiers, or nil when it has none.
   public static func strippingTracking(_ url: URL) -> URL? {
     (try? RustCore.request(["op": "stripTracking", "url": url.absoluteString]) as? String).flatMap(URL.init(string:))
+  }
+  /// A subscribed filter list's domain rules and element rules.
+  public static func parseFilterList(_ text: String) throws -> (domains: [String], cosmetic: [String]) {
+    let value = try RustCore.request(["op": "parseFilterList", "value": text]) as? [String: Any]
+    return (value?["domains"] as? [String] ?? [], value?["cosmetic"] as? [String] ?? [])
   }
   /// Domains from filter-list text: plain domains, hosts-file lines and `||domain^` rules.
   public static func parseRules(_ text: String) -> [String] {

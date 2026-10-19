@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -282,11 +282,25 @@ fn de_amp(address: &str) -> Option<String> {
     (target.host_str().is_some_and(|h| h.contains('.'))).then(|| target.to_string())
 }
 
+/// Filter lists offered in Settings: (id, title, address, what it blocks).
+pub const FILTER_LISTS: &[(&str, &str, &str, &str)] = &[
+    ("easylist", "EasyList", "https://easylist.to/easylist/easylist.txt", "Ads"),
+    ("easyprivacy", "EasyPrivacy", "https://easylist.to/easylist/easyprivacy.txt", "Trackers and analytics"),
+    ("peter-lowe", "Peter Lowe’s list", "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext", "Ad and tracking servers"),
+    ("fanboy-annoyance", "Fanboy’s Annoyance List", "https://secure.fanboy.co.nz/fanboy-annoyance.txt", "Cookie notices, pop-ups and in-page annoyances"),
+    ("fanboy-social", "Fanboy’s Social Blocking List", "https://easylist.to/easylist/fanboy-social.txt", "Social media buttons and widgets"),
+];
+
 /// Element-hiding rules from filter text, as `example.com,~shop.example.com##.ad`
 /// or `##.ad`. Exceptions, scriptlets and procedural selectors are skipped.
 pub fn parse_cosmetic(source: &str) -> Vec<String> {
+    parse_cosmetic_up_to(source, 5000)
+}
+
+pub fn parse_cosmetic_up_to(source: &str, limit: usize) -> Vec<String> {
     const PROCEDURAL: [&str; 9] = [":has-text(", ":-abp-", ":xpath(", ":matches-css", ":upward(", ":remove(", ":style(", ":min-text-length(", ":watch-attr("];
     let mut out: Vec<String> = vec![];
+    let mut seen = std::collections::HashSet::new();
     for line in source.lines().take(200_000) {
         let line = line.trim();
         let Some((hosts, selector)) = line.split_once("##") else { continue };
@@ -299,9 +313,9 @@ pub fn parse_cosmetic(source: &str) -> Vec<String> {
             continue;
         }
         let rule = format!("{}##{selector}", hosts.join(","));
-        if !out.contains(&rule) {
+        if seen.insert(rule.clone()) {
             out.push(rule);
-            if out.len() == 5000 {
+            if out.len() == limit {
                 break;
             }
         }
@@ -315,6 +329,7 @@ fn cosmetic_selector(selector: &str) -> bool {
 
 /// The element-hiding selectors from stored rules that apply on a site.
 pub fn cosmetic_for<'a>(rules: &'a [Value], site: &str) -> Vec<&'a str> {
+    let (mut specific, mut generic) = (0, 0);
     let matches = |host: &str| !host.is_empty() && (site == host || site.ends_with(&format!(".{host}")));
     rules
         .iter()
@@ -324,44 +339,78 @@ pub fn cosmetic_for<'a>(rules: &'a [Value], site: &str) -> Vec<&'a str> {
             let hosts: Vec<&str> = hosts.split(',').filter(|h| !h.is_empty()).collect();
             let excluded = hosts.iter().filter_map(|h| h.strip_prefix('~')).any(matches);
             let included: Vec<&&str> = hosts.iter().filter(|h| !h.starts_with('~')).collect();
-            cosmetic_selector(selector) && !excluded && (included.is_empty() || included.iter().any(|h| matches(h)))
+            if !cosmetic_selector(selector) || excluded {
+                return false;
+            }
+            // Generic rules apply everywhere, so keep their share of each page's stylesheet bounded.
+            if included.is_empty() {
+                generic += 1;
+                generic <= 4000
+            } else if included.iter().any(|h| matches(h)) {
+                specific += 1;
+                specific <= 2000
+            } else {
+                false
+            }
         })
         .map(|(_, selector)| selector)
-        .take(5000)
         .collect()
 }
 
 /// Domains from pasted or imported filter text: plain domains, hosts-file lines
 /// and network rules of the form `||example.com^`. Other rule types are skipped.
 pub fn parse_rules(source: &str) -> Vec<String> {
+    parse_rules_up_to(source, 5000)
+}
+
+/// A host name with at least two labels and a letter-only top-level domain.
+fn hostname(domain: &str) -> bool {
+    let labels: Vec<&str> = domain.split('.').collect();
+    domain.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        && labels.last().is_some_and(|tld| tld.len() >= 2 && tld.bytes().all(|b| b.is_ascii_alphabetic()))
+}
+
+/// Options a domain rule may carry and still block the whole domain's
+/// third-party requests, which is how Neutrino applies every rule.
+const DOMAIN_RULE_OPTIONS: [&str; 5] = ["third-party", "3p", "all", "important", "document"];
+
+/// Domain rules from a subscribed filter list, which may hold tens of thousands.
+pub fn parse_rules_up_to(source: &str, limit: usize) -> Vec<String> {
     let mut out = vec![];
-    for line in source.lines().take(200_000) {
+    let mut seen = std::collections::HashSet::new();
+    // In Adblock-style lists a bare line is a URL pattern, not a domain.
+    let adblock = source.lines().take(40).any(|l| l.starts_with("[Adblock") || l.starts_with("! Title:"))
+        || source.lines().take(4000).filter(|l| l.starts_with("||")).count() >= 20;
+    for line in source.lines().take(400_000) {
         let line = line.trim();
         if line.is_empty() || line.starts_with('!') || line.starts_with('#') || line.starts_with('[') || line.contains("##") || line.starts_with("@@") {
             continue;
         }
         let candidate = if let Some(rule) = line.strip_prefix("||") {
             let end = rule.find(['^', '/', '$']).unwrap_or(rule.len());
-            if rule[end..].contains('$') || rule[end..].trim_start_matches('^').contains('/') {
+            let (pattern, options) = rule[end..].split_once('$').unwrap_or((&rule[end..], ""));
+            if pattern.trim_start_matches('^').contains('/') || !pattern.trim_start_matches('^').is_empty()
+                || !options.is_empty() && !options.split(',').all(|o| DOMAIN_RULE_OPTIONS.contains(&o))
+            {
                 continue;
             }
             &rule[..end]
         } else if let Some(rest) = line.strip_prefix("0.0.0.0 ").or_else(|| line.strip_prefix("127.0.0.1 ")) {
             rest.split_whitespace().next().unwrap_or("")
-        } else if !line.contains(' ') && !line.contains('/') {
+        } else if !adblock && !line.contains(' ') && !line.contains('/') {
             line
         } else {
             continue;
         };
         let domain = candidate.trim_start_matches("*.").trim_end_matches('.').to_ascii_lowercase();
-        if domain.contains('.')
-            && domain.len() <= 253
+        if hostname(&domain)
             && !["localhost", "local", "0.0.0.0"].contains(&domain.as_str())
-            && domain.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
-            && !out.contains(&domain)
+            && seen.insert(domain.clone())
         {
             out.push(domain);
-            if out.len() == 5000 {
+            if out.len() == limit {
                 break;
             }
         }
@@ -1018,6 +1067,35 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 s.notice = format!("{host} uses your standard settings again.");
             }
         }
+        "filter-list" => {
+            if !regular {
+                return;
+            }
+            match value {
+                "toggle" => {
+                    let id = text(r, "id");
+                    let custom = array(&s.snapshot["preferences"]["filterLists"]).iter().any(|l| text(l, "id") == id);
+                    if let Some((id, title, url, _)) = FILTER_LISTS.iter().find(|l| l.0 == id) {
+                        commands.push(json!({"op":"filterList","action":"toggle","id":id,"title":title,"url":url}));
+                    } else if custom {
+                        commands.push(json!({"op":"filterList","action":"toggle","id":id}));
+                    }
+                }
+                "add" => match Url::parse(text(r, "url").trim()) {
+                    Ok(url) if url.scheme() == "https" && url.host_str().is_some() => {
+                        commands.push(json!({"op":"filterList","action":"add","url":url.as_str()}));
+                        s.notice = "Downloading the list…".into();
+                    }
+                    _ => s.notice = "Enter the https:// address of a filter list.".into(),
+                },
+                "remove" => commands.push(json!({"op":"filterList","action":"remove","id":text(r, "id")})),
+                "refresh" => {
+                    commands.push(json!({"op":"filterList","action":"refresh"}));
+                    s.notice = "Updating filter lists…".into();
+                }
+                _ => {}
+            }
+        }
         "link-route" => {
             let mut routes: Vec<Value> = array(&s.snapshot["preferences"]["linkRoutes"]).to_vec();
             match value {
@@ -1246,8 +1324,8 @@ mod tests {
 
     #[test]
     fn reads_domains_from_filter_lists_and_hosts_files() {
-        let rules = "! comment\n||ads.example.com^\n0.0.0.0 tracker.example.net\nplain.example.org\n##.banner\n||cdn.example.com^$script\n@@||good.example.com^\nlocalhost\n";
-        assert_eq!(parse_rules(rules), vec!["ads.example.com", "tracker.example.net", "plain.example.org"]);
+        let rules = "! comment\n||ads.example.com^\n0.0.0.0 tracker.example.net\nplain.example.org\n##.banner\n||cdn.example.com^$script\n@@||good.example.com^\nlocalhost\n||pixel.example.io^$third-party\n||shop.example.com^$domain=a.com\n||cdn.example.com/ads.js\n";
+        assert_eq!(parse_rules(rules), vec!["ads.example.com", "tracker.example.net", "plain.example.org", "pixel.example.io"]);
     }
 
     #[test]

@@ -128,12 +128,16 @@ pub const AD_DOMAINS: &[&str] = &[
 ];
 /// Hosts blocked at a level: trackers always, ads unless the request turns them off,
 /// and the person's own rules.
+/// Built-in domains, then the person's rules, then subscribed filter lists.
 fn blocked_domains(r: &Value) -> Vec<String> {
     let ads = r["ads"].as_bool().unwrap_or(true);
     let mut out: Vec<String> = TRACKER_DOMAINS.iter().chain(if ads { AD_DOMAINS } else { &[] }).map(|d| d.to_string()).collect();
-    for d in array(&r["custom"]).iter().filter_map(Value::as_str).take(5000) {
+    let mut seen: std::collections::HashSet<String> = out.iter().cloned().collect();
+    let custom = array(&r["custom"]).iter().filter_map(Value::as_str).take(5000);
+    let subscribed = array(&r["subscribed"]).iter().filter_map(Value::as_str).take(120_000);
+    for d in custom.chain(subscribed) {
         let d = d.to_ascii_lowercase();
-        if d.contains('.') && d.len() <= 253 && d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') && !out.contains(&d) {
+        if d.contains('.') && d.len() <= 253 && d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') && seen.insert(d.clone()) {
             out.push(d);
         }
     }
@@ -219,6 +223,14 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         "stripTracking" => json!(crate::features::strip_tracking(text(&r, "url"))),
         "parseBlockRules" => json!(crate::features::parse_rules(text(&r, "value"))),
         "parseCosmeticRules" => json!(crate::features::parse_cosmetic(text(&r, "value"))),
+        // A subscribed list: domain rules and element rules, bounded.
+        "parseFilterList" => {
+            let source = text(&r, "value");
+            if source.len() > 20 * 1024 * 1024 {
+                return Err("That filter list is larger than 20 MB.");
+            }
+            json!({"domains":crate::features::parse_rules_up_to(source, 60_000),"cosmetic":crate::features::parse_cosmetic_up_to(source, 20_000)})
+        }
         "webKitRules" => webkit_rules(&r),
         "reader" => json!(reader(text(&r,"html"))?),
         "validateOrganization" => {

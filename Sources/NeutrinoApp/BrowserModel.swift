@@ -321,6 +321,7 @@ final class BrowserModel: ObservableObject {
         tab.blockAds = app.library.preferences.blockAds != false
         tab.blockingExceptions = app.library.preferences.shieldsDown ?? []
         tab.blockingCustom = app.library.preferences.customBlockList ?? []
+        tab.blockingSubscribed = app.filterListDomains
         tab.blockingEnabled = app.library.preferences.blockTrackers != false
     }
     func navigate(_ input: String) {

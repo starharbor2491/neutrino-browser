@@ -13,6 +13,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include "NeutrinoEngineABI.h"
@@ -496,7 +497,7 @@ struct BlockPolicy {
   std::atomic<bool> enabled{false};
   /// Requests cancelled since the tab group opened, for the shield count.
   std::atomic<uint64_t> blocked{0};
-  std::shared_ptr<const std::vector<std::string>> domains;
+  std::shared_ptr<const std::unordered_set<std::string>> domains;
 };
 class BlockedResourceHandler final : public CefResourceRequestHandler {
  public:
@@ -510,8 +511,12 @@ class BlockedResourceHandler final : public CefResourceRequestHandler {
     if (scheme!="http" && scheme!="https") return RV_CONTINUE;
     std::string host=CefString(&parts.host).ToString();
     std::transform(host.begin(),host.end(),host.begin(),[](unsigned char ch){ return std::tolower(ch); });
-    for (const auto& domain : *domains) {
-      if (host==domain || (host.size()>domain.size() && host.ends_with("."+domain))) { policy_->blocked.fetch_add(1); return RV_CANCEL; }
+    // The host and each parent domain: a.b.example.com, b.example.com, example.com, com.
+    for (size_t start=0; start<host.size();) {
+      if (domains->count(host.substr(start))) { policy_->blocked.fetch_add(1); return RV_CANCEL; }
+      const size_t dot=host.find('.',start);
+      if (dot==std::string::npos) break;
+      start=dot+1;
     }
     return RV_CONTINUE;
   }
@@ -583,7 +588,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
   uint64_t BlockedCount() const { return blocking_->blocked.load(); }
   void SetBlocking(bool enabled,const std::vector<std::string>& domains) {
-    std::atomic_store(&blocking_->domains,std::make_shared<const std::vector<std::string>>(domains));
+    std::atomic_store(&blocking_->domains,std::make_shared<const std::unordered_set<std::string>>(domains.begin(),domains.end()));
     blocking_->enabled.store(enabled);
   }
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>,
@@ -1437,9 +1442,10 @@ void Command(void* opaque,int command,const char* text,double value) {
   if (command==NEUTRINO_CEF_POPUPS) { owner->popups=value!=0; return; }
   if (command==NEUTRINO_CEF_SET_BLOCKING) {
     std::vector<std::string> domains; std::string source=text ? text : "";
-    if (source.size()>262144) return;
+    // Subscribed filter lists bring tens of thousands of domains.
+    if (source.size()>4*1024*1024) return;
     size_t offset=0;
-    while (offset<source.size() && domains.size()<6000) {
+    while (offset<source.size() && domains.size()<150000) {
       const size_t end=source.find('\n',offset);
       const std::string domain=source.substr(offset,end==std::string::npos ? end : end-offset);
       if (!domain.empty() && domain.size()<=253 && domain.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-")==std::string::npos) domains.push_back(domain);

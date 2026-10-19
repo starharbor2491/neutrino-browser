@@ -23,6 +23,10 @@ final class AppState: ObservableObject {
     @Published var onboardingSaving = false
     @Published var startupError: String?
     @Published var notice: String?
+    /// Rules from subscribed filter lists, loaded from their saved copies.
+    var filterListDomains: [String] = []
+    var filterListGenericCosmetic: [String] = []
+    var filterListSiteCosmetic: [String: [String]] = [:]
     @Published var installedModules: [InstalledModule] = [] { didSet { modulePresentationCache = nil; resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
     var modulePresentationCache: ModulePresentation?
     @Published private(set) var resourceWorkerGeneration = UUID()
@@ -130,6 +134,8 @@ final class AppState: ObservableObject {
                 try loadCommunityCatalogs()
             } catch { notice = "Optional modules could not load: \(error.localizedDescription). Open Recovery to repair them." }
             await finishPendingProfileDeletions()
+            loadFilterLists()
+            Task { await refreshFilterLists(force: false) }
             DistributionManager.shared.configure(dataDirectory: dataDirectory)
             ready = true; startupError = nil
         } catch { startupError = error.localizedDescription }

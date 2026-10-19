@@ -40,6 +40,8 @@ class BrowserEngineTab: NSObject, ObservableObject {
     var blockAds = true
     var blockingExceptions: [String] = []
     var blockingCustom: [String] = []
+    /// Domains from subscribed filter lists.
+    var blockingSubscribed: [String] = []
     /// Called after each page finishes loading, so per-site tools can be reapplied.
     var onPageLoaded: (() -> Void)?
     /// Shift-clicked links open in a floating preview when this returns true.

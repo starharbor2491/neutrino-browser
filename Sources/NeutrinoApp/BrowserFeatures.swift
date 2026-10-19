@@ -591,6 +591,7 @@ final class BrowserFeatures {
             app.library.preferences.customCosmetic = cosmetic.isEmpty ? nil : cosmetic
             for window in app.windows.values { window.model?.updateBlockingPolicy() }
             restyleOpenPages()
+        case "filterList": app.filterListCommand(command)
         case "importRules":
             let panel = NSOpenPanel(); panel.message = "Choose a filter list or hosts file."
             guard panel.runModal() == .OK, let url = panel.url,
@@ -887,7 +888,7 @@ extension BrowserModel {
         if app.feature("boosts"), let css = settings?.css { style["css"] = css }
         if app.feature("boosts"), let hue = settings?.hue { style["hue"] = hue }
         let shields = preferences.blockTrackers != false && !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? [])
-        let cosmetic = shields ? preferences.customCosmetic ?? [] : []
+        let cosmetic = shields ? (preferences.customCosmetic ?? []) + app.filterListCosmetic(for: site) : []
         if let script = PageScript.source("style", ["settings": style, "cookieBanners": app.feature("cookie-banners"), "site": site, "cosmetic": cosmetic]) {
             Task { _ = try? await tab.runPageScript(script) }
         }

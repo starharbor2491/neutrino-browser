@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
+import CryptoKit
 import SwiftUI
 @preconcurrency import WebKit
 import NeutrinoCore
@@ -79,23 +80,38 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
             if let pendingLoadURL { load(pendingLoadURL) }
             return
         }
-        guard let rules = try? ContentBlocking.webKitRules(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom) else { return }
+        guard let (identifier, rules) = RuleListCache.source(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom, subscribed: blockingSubscribed) else { return }
+        if let compiled = RuleListCache.compiled[identifier] {
+            if let previous = blockingRuleList, previous !== compiled { controller.remove(previous) }
+            if blockingRuleList !== compiled { controller.add(compiled) }
+            blockingRuleList = compiled; blockingReady = true; compilingRules = false
+            if let pendingLoadURL { load(pendingLoadURL) }
+            return
+        }
         blockingReady = blockingRuleList != nil; compilingRules = true
-        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "org.neutrino.blocking.v1", encodedContentRuleList: rules) { [weak self] list, error in
+        let finish: @MainActor (WKContentRuleList?, (any Error)?) -> Void = { [weak self] list, error in
+            guard let self, !self.disposed, self.blockingEnabled, self.blockingRevision == revision else { return }
+            self.compilingRules = false
+            if let list {
+                RuleListCache.compiled = [identifier: list]
+                let controller = self.webView.configuration.userContentController
+                if let previous = self.blockingRuleList { controller.remove(previous) }
+                controller.add(list); self.blockingRuleList = list; self.blockingReady = true
+                if let url = self.pendingLoadURL { self.load(url) }
+            } else {
+                self.onNotice?(error?.localizedDescription ?? "Content blocking could not load.")
+                if let url = self.pendingLoadURL {
+                    self.failedNavigationURL = url; self.pendingLoadURL = nil; self.loading = false
+                    self.errorMessage = "Blocking rules could not load. Retry or change blocking in Settings."; self.onChange?(false)
+                }
+            }
+        }
+        // A list compiled earlier for the same rules is reused, even after relaunch.
+        WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: identifier) { list, _ in
             Task { @MainActor in
-                guard let self, !self.disposed, self.blockingEnabled, self.blockingRevision == revision else { return }
-                self.compilingRules = false
-                if let list {
-                    let controller = self.webView.configuration.userContentController
-                    if let previous = self.blockingRuleList { controller.remove(previous) }
-                    controller.add(list); self.blockingRuleList = list; self.blockingReady = true
-                    if let url = self.pendingLoadURL { self.load(url) }
-                } else {
-                    self.onNotice?(error?.localizedDescription ?? "Content blocking could not load.")
-                    if let url = self.pendingLoadURL {
-                        self.failedNavigationURL = url; self.pendingLoadURL = nil; self.loading = false
-                        self.errorMessage = "Blocking rules could not load. Retry or change blocking in Settings."; self.onChange?(false)
-                    }
+                if let list { finish(list, nil); return }
+                WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { list, error in
+                    Task { @MainActor in finish(list, error); RuleListCache.removeStale(keeping: identifier) }
                 }
             }
         }
@@ -479,5 +495,32 @@ private final class WebImageSnapshotRequest {
             continuation.resume(throwing: ValidationError("The page could not be captured within the 32 MB limit.")); return
         }
         continuation.resume(returning: png)
+    }
+}
+
+/// Compiled WebKit rule lists, shared by every tab. The store keeps them across
+/// launches under an identifier derived from their content.
+@MainActor
+enum RuleListCache {
+    private static var lastKey: [String]?
+    private static var last: (identifier: String, source: String)?
+    static var compiled: [String: WKContentRuleList] = [:]
+    static func source(ads: Bool, exceptions: [String], custom: [String], subscribed: [String]) -> (String, String)? {
+        let key = [ads ? "ads" : "trackers", exceptions.joined(separator: ","), custom.joined(separator: ","), String(subscribed.count), String(subscribed.hashValue)]
+        if key == lastKey, let last { return (last.identifier, last.source) }
+        guard let rules = try? ContentBlocking.webKitRules(ads: ads, exceptions: exceptions, custom: custom, subscribed: Array(subscribed.prefix(110_000))) else { return nil }
+        let digest = SHA256.hash(data: Data(rules.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        let identifier = "org.neutrino.blocking." + digest
+        lastKey = key; last = (identifier, rules)
+        return (identifier, rules)
+    }
+    /// Removes lists compiled for rules no longer in use.
+    static func removeStale(keeping identifier: String) {
+        WKContentRuleListStore.default().getAvailableContentRuleListIdentifiers { ids in
+            let stale = (ids ?? []).filter { $0.hasPrefix("org.neutrino.blocking.") && $0 != identifier } + ["org.neutrino.blocking.v1"]
+            Task { @MainActor in
+                for id in stale { WKContentRuleListStore.default().removeContentRuleList(forIdentifier: id) { _ in } }
+            }
+        }
     }
 }

@@ -779,6 +779,7 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             (setting_toggle("Block third-party cookies", "Sites can’t follow you with cookies set by other sites.", "blockThirdPartyCookies", p["blockThirdPartyCookies"].as_bool().unwrap_or(true)))
             (module_toggle(s, "cookie-banners", "Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer."))
         }
+        (filter_lists(s))
         (site_settings_list(s))
         details class="credential-disclosure"{summary{"Custom blocking rules"@if rules > 0 {" ("(rules)")"}}form data-form="custom-rules"{
             p class="field-help"{"Paste domains, hosts-file lines, rules like ||ads.example.com^ or element rules like example.com##.banner."}
@@ -794,6 +795,44 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             }
         }
     }
+}
+
+/// Subscribed filter lists: the common ones, then any added by address.
+fn filter_lists(s: &Shell) -> Markup {
+    let lists = array(&prefs(s)["filterLists"]);
+    let saved = |id: &str| lists.iter().find(|l| text(l, "id") == id);
+    let status = |l: Option<&Value>| -> String {
+        match l {
+            Some(l) if !text(l, "error").is_empty() => text(l, "error").to_string(),
+            Some(l) if l["domains"].is_number() => format!("{} sites and {} element rules", l["domains"].as_u64().unwrap_or(0), l["cosmetic"].as_u64().unwrap_or(0)),
+            Some(l) if flag(l, "enabled") => "Downloading…".into(),
+            _ => String::new(),
+        }
+    };
+    let custom: Vec<&Value> = lists.iter().filter(|l| !features::FILTER_LISTS.iter().any(|f| f.0 == text(l, "id"))).collect();
+    let on = lists.iter().filter(|l| flag(l, "enabled")).count();
+    html! {@if !s.private() {
+        details class="credential-disclosure"{summary{"Filter lists"@if on > 0 {" ("(on)" on)"}}
+            p class="field-help"{"Lists download from their publishers and update once a week."}
+            div class="settings-group"{
+                @for (id, title, _, detail) in features::FILTER_LISTS {
+                    @let list = saved(id);
+                    @let enabled = list.is_some_and(|l| flag(l, "enabled"));
+                    button class="toggle-row" data-op="filter-list" data-value="toggle" data-id=(id) role="switch" aria-checked=(enabled.to_string()){span{strong{(title)}small{(if enabled {status(list)} else {detail.to_string()})}}span class=(if enabled{"switch on"}else{"switch"}){span{}}}
+                }
+                @for l in &custom {
+                    div class="list-row"{div{strong{(text(l,"title"))}small{(status(Some(l)))}}
+                        button class="button quiet" data-op="filter-list" data-value="toggle" data-id=(text(l,"id")){(if flag(l,"enabled") {"Turn off"} else {"Turn on"})}
+                        button class="icon-button" data-op="filter-list" data-value="remove" data-id=(text(l,"id")) aria-label=(format!("Remove {}", text(l,"title"))){(icon("close"))}}
+                }
+            }
+            form class="route-form" data-form="filter-list"{
+                input type="url" name="url" placeholder="https://example.com/list.txt" aria-label="List address" spellcheck="false" autocomplete="off";
+                button class="button" type="submit"{"Add list"}
+                @if on > 0 {button class="button quiet" type="button" data-op="filter-list" data-value="refresh"{"Update now"}}
+            }
+        }
+    }}
 }
 
 /// Every site with its own settings: permissions, scripts, styles, zoom.

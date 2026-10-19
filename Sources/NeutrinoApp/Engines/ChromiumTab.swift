@@ -246,7 +246,7 @@ final class ChromiumTab: BrowserEngineTab {
         // Chromium filters per browser group, so a site with Shields down turns
         // blocking off for this tab while it shows that site.
         let enabled = blockingEnabled && !ContentBlocking.isException(pageURL?.host, in: blockingExceptions)
-        command(Int(NEUTRINO_CEF_SET_BLOCKING), text: ContentBlocking.domains(ads: blockAds, custom: blockingCustom).joined(separator: "\n"), value: enabled ? 1 : 0)
+        command(Int(NEUTRINO_CEF_SET_BLOCKING), text: ContentBlocking.domains(ads: blockAds, custom: blockingCustom, subscribed: blockingSubscribed).joined(separator: "\n"), value: enabled ? 1 : 0)
     }
     /// The isolated world page tools use for the current document, created once per document.
     private var toolWorld: (revision: UUID, unique: String)?

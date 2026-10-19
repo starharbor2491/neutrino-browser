@@ -304,6 +304,7 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var liveWallpaper: String?
     /// Keep the local network address out of WebRTC (Chromium's IP handling policy).
     public var hideLocalIP: Bool?
+    public var filterLists: [FilterList]?
     /// Element-hiding rules such as "example.com##.banner" or "##.banner".
     public var customCosmetic: [String]?
     public var startupPages: [String]?
@@ -357,6 +358,18 @@ public struct SiteSettings: Codable, Equatable, Sendable {
     /// Clear the site's data when its last tab closes.
     public var forget: Bool?
     public init() {}
+}
+/// A filter list the person subscribed to, downloaded and refreshed on this Mac.
+public struct FilterList: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var url: URL
+    public var enabled: Bool
+    public var updatedAt: Date?
+    public var domains: Int?
+    public var cosmetic: Int?
+    public var error: String?
+    public init(id: String, title: String, url: URL, enabled: Bool = true) { self.id = id; self.title = title; self.url = url; self.enabled = enabled }
 }
 public struct LinkRoute: Codable, Equatable, Sendable {
     public var host: String
