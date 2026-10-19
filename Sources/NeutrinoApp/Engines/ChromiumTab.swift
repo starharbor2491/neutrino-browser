@@ -271,6 +271,16 @@ final class ChromiumTab: BrowserEngineTab {
     override func pageText() async throws -> String { try await evaluateIsolated("(document.body?.innerText ?? '').slice(0, 40000)") as? String ?? "" }
     override func selectedText() async throws -> String { try await evaluateIsolated("(window.getSelection()?.toString() ?? '').slice(0, 8000)") as? String ?? "" }
     override func fillCredential(_ credential: LocalCredential) async throws { _ = try await evaluateIsolated("(() => { " + credential.autofillScript + " })()") }
+    private var fingerprintProtectionInstalled = false
+    override func installFingerprintProtection(_ source: String) {
+        guard !fingerprintProtectionInstalled else { return }
+        fingerprintProtectionInstalled = true
+        // Retried after the next load if the page wasn't ready for DevTools yet.
+        Task { [weak self] in
+            do { _ = try await self?.request("Page.addScriptToEvaluateOnNewDocument", parameters: ["source": source]) }
+            catch { self?.fingerprintProtectionInstalled = false }
+        }
+    }
     override func fillCredentialOnUse(_ credential: LocalCredential) async throws { _ = try await evaluateIsolated("(() => { " + credential.autofillOnUseScript + " })()") }
     override func runPageScript(_ source: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> String {
         try await evaluateIsolated(source, userGesture: userGesture, wait: wait) as? String ?? ""

@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.fingerprinting",
+  "name": "Fingerprinting protection",
+  "version": 1,
+  "summary": "Give each site slightly different canvas, graphics and processor details, as Brave does.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

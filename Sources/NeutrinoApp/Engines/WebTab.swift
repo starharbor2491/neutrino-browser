@@ -32,6 +32,17 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     private var insecureHosts = Set<String>()
     private let startPageURL = URL(string: "about:blank#neutrino-start-" + UUID().uuidString)!
     private var credentialCaptureInstalled = false
+    private var fingerprintProtectionInstalled = false
+    private static let fingerprintControllers = NSHashTable<WKUserContentController>.weakObjects()
+    override func installFingerprintProtection(_ source: String) {
+        guard !fingerprintProtectionInstalled, !disposed else { return }
+        fingerprintProtectionInstalled = true
+        // A popup shares its opener's content controller, which may already have the script.
+        let controller = webView.configuration.userContentController
+        guard !Self.fingerprintControllers.contains(controller) else { return }
+        Self.fingerprintControllers.add(controller)
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    }
     /// Sign-ins are reported from a content world the page's own scripts can't reach.
     override func installCredentialCapture() {
         guard !credentialCaptureInstalled, !disposed, let source = PageScript.source("credentialCapture") else { return }

@@ -87,6 +87,8 @@ class BrowserEngineTab: NSObject, ObservableObject {
     func pageText() async throws -> String { throw ValidationError("This engine cannot read page text.") }
     func selectedText() async throws -> String { throw ValidationError("This engine cannot read selected text.") }
     func fillCredential(_ credential: LocalCredential) async throws { throw ValidationError("Autofill is unavailable in this engine.") }
+    /// Runs Brave-style fingerprinting protection in the page's own world before each document's scripts.
+    func installFingerprintProtection(_ source: String) {}
     /// Fills the login once the person uses the form, rather than as the page loads.
     func fillCredentialOnUse(_ credential: LocalCredential) async throws { throw ValidationError("Autofill is unavailable in this engine.") }
     func focus() { if !interfaceEditing { nativeView.window?.makeFirstResponder(nativeView) } }
@@ -147,5 +149,15 @@ enum ProcessUsage {
         let ticks = Double(info.ri_user_time + info.ri_system_time)
         let nanoseconds = timebase.denom == 0 ? ticks : ticks * Double(timebase.numer) / Double(timebase.denom)
         return (Double(info.ri_phys_footprint) / 1_048_576, nanoseconds / 1_000_000_000)
+    }
+}
+
+/// Brave-style fingerprinting protection: one random key per launch, so each site sees
+/// stable noise for the session and different sites see different noise.
+@MainActor
+enum FingerprintProtection {
+    static let seed = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+    static func script(exceptions: [String]) -> String? {
+        PageScript.source("farbling", ["seed": seed, "exceptions": Array(exceptions.prefix(500))])
     }
 }

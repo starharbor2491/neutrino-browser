@@ -888,6 +888,7 @@ pub fn privacy_extra(s: &Shell) -> Markup {
             (setting_toggle("Block third-party cookies", "Sites can’t follow you with cookies set by other sites.", "blockThirdPartyCookies", p["blockThirdPartyCookies"].as_bool().unwrap_or(true)))
             (setting_toggle("Remove tracking from links", "Strip click and campaign identifiers such as utm_source and fbclid from addresses, and open AMP pages from the publisher.", "stripTracking", p["stripTracking"].as_bool().unwrap_or(true)))
             (setting_toggle("Hide your local IP address", "WebRTC calls won’t reveal your network address. WebKit tabs always do this.", "hideLocalIP", p["hideLocalIP"].as_bool().unwrap_or(true)))
+            (module_toggle(s, "fingerprinting", "Fingerprinting protection", "Each site sees slightly different canvas images, a generic graphics card and fewer processor cores. Applies to tabs opened after a change; sites with Shields down are left alone."))
             (module_toggle(s, "cookie-banners", "Hide cookie banners", "Hide common consent pop-ups. Sites may treat this as no answer."))
         }
         (filter_lists(s))

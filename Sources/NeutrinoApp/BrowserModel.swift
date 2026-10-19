@@ -264,6 +264,7 @@ final class BrowserModel: ObservableObject {
             PeekWindow.show(url, model: self); return true
         }
         tab.setPrivacyPreferences(httpsOnly: preferences.httpsUpgrade != false, blockThirdPartyCookies: preferences.blockThirdPartyCookies != false, hideLocalIP: preferences.hideLocalIP != false)
+        if app.feature("fingerprinting"), let script = FingerprintProtection.script(exceptions: preferences.shieldsDown ?? []) { tab.installFingerprintProtection(script) }
     }
     func updatePagePolicies() { webTabs.values.forEach(applyPagePolicy); webTabs.values.forEach { $0.applyScriptPolicy() } }
 

@@ -1115,6 +1115,7 @@ extension BrowserModel {
         }
         if !isPrivate { features?.autofill(tab, profileID: session.profileID) }
         if app.feature("spatial-navigation"), let script = PageScript.source("spatialNavigation") { Task { _ = try? await tab.runPageScript(script) } }
+        if app.feature("fingerprinting"), let script = FingerprintProtection.script(exceptions: preferences.shieldsDown ?? []) { tab.installFingerprintProtection(script) }
         if app.feature("feeds"), !isPrivate, let url = tab.url, let script = PageScript.source("feedLink") {
             Task { [weak self] in
                 guard let feed = try? await tab.runPageScript(script) else { return }
