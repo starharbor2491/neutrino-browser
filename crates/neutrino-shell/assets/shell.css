@@ -7029,3 +7029,13 @@ body.split-armed .split-drop {
   font-size: 11px;
   color: var(--muted);
 }
+.panel-switch {
+  padding: 0 12px 8px;
+}
+/* In a narrow panel the library's search field takes its own row. */
+.workspace-panel .library-actions {
+  flex-wrap: wrap;
+}
+.workspace-panel .library-actions .library-search {
+  flex: 1 1 100%;
+}

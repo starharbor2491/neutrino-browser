@@ -543,6 +543,20 @@ fn speed_dial_groups_are_folders_inside_speed_dial() {
     assert!(s.dispatch(json!({"op":"dial-group","value":"Nope"})).is_object() && s.dial_group == "Reading");
 }
 #[test]
+fn chrome_toolbar_has_extensions_and_a_side_panel() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("chrome");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-value="extensions-menu""#) && html.contains("Show side panel"));
+    let menu = s.dispatch(json!({"op":"menu","value":"extensions-menu"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("Manage extensions") && menu.contains("Visit Chrome Web Store"));
+    // Arc keeps neither.
+    s.dispatch(json!({"op":"escape"}));
+    s.snapshot["configuration"]["theme"]["preset"] = json!("arc");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("extensions-menu") && !html.contains("Show side panel"));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

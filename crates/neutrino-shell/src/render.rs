@@ -537,6 +537,10 @@ fn workspace_panel(s: &Shell, key: &str) -> Markup {
     copy.section = key.into();
     copy.panel = key.into();
     html! {aside class="workspace-panel" aria-label=(key) {header{h2{(match key{"notes"=>"Notes","history"=>"History","downloads"=>"Downloads","reading"=>"Reading List","resources"=>if style(s)=="gx"{"Resource control"}else{"Resources"},"tabs"=>"Window",_=>"Bookmarks"})}button class="icon-button" data-op="panel" data-value="" aria-label="Close panel"{(icon("close"))}}
+        // Chrome's side panel switches between its Reading list and Bookmarks.
+        @if style(s) == "chrome" && ["reading", "bookmarks"].contains(&key) && crate::features::on(s, "reading-list") {
+            div class="panel-switch"{(segments("panel", "", key, &[("reading", "Reading list"), ("bookmarks", "Bookmarks")]))}
+        }
         @if key=="resources" {(resources(s))@if style(s)=="gx" {(crate::views::gx_control(s))}}@else if key=="tabs" {div class="tabs-scroll window-panel"{(tab_groups(s,false))}}@else{(library(&copy))}
     }}
 }
@@ -548,11 +552,18 @@ fn page_actions(s: &Shell, style: &str) -> Markup {
     let items: Vec<&str> = array(&s.config()["layout"]["toolbarItems"]).iter().filter_map(Value::as_str).collect();
     html! {div class="page-actions"{
         @if inline {(module_tools(s))}
-        @for item in items {(toolbar_item(s, item, blank))}
+        @for item in &items {(toolbar_item(s, item, blank))}
         @if focus {button class="button focus-exit" data-op="native" data-action="toggleFocus" aria-label="Exit Focus mode"{(icon("focus"))"Exit Focus"}}
         @if !["chrome", "brave", "safari"].contains(&style) && !button_hidden(s, "bookmark") {(bookmark_button(s))}
         @if style == "safari" {button class="icon-button" data-op="newTab" title="New tab (⌘T)" aria-label="New tab"{(icon("plus"))}}
         button class="icon-button" data-op="menu" data-value="page" title=(if blank {"Page options: open a page first"} else {"Page options"}) aria-label="Page options"{(icon("more"))}
+        // Chrome's, Brave's and GX's Extensions button, and Chrome's side panel.
+        @if ["chrome", "brave", "gx"].contains(&style) && !items.contains(&"extensions") {button class="icon-button" data-op="menu" data-value="extensions-menu" title="Extensions" aria-label="Extensions"{(icon("plug"))}}
+        @if style == "chrome" {
+            @let open = !s.visible_panel_key().is_empty();
+            @let side = if crate::features::on(s, "reading-list") {"reading"} else {"bookmarks"};
+            button class=(if open {"icon-button selected"} else {"icon-button"}) data-op="panel" data-value=(if open {""} else {side}) title=(if open {"Hide side panel"} else {"Show side panel"}) aria-label=(if open {"Hide side panel"} else {"Show side panel"}) aria-pressed=(open.to_string()){(icon("panel"))}
+        }
         @if ["chrome", "brave", "gx"].contains(&style) {
             button class="avatar" data-op="menu" data-value="profiles" title=(text(&s.snapshot,"profileName")) aria-label=(format!("Profile: {}",text(&s.snapshot,"profileName"))){span{(text(&s.snapshot,"profileName").chars().next().unwrap_or('P'))}}
             button class="icon-button" data-op="menu" data-value="browser" title="Browser menu" aria-label="Browser menu"{(icon("kebab"))}
@@ -1435,6 +1446,13 @@ fn menu(s: &Shell) -> Markup {
             "rename-space"=>{label class="field"{span{"Space name"}input id="name-input" data-name="true" value=(s.name.as_str()) maxlength="80";}button class="button primary" data-op="renameSpace" data-id=(text(&s.snapshot["session"],"spaceID")) disabled[s.name.is_empty()]{"Save name"}}
             "find"=>{form data-form="find"{label class="field"{span{"Find on this page"}input name="find" id="find-input" type="search" autocomplete="off";}button class="button primary" type="submit"{"Find next"}}p class="field-help"{"Matches are highlighted on the page."}}
             "new-space"|"new-folder"|"new-profile"=>{label class="field"{span{(if s.menu=="new-folder"{"Folder name"}else if s.menu=="new-profile"{"Profile name"}else{"Space name"})}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Give it a name" maxlength="80" autocomplete="off";}button class="button primary" data-op=(if s.menu=="new-folder"{"createFolder"}else if s.menu=="new-profile"{"createProfile"}else{"createSpace"}) disabled[s.name.is_empty()]{"Create"}}
+            "extensions-menu"=>{
+                @let available = flag(&s.snapshot,"blinkAvailable");
+                div class="menu-label"{"Extensions"}
+                @if !available {p class="field-help"{"Extensions aren’t included in this build."}}
+                button class="menu-item" data-op="installExtension" disabled[!available]{(icon("settings"))span{"Manage extensions"}}
+                button class="menu-item" data-op="webStore" disabled[!available]{(icon("external"))span{"Visit Chrome Web Store"}}
+            }
             "profiles"=>{@for p in array(&s.snapshot["profiles"]){button class="menu-item" data-op="native" data-action="switchProfile" data-id=(text(p,"id")) disabled[s.private()]{(icon("user"))(text(p,"name"))}}button class="menu-item" data-op="screen" data-value="settings" data-section="profiles"{(icon("settings"))"Manage Profiles"}}
             "clear-history"=>{p{"Clear saved history for this Profile? Your bookmarks, tabs and website sign-ins are kept."}(action("Clear history","clearHistory",true))}
             "discard-editor"=>{p{"You have unsaved appearance changes."}div class="button-row"{(action("Keep editing","escape",false))(action("Discard changes","editor-cancel",false))(action("Save changes","editor-save",true))}}
