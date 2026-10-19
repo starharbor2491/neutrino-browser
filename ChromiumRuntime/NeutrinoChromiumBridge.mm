@@ -20,6 +20,7 @@
 #include "NeutrinoTrackingStrip.h"
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
+#include "include/cef_cookie.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_client.h"
 #include "include/cef_parser.h"
@@ -284,6 +285,12 @@ class EngineApp final : public CefApp, public CefBrowserProcessHandler {
       if (!features.empty()) features+=",";
       features+="PMLoadingPageVoter";
       command_line->AppendSwitchWithValue("enable-features",features);
+      // Neutrino publishes Now Playing and answers the media keys for both engines;
+      // Chrome's own handler would answer the same key a second time.
+      std::string disabled=command_line->GetSwitchValue("disable-features").ToString();
+      if (!disabled.empty()) disabled+=",";
+      disabled+="HardwareMediaKeyHandling";
+      command_line->AppendSwitchWithValue("disable-features",disabled);
     }
     if (process_type.empty() && diagnostics &&
         [[[NSProcessInfo processInfo] environment] objectForKey:@"NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE"]) {
@@ -525,6 +532,19 @@ class BlockedResourceHandler final : public CefResourceRequestHandler {
  private:
   std::shared_ptr<BlockPolicy> policy_;
   IMPLEMENT_REFCOUNTING(BlockedResourceHandler);
+};
+
+// "Clear browsing data" with a time range: deletes the Profile's cookies created since a time.
+class RecentCookieRemover final : public CefCookieVisitor {
+ public:
+  explicit RecentCookieRemover(int64_t since) : since_(since) {}
+  bool Visit(const CefCookie& cookie,int,int,bool& deleteCookie) override {
+    deleteCookie=cookie.creation.val>=since_;
+    return true;
+  }
+ private:
+  const int64_t since_;
+  IMPLEMENT_REFCOUNTING(RecentCookieRemover);
 };
 
 class Client final : public CefClient, public CefLifeSpanHandler,
@@ -1469,6 +1489,13 @@ void Command(void* opaque,int command,const char* text,double value) {
   if (final_quit_frozen && command!=NEUTRINO_CEF_SYNC_ACTIVE) return;
   if (command==NEUTRINO_CEF_POPUPS) { owner->popups=value!=0; return; }
   if (command==NEUTRINO_CEF_STRIP_TRACKING) { Group(owner)->strip_tracking=value!=0; return; }
+  if (command==NEUTRINO_CEF_CLEAR_COOKIES_SINCE) {
+    if (!owner->browser || !(value>0) || value>32.0*86400) return;
+    auto context=owner->browser->GetHost()->GetRequestContext();
+    auto manager=context ? context->GetCookieManager(nullptr) : nullptr;
+    if (manager) manager->VisitAllCookies(new RecentCookieRemover(cef_basetime_now().val-static_cast<int64_t>(value*1000000.0)));
+    return;
+  }
   if (command==NEUTRINO_CEF_SET_BLOCKING) {
     std::vector<std::string> domains; std::string source=text ? text : "";
     // Subscribed filter lists bring tens of thousands of domains.

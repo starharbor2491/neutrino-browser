@@ -178,10 +178,10 @@ final class BrowserFeatures {
         }
         publishNowPlaying(model)
     }
-    /// The playing WebKit page appears in Now Playing and answers the media keys.
-    /// Chromium pages use Chromium's own media session support.
+    /// The playing page appears in Now Playing and answers the media keys, in either
+    /// engine: the Chromium bridge turns off Chrome's own media-key handling.
     private func publishNowPlaying(_ model: BrowserModel) {
-        guard app.feature("media-controls"), !model.isPrivate, let media, model.liveEngineTab(media.id)?.engineID == .webkit,
+        guard app.feature("media-controls"), !model.isPrivate, let media, model.liveEngineTab(media.id) != nil,
               let tab = model.session.tabs.first(where: { $0.id == media.id }) else { NowPlaying.clear(self); return }
         NowPlaying.show(self, title: tab.customTitle ?? tab.title, site: tab.url?.host ?? "", playing: media.playing)
     }
@@ -496,7 +496,7 @@ final class BrowserFeatures {
             guard !types.isEmpty, regular else { break }
             app.webKitDataStore(profileID: profileID).removeData(ofTypes: types, modifiedSince: since) {}
             let chromium = model.liveEngineTabs.map(\.page).first { $0.engineID == .chromium }
-            if let chromium { Task { await chromium.clearWebsiteData(cookies: cookies, cache: cache, hosts: visitedHosts) } }
+            if let chromium { Task { await chromium.clearWebsiteData(cookies: cookies, cache: cache, hosts: visitedHosts, since: since) } }
             else if model.session.tabs.contains(where: { $0.engineID == .chromium && $0.url != nil }) {
                 app.notice = "WebKit data was cleared. Open a Chromium tab, then clear again to include Chromium’s cookies and cache."
             }

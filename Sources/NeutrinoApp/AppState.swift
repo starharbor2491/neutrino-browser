@@ -680,13 +680,31 @@ final class AppState: ObservableObject {
         var types = Set<String>()
         if cookies { types.formUnion(WKWebsiteDataStore.allWebsiteDataTypes().subtracting(cacheTypes)) }
         if cache { types.formUnion(cacheTypes) }
-        for store in webKitDataStores.values { await store.removeData(ofTypes: types, modifiedSince: .distantPast) }
-        // Chromium clears through a live page of each Profile.
+        // Every Profile's store, including Profiles with no window this session.
+        let pending = Set((library.pendingProfileDeletions ?? []) + (library.pendingWebsiteDataClears ?? []))
+        for profile in library.profiles where !pending.contains(profile.id) {
+            await webKitDataStore(profileID: profile.id).removeData(ofTypes: types, modifiedSince: .distantPast)
+        }
+        // Chromium clears through a live page of each Profile now, and every
+        // Profile's files once the engine has stopped (clearChromiumFilesOnQuit).
         var cleared = Set<UUID>()
         for model in windows.values.compactMap(\.model) where !model.isPrivate && !cleared.contains(model.session.profileID) {
             guard let page = model.liveEngineTabs.map(\.page).first(where: { $0.engineID == .chromium }) else { continue }
             cleared.insert(model.session.profileID)
             await page.clearWebsiteData(cookies: cookies, cache: cache, hosts: visitedHosts[model.session.profileID] ?? [])
+        }
+    }
+    /// After Chromium has shut down: removes cookies, site storage and caches from
+    /// every regular Profile's Chromium folder, including Profiles with no open page.
+    func clearChromiumFilesOnQuit() {
+        let preferences = library.preferences
+        var entries: [String] = []
+        if preferences.clearCookiesOnQuit == true { entries += ChromiumProfileData.siteDataEntries }
+        if preferences.clearCacheOnQuit == true { entries += ChromiumProfileData.cacheEntries }
+        guard !entries.isEmpty else { return }
+        // Best effort: the app is exiting, and a failure leaves only data the person already had.
+        for profile in library.profiles {
+            try? ChromiumProfileData.eraseEntries(entries, profileID: profile.id, dataDirectory: dataDirectory)
         }
     }
     func freezeQuitData() {
@@ -856,7 +874,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     for browser in state.windows.values.compactMap(\.model) { browser.disposeEngineTabs() }
                     quit = await ChromiumRuntime.shared.shutdown()
                     if !quit { state.notice = ChromiumRuntime.shared.status }
-                    if quit { await state.finishPendingProfileDeletions() }
+                    if quit { await state.finishPendingProfileDeletions(); state.clearChromiumFilesOnQuit() }
                     if quit && state.uninstallRequested {
                         for browser in state.windows.values.compactMap(\.model) { await browser.stopInterface?() }
                         let failures=await AppUninstaller.remove(state)

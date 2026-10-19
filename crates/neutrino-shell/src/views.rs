@@ -327,7 +327,7 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
             @for (key, label, detail, on) in [("history","Browsing history","Pages you visited",true),("cookies","Cookies and site data","Signs you out of most sites",true),("cache","Cached images and files","Pages may load slower next time",true),("downloads","Download list","Files stay on disk",false)] {
                 label class="check-row"{input type="checkbox" name="items" value=(key) checked[on];span{strong{(label)}small{(detail)}}}
             }
-            p class="field-help"{"Chromium tabs clear cookies and cache for all time, whatever the range."}
+            p class="field-help"{"In Chromium tabs, cached files are cleared for all time, whatever the range."}
             div class="button-row"{button class="button" type="button" data-op="escape"{"Cancel"}button class="button primary" type="submit"{"Clear data"}}
         }},
         m if m.starts_with("nav-history:") => {
