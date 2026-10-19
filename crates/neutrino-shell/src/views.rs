@@ -984,6 +984,16 @@ fn filter_lists(s: &Shell) -> Markup {
 }
 
 /// Every site with its own settings: permissions, scripts, styles, zoom.
+/// One permission of a listed site, as segments; true/false values are sent as booleans.
+fn site_choice(host: &str, label: &str, key: &str, selected: &str, items: &[(&str, &str)]) -> Markup {
+    let boolean = items.iter().all(|(v, _)| *v == "true" || *v == "false");
+    let index = items.iter().position(|(value, _)| *value == selected).unwrap_or(0);
+    html! {div class="site-permission"{span{(label)}
+        div class="segments" role="group" aria-label=(format!("{label} for {host}")) style=(format!("--count:{};--index:{}", items.len(), index)) data-selected="true"{
+            @for (value, name) in items {button class=(if *value == selected {"selected"} else {""}) data-op="site-setting" data-host=(host) data-key=(key) data-value=(value) data-type=[boolean.then_some("bool")] aria-pressed=((*value == selected).to_string()){(name)}}
+        }
+    }}
+}
 fn site_settings_list(s: &Shell) -> Markup {
     let p = prefs(s);
     let mut hosts: Vec<&String> = p["siteSettings"].as_object().map(|o| o.keys().collect()).unwrap_or_default();
@@ -1010,7 +1020,22 @@ fn site_settings_list(s: &Shell) -> Markup {
     };
     html! {@if !hosts.is_empty() {
         details class="credential-disclosure"{summary{"Site settings ("(hosts.len())")"}
-            div class="settings-group"{@for host in &hosts {div class="list-row"{(icon("globe"))div{strong{(host)}small{(summary(host))}}button class="button quiet" data-op="site-reset" data-host=(host){"Reset"}}}}
+            div class="settings-group"{@for host in &hosts {
+                @let v = &p["siteSettings"][*host];
+                // A class per site, since open rows are restored by class after each render.
+                details class=(format!("site-settings-row site-{}", host.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))){
+                    summary class="list-row"{(icon("globe"))div{strong{(host)}small{(summary(host))}}}
+                    div class="site-permissions"{
+                        (site_choice(host, "JavaScript", "blockScripts", if flag(v, "blockScripts") {"true"} else {"false"}, &[("false", "Allowed"), ("true", "Blocked")]))
+                        (site_choice(host, "Pop-ups", "allowPopups", if flag(v, "allowPopups") {"true"} else {"false"}, &[("false", "Blocked"), ("true", "Allowed")]))
+                        (site_choice(host, "Sound", "muted", if flag(v, "muted") {"true"} else {"false"}, &[("false", "On"), ("true", "Muted")]))
+                        @for (key, label) in [("camera", "Camera"), ("microphone", "Microphone")] {
+                            (site_choice(host, label, key, if text(v, key).is_empty() {"ask"} else {text(v, key)}, &[("ask", "Ask"), ("allow", "Allow"), ("block", "Block")]))
+                        }
+                        div class="button-row"{button class="button quiet" data-op="site-reset" data-host=(host){"Reset all for this site"}}
+                    }
+                }
+            }}
         }
     }}
 }

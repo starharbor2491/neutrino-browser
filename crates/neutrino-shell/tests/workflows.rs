@@ -349,6 +349,18 @@ fn tab_search_lists_and_filters_open_tabs() {
     assert!(s.menu.is_empty());
 }
 #[test]
+fn listed_sites_can_be_edited_from_privacy_settings() {
+    let mut s = shell();
+    s.snapshot["preferences"]["siteSettings"] = json!({"news.example":{"blockScripts":true,"camera":"block"}});
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"privacy"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("site-settings-row site-news-example") && html.contains("aria-label=\"Camera for news.example\""));
+    let r = s.dispatch(json!({"op":"site-setting","host":"news.example","key":"camera","value":"allow"}));
+    assert_eq!(commands(&r)[0], json!({"op":"siteSetting","host":"news.example","key":"camera","value":"allow"}));
+    // A site not in the list can't be edited from here.
+    assert!(commands(&s.dispatch(json!({"op":"site-setting","host":"other.example","key":"camera","value":"allow"}))).is_empty());
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

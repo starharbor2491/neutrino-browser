@@ -798,7 +798,11 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         }
         "site-setting" => {
             let key = text(r, "key");
-            let Some(site) = site_of_active(s) else { return };
+            // Settings → Privacy edits a listed site; the site menu edits the current page's site.
+            let listed = |host: &str| s.snapshot["preferences"]["siteSettings"].get(host).is_some() || s.snapshot["preferences"]["siteZoom"].get(host).is_some();
+            let requested = text(r, "host");
+            let site = if !requested.is_empty() { listed(requested).then(|| requested.to_string()) } else { site_of_active(s) };
+            let Some(site) = site else { return };
             let valid = match key {
                 "blockScripts" | "allowPopups" | "muted" | "forget" => r["value"].is_boolean(),
                 "camera" | "microphone" => ["ask", "allow", "block"].contains(&value),

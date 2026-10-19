@@ -261,9 +261,13 @@
         ".tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list,.start-surface,.horizontal-tab-scroll,.modules-content,.module-details",
       ),
     ].map((e) => [e.className, e.scrollTop, e.scrollLeft]);
-    const openDetails = [...root.querySelectorAll("details[open]")].map(
-      (e) => e.className,
-    );
+    // Disclosures that share a class are told apart by their summary, without its count.
+    const detailKey = (e) => {
+      const summary = e.querySelector(":scope > summary");
+      const label = summary?.querySelector("strong")?.textContent ?? summary?.textContent ?? "";
+      return e.className + "\n" + label.trim().replace(/\s*\([^)]*\)$/, "");
+    };
+    const openDetails = new Set([...root.querySelectorAll("details[open]")].map(detailKey));
     const hadDialog = !!topDialog();
     const template = document.createElement("template");
     template.innerHTML = result.html;
@@ -288,10 +292,8 @@
     ))
       el.inert = !!dialog && !el.contains(dialog) && el !== dialog;
     if (dialog && !hadDialog) returnFocus = key;
-    for (const cls of openDetails) {
-      const el = root.getElementsByClassName(cls)[0];
-      if (el) el.open = true;
-    }
+    if (openDetails.size)
+      for (const el of root.querySelectorAll("details")) if (openDetails.has(detailKey(el))) el.open = true;
     for (const [cls, top, left] of scrolls) {
       const el = root.getElementsByClassName(cls)[0];
       if (el) {

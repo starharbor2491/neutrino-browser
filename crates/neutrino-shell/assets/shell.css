@@ -4857,6 +4857,21 @@ details.start-guide > .guide-keys {
 .site-permission .segments {
   width: 170px;
 }
+.site-settings-row > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.site-settings-row > summary::-webkit-details-marker {
+  display: none;
+}
+.site-settings-row[open] > summary {
+  background: var(--hover);
+}
+.site-permissions {
+  display: grid;
+  gap: 2px;
+  padding: 4px 0 10px 34px;
+}
 .popover-menu .toggle-row {
   width: 100%;
   padding: 6px 9px;
