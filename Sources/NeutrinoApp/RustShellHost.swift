@@ -888,7 +888,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard let center = downloadCenter ?? model?.downloads, let item = center.items.first(where: { $0.id == id }) else { return }
             if operation == "downloadCancel" { center.cancel(item) }
             else if operation == "downloadPause" || operation == "downloadResume" { center.setPaused(item, operation == "downloadPause") }
-            else if let url = item.destination, !item.active {
+            else if let url = item.destination, item.succeeded {
                 if operation == "downloadOpen" { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             }
         case "toggleModule":

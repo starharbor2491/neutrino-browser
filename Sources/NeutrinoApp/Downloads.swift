@@ -90,6 +90,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     var pauseChromium: (@MainActor @Sendable (Bool) -> Void)?
     /// Paused by the person. A paused WebKit download keeps its partial file and resume data.
     @Published var paused = false
+    /// The file was saved at its destination.
+    var succeeded = false
     var resumeData: Data?
     var resuming = false
     /// Keeps the view that resumed a WebKit download until the transfer ends.
@@ -97,7 +99,7 @@ final class DownloadItem: ObservableObject, Identifiable {
     var canPause: Bool { active && !cancellationRequested && destination != nil && (download != nil || pauseChromium != nil) }
     /// What the interface's download list shows.
     var summary: [String: Any] {
-        ["id": id.uuidString, "name": name, "status": status, "complete": !active && destination != nil,
+        ["id": id.uuidString, "name": name, "status": status, "complete": succeeded, "ended": !active && !awaitsTerminalUpdate,
          "fraction": fraction, "paused": paused, "canPause": canPause]
     }
     var destinationPanel: NSSavePanel?
@@ -337,7 +339,7 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
                 _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging,
                                                          backupItemName: nil, options: .usingNewMetadataOnly)
             } else { try FileManager.default.moveItem(at: staging, to: destination) }
-            item.staging = nil; item.fraction = 1; item.status = "Finished"
+            item.staging = nil; item.fraction = 1; item.status = "Finished"; item.succeeded = true
         } catch { item.status = "Failed to save: \(error.localizedDescription). Temporary file kept at \(staging.path)." }
     }
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {

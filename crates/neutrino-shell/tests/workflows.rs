@@ -273,6 +273,9 @@ fn downloads_show_progress_and_pause_or_resume() {
     assert!(html.contains("<progress class=\"download-progress\" max=\"1\" value=\"0.4\""));
     let r = s.dispatch(json!({"op":"native","action":"downloadPause","id":"d1"}));
     assert_eq!(commands(&r)[0]["op"], "downloadPause");
+    s.snapshot["downloads"] = json!([{"id":"d3","name":"setup.dmg","status":"Cancelled","complete":false,"ended":true}]);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("downloadOpen") && !html.contains("downloadCancel") && html.contains("downloadRemove"));
 }
 #[test]
 fn closing_palette_restores_page_identity() {

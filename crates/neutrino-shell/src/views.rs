@@ -621,11 +621,12 @@ pub fn bookmarks(s: &Shell) -> Markup {
 pub fn downloads(s: &Shell) -> Markup {
     let list = array(&s.snapshot["downloads"]);
     html! {
-        @if list.iter().any(|d| flag(d,"complete")) {div class="library-actions"{span class="spacer"{}button class="button" data-op="native" data-action="downloadClear"{"Clear finished"}}}
+        @if list.iter().any(|d| flag(d,"complete") || flag(d,"ended")) {div class="library-actions"{span class="spacer"{}button class="button" data-op="native" data-action="downloadClear"{"Clear finished"}}}
         @if list.is_empty() {(crate::render::empty("No downloads","Files you download appear here.","download"))}
         @for d in list {div class="list-row"{(icon("download"))div{strong{(text(d,"name"))}small{(text(d,"status"))}
                 @if !flag(d,"complete") && d["fraction"].is_number() && (flag(d,"canPause") || flag(d,"paused")) {progress class="download-progress" max="1" value=(d["fraction"].as_f64().unwrap_or(0.).clamp(0., 1.)) aria-label=(format!("{} progress", text(d,"name"))){}}}
             @if flag(d,"complete") {div class="button-row"{button class="button" data-op="native" data-action="downloadOpen" data-id=(text(d,"id")){"Open"}button class="button" data-op="native" data-action="downloadReveal" data-id=(text(d,"id")){"Show in Finder"}button class="icon-button" data-op="native" data-action="downloadRemove" data-id=(text(d,"id")) aria-label="Remove from list"{(icon("close"))}}}
+            @else if flag(d,"ended") {button class="icon-button" data-op="native" data-action="downloadRemove" data-id=(text(d,"id")) aria-label="Remove from list"{(icon("close"))}}
             @else {div class="button-row"{
                 @if flag(d,"canPause") {@if flag(d,"paused") {button class="button" data-op="native" data-action="downloadResume" data-id=(text(d,"id")){"Resume"}} @else {button class="button" data-op="native" data-action="downloadPause" data-id=(text(d,"id")){"Pause"}}}
                 button class="button" data-op="native" data-action="downloadCancel" data-id=(text(d,"id")){"Cancel"}
