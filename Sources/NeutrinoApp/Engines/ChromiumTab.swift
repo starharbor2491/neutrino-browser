@@ -342,6 +342,21 @@ final class ChromiumTab: BrowserEngineTab {
         privacy = (httpsOnly, blockThirdPartyCookies, hideLocalIP)
         if activeContentKnown && !loading { sendPrivacyPreferences() }
     }
+    private var credentialCaptureWanted = false, credentialCaptureInstalled = false
+    override func installCredentialCapture() { credentialCaptureWanted = true; if activeContentKnown && !loading { installCredentialBinding() } }
+    /// A binding that only Neutrino's own isolated world can call reports sign-ins.
+    private func installCredentialBinding() {
+        guard credentialCaptureWanted, !credentialCaptureInstalled, let source = PageScript.source("credentialCapture") else { return }
+        credentialCaptureInstalled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.request("Runtime.enable", parameters: [:])
+                _ = try await self.request("Runtime.addBinding", parameters: ["name": "neutrinoCredential", "executionContextName": "org.neutrino.passwords"])
+                _ = try await self.request("Page.addScriptToEvaluateOnNewDocument", parameters: ["source": source, "worldName": "org.neutrino.passwords", "runImmediately": true])
+            } catch { self.credentialCaptureInstalled = false }
+        }
+    }
     private func sendPrivacyPreferences() {
         guard let privacy else { return }
         self.privacy = nil
@@ -558,6 +573,7 @@ final class ChromiumTab: BrowserEngineTab {
                 Task { @MainActor [weak self] in
                     guard let self, self.page != nil, self.navigationRevision == revision, !self.loading else { return }
                     self.sendPrivacyPreferences()
+                    self.installCredentialBinding()
                     self.onPageLoaded?()
                 }
             }
@@ -611,6 +627,12 @@ final class ChromiumTab: BrowserEngineTab {
                 downloadIDs.remove(key)
                 if disposing && downloadIDs.isEmpty && closeTask == nil { closePage() }
             }
+        case Int32(NEUTRINO_CEF_CREDENTIAL):
+            guard let payload = value["payload"] as? String, payload.utf8.count <= 4096,
+                  let body = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+                  let origin = body["origin"] as? String, let username = body["username"] as? String, let password = body["password"] as? String,
+                  !password.isEmpty, let url = pageURL, (try? LocalCredential.origin(for: url)) == origin else { return }
+            onCredential?(origin, String(username.prefix(500)), String(password.prefix(8192)))
         case Int32(NEUTRINO_CEF_READER_CONTEXT):
             if value["clear"] as? Bool == true { readerContexts.removeAll() }
             else if value["destroyed"] as? Bool == true {

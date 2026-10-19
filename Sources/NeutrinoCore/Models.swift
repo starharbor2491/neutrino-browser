@@ -305,6 +305,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     /// Keep the local network address out of WebRTC (Chromium's IP handling policy).
     public var hideLocalIP: Bool?
     public var filterLists: [FilterList]?
+    /// Sites where Neutrino never offers to save a password.
+    public var neverSavePasswords: [String]?
     /// Element-hiding rules such as "example.com##.banner" or "##.banner".
     public var customCosmetic: [String]?
     public var startupPages: [String]?

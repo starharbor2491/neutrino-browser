@@ -18,6 +18,8 @@ final class BrowserFeatures {
     private(set) var navigationList: [String: Any] = [:]
     private(set) var source: [String: Any] = [:]
     private(set) var siteData: [[String: String]]?
+    /// A sign-in waiting for Save, Never or Not now. The password never reaches the interface.
+    private var passwordPrompt: (profileID: UUID, credential: LocalCredential, update: Bool)?
     private(set) var tabResources: [[String: Any]] = []
     private(set) var audible = Set<UUID>()
     private(set) var media: (id: UUID, playing: Bool)?
@@ -86,6 +88,9 @@ final class BrowserFeatures {
         snapshot["tabResources"] = tabResources
         snapshot["breakMode"] = breakMode
         if let blocked = model.activeWebTab.blockedOnPage { snapshot["blockedCount"] = blocked }
+        if let prompt = passwordPrompt, prompt.profileID == model.session.profileID {
+            snapshot["passwordPrompt"] = ["origin": prompt.credential.origin, "username": prompt.credential.username, "update": prompt.update]
+        }
         let counted = model.liveEngineTabs.compactMap { $0.page.blockedTotal }
         if !counted.isEmpty { snapshot["shieldsStats"] = ["blocked": counted.reduce(0, +)] }
         snapshot["onBattery"] = Self.onBattery
@@ -592,6 +597,17 @@ final class BrowserFeatures {
             for window in app.windows.values { window.model?.updateBlockingPolicy() }
             restyleOpenPages()
         case "filterList": app.filterListCommand(command)
+        case "passwordPrompt":
+            guard let prompt = passwordPrompt else { break }
+            passwordPrompt = nil
+            switch command["value"] as? String {
+            case "save":
+                do { try prompt.credential.save(profile: prompt.profileID); credentialsChanged = true; app.notice = prompt.update ? "Password updated." : "Password saved in Keychain." }
+                catch { app.notice = error.localizedDescription }
+            case "never":
+                app.library.preferences.neverSavePasswords = Array(((app.library.preferences.neverSavePasswords ?? []) + [prompt.credential.origin]).suffix(500))
+            default: break
+            }
         case "importRules":
             let panel = NSOpenPanel(); panel.message = "Choose a filter list or hosts file."
             guard panel.runModal() == .OK, let url = panel.url,
@@ -856,6 +872,31 @@ final class BrowserFeatures {
     }
 }
 
+extension BrowserFeatures {
+    /// Offers to save or update a sign-in, unless it is already saved or the site is on the never list.
+    func offerToSave(origin: String, username: String, password: String, profileID: UUID) {
+        guard !(app.library.preferences.neverSavePasswords ?? []).contains(origin) else { return }
+        let service = LocalCredential.service(profileID), credential = LocalCredential(origin: origin, username: username, password: password)
+        var update = false
+        if let data = try? SecureVault.get(account: credential.id, service: service),
+           let saved = try? JSONDecoder().decode(LocalCredential.self, from: data) {
+            guard saved.password != password else { return }
+            update = true
+        }
+        passwordPrompt = (profileID, credential, update)
+        refresh()
+    }
+    /// Fills a page's sign-in form when exactly one saved login matches its site.
+    func autofill(_ tab: BrowserEngineTab, profileID: UUID) {
+        guard app.feature("password-manager"), let url = tab.url, let origin = try? LocalCredential.origin(for: url) else { return }
+        let service = LocalCredential.service(profileID)
+        let matches = ((try? SecureVault.accounts(service: service)) ?? []).filter { $0.hasPrefix(origin + "\n") }
+        guard matches.count == 1, let data = try? SecureVault.get(account: matches[0], service: service),
+              let credential = try? JSONDecoder().decode(LocalCredential.self, from: data) else { return }
+        Task { try? await tab.fillCredential(credential) }
+    }
+}
+
 extension BrowserModel {
     /// Brave's "Forget me": once a site's last tab in its Profile closes, its cookies and storage go.
     func forgetSiteIfClosed(_ url: URL?) {
@@ -897,6 +938,7 @@ extension BrowserModel {
             // The Boost's script runs once per load in Neutrino's isolated world.
             Task { _ = try? await tab.runPageScript("(()=>{try{" + js + "\n}catch(e){};return 'ok'})()") }
         }
+        if !isPrivate { features?.autofill(tab, profileID: session.profileID) }
         if app.feature("spatial-navigation"), let script = PageScript.source("spatialNavigation") { Task { _ = try? await tab.runPageScript(script) } }
         if app.feature("mouse-gestures"), let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
     }

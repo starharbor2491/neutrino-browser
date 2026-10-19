@@ -31,6 +31,22 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     private var pendingUpgrade: (secure: URL, original: URL)?
     private var insecureHosts = Set<String>()
     private let startPageURL = URL(string: "about:blank#neutrino-start-" + UUID().uuidString)!
+    private var credentialCaptureInstalled = false
+    /// Sign-ins are reported from a content world the page's own scripts can't reach.
+    override func installCredentialCapture() {
+        guard !credentialCaptureInstalled, !disposed, let source = PageScript.source("credentialCapture") else { return }
+        credentialCaptureInstalled = true
+        let world = WKContentWorld.world(name: "org.neutrino.passwords")
+        let controller = webView.configuration.userContentController
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
+        controller.add(CredentialMessages(tab: self), contentWorld: world, name: "neutrinoCredential")
+    }
+    fileprivate func receiveCredential(_ message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any],
+              let origin = body["origin"] as? String, let username = body["username"] as? String, let password = body["password"] as? String,
+              !password.isEmpty, let url = webView.url, (try? LocalCredential.origin(for: url)) == origin else { return }
+        onCredential?(origin, String(username.prefix(500)), String(password.prefix(8192)))
+    }
     init(dataStore: WKWebsiteDataStore, downloads: DownloadCenter, profileID: UUID, configuration: WKWebViewConfiguration? = nil) {
         let config = configuration ?? WKWebViewConfiguration()
         if configuration == nil { config.websiteDataStore = dataStore }
@@ -522,5 +538,14 @@ enum RuleListCache {
                 for id in stale { WKContentRuleListStore.default().removeContentRuleList(forIdentifier: id) { _ in } }
             }
         }
+    }
+}
+
+/// Forwards sign-in messages without the content controller keeping the tab alive.
+private final class CredentialMessages: NSObject, WKScriptMessageHandler {
+    private weak var tab: WebTab?
+    init(tab: WebTab) { self.tab = tab }
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated { tab?.receiveCredential(message) }
     }
 }

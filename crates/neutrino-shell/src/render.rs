@@ -664,7 +664,7 @@ fn browser(s: &Shell, preview: bool) -> Markup {
         @if (s.sidebar_hidden || horizontal || compact) && !preview {(feedback(s))}
         @if flag(&s.config()["layout"],"bookmarksBar") && !s.private() {(crate::views::bookmarks_bar(s))}
         @if !preview {(crate::views::find_bar(s))}
-        div class="page-workspace"{@if strip {(panel_strip(s))}div class="page-frame"{
+        div class="page-workspace"{@if strip {(panel_strip(s))}div class=(if s.snapshot["passwordPrompt"].is_object() && !preview {"page-frame with-prompt"} else {"page-frame"}){@if !preview {(crate::views::password_prompt(s))}
             @if !preview && !["browse","editor"].contains(&s.screen.as_str()) {(utility_page(s))}
             @else if !s.snapshot["session"]["split"].is_null(){div class="split-canvas" data-axis=(text(&s.config()["layout"],"split")) style=(format!("--split:{}",s.config()["layout"]["splitRatio"].as_f64().unwrap_or(0.5).clamp(0.2,0.8))){
                 @for (pane, id) in [&s.snapshot["session"]["split"]["first"],&s.snapshot["session"]["split"]["second"]].into_iter().enumerate() {

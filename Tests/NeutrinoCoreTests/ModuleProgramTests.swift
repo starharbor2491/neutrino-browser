@@ -153,7 +153,7 @@ import Testing
 @Test func everyOfficialDataPackageHasACompleteCompatibleRemovablePayload() throws {
     let root = officialModuleDirectory("org.neutrino.notes").deletingLastPathComponent()
     let directories = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-    #expect(directories.count == 48)
+    #expect(directories.count == 49)
     for directory in directories {
         let manifest = try ModuleManifest.decode(Data(contentsOf: directory.appendingPathComponent("manifest.json")))
         if manifest.capability == .feature {

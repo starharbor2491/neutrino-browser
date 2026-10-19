@@ -929,6 +929,18 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (!page_ || page_!=Active(Group(page_))) return;
     const std::string name = method.ToString();
     auto value = CefDictionaryValue::Create();
+    if (name == "Runtime.bindingCalled") {
+      // Only Neutrino's password binding, which exists solely in its isolated world.
+      if (!params || size > 8192) return;
+      auto parsed = CefParseJSON(std::string(static_cast<const char*>(params),size),JSON_PARSER_RFC);
+      auto dictionary = parsed ? parsed->GetDictionary() : nullptr;
+      if (!dictionary || dictionary->GetString("name") != "neutrinoCredential") return;
+      const std::string payload = dictionary->GetString("payload").ToString();
+      if (payload.empty() || payload.size() > 4096) return;
+      value->SetString("payload",payload);
+      Emit(page_,NEUTRINO_CEF_CREDENTIAL,value);
+      return;
+    }
     if (name == "Runtime.executionContextsCleared") {
       value->SetBool("clear",true);
     } else if (name == "Runtime.executionContextCreated" ||

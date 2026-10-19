@@ -40,6 +40,9 @@ class BrowserEngineTab: NSObject, ObservableObject {
     var blockAds = true
     var blockingExceptions: [String] = []
     var blockingCustom: [String] = []
+    /// A sign-in submitted on the page's own origin: origin, username, password.
+    var onCredential: ((String, String, String) -> Void)? { didSet { if onCredential != nil { installCredentialCapture() } } }
+    func installCredentialCapture() {}
     /// Domains from subscribed filter lists.
     var blockingSubscribed: [String] = []
     /// Called after each page finishes loading, so per-site tools can be reapplied.

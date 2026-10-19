@@ -6615,3 +6615,36 @@ input[type="color"] {
     animation: none;
   }
 }
+
+/* Save-password bar above the page */
+.page-frame.with-prompt .native-page {
+  top: 48px;
+}
+.prompt-bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  z-index: 2;
+  font-size: 13px;
+}
+.prompt-bar > span:first-of-type {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.prompt-bar small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prompt-bar .spacer {
+  flex: 1;
+}

@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt",
 ];
 
 /// Built-in feature modules: key (the module is `org.neutrino.<key>`), group,
@@ -38,6 +38,7 @@ pub const MODULES: &[(&str, &str, &[&str])] = &[
     ("boosts", "Pages", &["arc"]),
     ("cookie-banners", "Pages", &["brave", "vivaldi", "gx", "neutrino"]),
     ("autofill", "Pages", &["*"]),
+    ("password-manager", "Pages", &["*"]),
     ("forget-sites", "Pages", &["brave"]),
     ("web-panels", "Workspace", &["vivaldi", "gx"]),
     ("boards", "Workspace", &["arc", "gx"]),
@@ -1067,6 +1068,11 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 s.notice = format!("{host} uses your standard settings again.");
             }
         }
+        "password-prompt" => {
+            if ["save", "never", "dismiss"].contains(&value) && s.snapshot["passwordPrompt"].is_object() {
+                commands.push(json!({"op":"passwordPrompt","value":value}));
+            }
+        }
         "filter-list" => {
             if !regular {
                 return;
@@ -1231,6 +1237,9 @@ pub fn page_script(r: &Value) -> Option<String> {
             format!("(()=>{{const id='neutrino-page-style';let s=document.getElementById(id);const css={};if(!css){{s?.remove();return 'none'}}if(!s){{s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s)}}if(s.textContent!==css)s.textContent=css;return 'applied'}})()", quote(&css))
         }
         "mute" => format!("(()=>{{const m={};window.__neutrinoMuted=m;const all=()=>document.querySelectorAll('video,audio').forEach(e=>{{if(m)e.muted=true;else if(e.dataset.neutrinoMuted)e.muted=false;if(m)e.dataset.neutrinoMuted='1';else delete e.dataset.neutrinoMuted}});all();if(!window.__neutrinoMuteObserver){{window.__neutrinoMuteObserver=true;document.addEventListener('play',e=>{{if(window.__neutrinoMuted&&e.target instanceof HTMLMediaElement){{e.target.muted=true;e.target.dataset.neutrinoMuted='1'}}}},true)}}return String(m)}})()", flag(r, "value")),
+        // Reports a submitted sign-in to Neutrino from its own isolated world, so the
+        // page can't call the reporter. WebKit uses a message handler, Chromium a binding.
+        "credentialCapture" => "(()=>{if(window.__neutrinoCredentials||window.top!==window)return 'off';window.__neutrinoCredentials=true;const send=o=>{try{if(window.webkit&&webkit.messageHandlers&&webkit.messageHandlers.neutrinoCredential)webkit.messageHandlers.neutrinoCredential.postMessage(o);else if(typeof neutrinoCredential==='function')neutrinoCredential(JSON.stringify(o))}catch(_){}};let last='';const capture=form=>{const root=form||document;const pw=[...root.querySelectorAll('input[type=password]')].find(i=>i.value);if(!pw)return;const inputs=[...(pw.form||root).querySelectorAll('input')];let user='';for(let i=inputs.indexOf(pw)-1;i>=0;i--){const t=(inputs[i].type||'text').toLowerCase();if(['text','email','tel'].includes(t)&&inputs[i].value){user=inputs[i].value;break}}if(!user){const u=document.querySelector('input[autocomplete=username],input[type=email]');user=(u&&u.value)||''}const key=user+'\\n'+pw.value;if(key===last)return;last=key;send({origin:location.origin,username:user.slice(0,200),password:pw.value.slice(0,500)})};addEventListener('submit',e=>capture(e.target),true);addEventListener('click',e=>{const b=e.target&&e.target.closest&&e.target.closest('button,input[type=submit],[role=button]');if(b&&(b.form||document).querySelector('input[type=password]'))setTimeout(()=>capture(b.form),0)},true);addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target&&e.target.form&&e.target.form.querySelector('input[type=password]'))capture(e.target.form)},true);return 'on'})()".into(),
         // WebKit content rules don't report matches, so count the page's
         // third-party resources from blocked domains: an estimate of what was blocked.
         "blockedCount" => {

@@ -47,6 +47,8 @@ final class BrowserModel: ObservableObject {
         focusMode = false
     }
     @Published var sheet: BrowserSheet?
+    /// The window's feature host, for engine callbacks such as a submitted sign-in.
+    weak var features: BrowserFeatures?
     private struct ClosedTabContext: Hashable { let profileID: UUID; let spaceID: UUID? }
     private var closedTabStacks: [ClosedTabContext: [BrowserTab]] = [:]
     var closedTabs: [BrowserTab] {
@@ -247,6 +249,10 @@ final class BrowserModel: ObservableObject {
             var settings = self.app.library.preferences.siteSettings?[site] ?? SiteSettings()
             if kind == "camera" { settings.camera = decision } else { settings.microphone = decision }
             self.app.library.preferences.siteSettings = (self.app.library.preferences.siteSettings ?? [:]).merging([site: settings]) { $1 }
+        }
+        tab.onCredential = isPrivate ? nil : { [weak self] origin, username, password in
+            guard let self, !self.isPrivate, self.app.feature("password-manager") else { return }
+            self.features?.offerToSave(origin: origin, username: username, password: password, profileID: self.session.profileID)
         }
         tab.onPeek = { [weak self] url in
             guard let self, self.app.feature("peek") else { return false }

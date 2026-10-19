@@ -273,6 +273,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         }
         model?.shellAction = { [weak self] request in self?.sendAction(request) }
         model?.stopInterface = { [weak self] in await self?.stopAndWait() }
+        model?.features = features
         features.start()
         chrome.load(URLRequest(url: URL(string: "neutrino-ui://shell/index.html")!))
     }

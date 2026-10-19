@@ -797,6 +797,21 @@ pub fn privacy_extra(s: &Shell) -> Markup {
     }
 }
 
+/// Asks to save a password after a sign-in, above the page so nothing covers it.
+pub fn password_prompt(s: &Shell) -> Markup {
+    let p = &s.snapshot["passwordPrompt"];
+    html! {@if p.is_object() {
+        div class="prompt-bar" role="alertdialog" aria-label="Save password"{
+            (icon("key"))
+            span{strong{(if flag(p, "update") {"Update the saved password for "} else {"Save password for "})(host(text(p, "origin")))"?"}@if !text(p, "username").is_empty() {small{(text(p, "username"))}}}
+            span class="spacer"{}
+            button class="button quiet" data-op="password-prompt" data-value="never"{"Never for this site"}
+            button class="button quiet" data-op="password-prompt" data-value="dismiss"{"Not now"}
+            button class="button primary" data-op="password-prompt" data-value="save"{(if flag(p, "update") {"Update"} else {"Save"})}
+        }
+    }}
+}
+
 /// Subscribed filter lists: the common ones, then any added by address.
 fn filter_lists(s: &Shell) -> Markup {
     let lists = array(&prefs(s)["filterLists"]);
