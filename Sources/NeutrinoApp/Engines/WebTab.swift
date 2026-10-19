@@ -36,13 +36,17 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     override func installCredentialCapture() {
         guard !credentialCaptureInstalled, !disposed, let source = PageScript.source("credentialCapture") else { return }
         credentialCaptureInstalled = true
-        let world = WKContentWorld.world(name: "org.neutrino.passwords")
+        CredentialMessages.tabs.setObject(self, forKey: webView)
+        // A popup shares its opener's content controller, which may already report sign-ins.
         let controller = webView.configuration.userContentController
+        guard !CredentialMessages.controllers.contains(controller) else { return }
+        CredentialMessages.controllers.add(controller)
+        let world = WKContentWorld.world(name: "org.neutrino.passwords")
         controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
-        controller.add(CredentialMessages(tab: self), contentWorld: world, name: "neutrinoCredential")
+        controller.add(CredentialMessages(), contentWorld: world, name: "neutrinoCredential")
     }
     fileprivate func receiveCredential(_ message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any],
+        guard message.frameInfo.isMainFrame, message.webView === webView, let body = message.body as? [String: Any],
               let origin = body["origin"] as? String, let username = body["username"] as? String, let password = body["password"] as? String,
               !password.isEmpty, let url = webView.url, (try? LocalCredential.origin(for: url)) == origin else { return }
         onCredential?(origin, String(username.prefix(500)), String(password.prefix(8192)))
@@ -542,10 +546,14 @@ enum RuleListCache {
 }
 
 /// Forwards sign-in messages without the content controller keeping the tab alive.
+/// Reports sign-ins to the tab whose page sent them; one handler serves each content controller.
 private final class CredentialMessages: NSObject, WKScriptMessageHandler {
-    private weak var tab: WebTab?
-    init(tab: WebTab) { self.tab = tab }
+    @MainActor static let controllers = NSHashTable<WKUserContentController>.weakObjects()
+    @MainActor static let tabs = NSMapTable<WKWebView, WebTab>.weakToWeakObjects()
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        MainActor.assumeIsolated { tab?.receiveCredential(message) }
+        MainActor.assumeIsolated {
+            guard let webView = message.webView else { return }
+            Self.tabs.object(forKey: webView)?.receiveCredential(message)
+        }
     }
 }
