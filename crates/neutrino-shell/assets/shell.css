@@ -1238,12 +1238,14 @@ li.done .guide-check {
   flex: 1 0 8px;
   align-self: stretch;
 }
+/* Groups only mark membership; their tabs, labels and buttons size together in
+   the scroller, so tabs shrink evenly and labels never overlap their neighbours. */
 .horizontal-group {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  min-width: 0;
-  flex: 0 1 auto;
+  display: contents;
+}
+.horizontal-group-label,
+.horizontal-group > .folder-options {
+  flex: none;
 }
 .horizontal-group[data-drop-group="today"] {
   flex: 1 1 auto;
@@ -1325,10 +1327,22 @@ li.done .guide-check {
 .bookmarks-bar {
   display: flex;
   gap: 4px;
-  overflow: auto;
+  overflow: hidden;
   min-height: 32px;
   flex: none;
   padding: 0 8px 4px;
+}
+.bar-items {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.bar-overflow {
+  flex: none;
 }
 .bookmarks-bar button {
   min-height: 28px;
@@ -3420,6 +3434,9 @@ li.done .guide-check {
 }
 .menu-item span {
   flex: 1;
+}
+.menu-item .site-icon {
+  flex: none;
 }
 .menu-item kbd {
   margin-left: auto;

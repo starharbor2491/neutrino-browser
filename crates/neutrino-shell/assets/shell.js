@@ -443,11 +443,27 @@
     announce(result.announce);
     patching = false;
     revealActiveTab();
+    updateBookmarkOverflow();
     updateClocks();
     applySchedule();
     updateSounds();
     scalePreview();
     scheduleGeometry();
+  }
+  // The bookmarks bar shows what fits; » opens a menu with the rest, as in Chrome and Vivaldi.
+  function updateBookmarkOverflow() {
+    for (const bar of root.querySelectorAll(".bookmarks-bar")) {
+      const list = bar.querySelector(".bar-items"), more = bar.querySelector(".bar-overflow");
+      if (!list || !more) continue;
+      const items = [...list.children];
+      const overflow = () => items.findIndex((e) => e.offsetLeft + e.offsetWidth > list.clientWidth + 1);
+      more.hidden = true;
+      let first = overflow();
+      // Showing » narrows the list, so measure again with it in place.
+      if (first >= 0) { more.hidden = false; first = overflow(); }
+      items.forEach((e, i) => { e.style.visibility = first >= 0 && i >= first ? "hidden" : ""; });
+      more.dataset.value = "bm-overflow:" + Math.max(0, first);
+    }
   }
   // Keep the selected tab visible after it changes, in the sidebar and in tab strips.
   function revealActiveTab() {
@@ -749,6 +765,7 @@
     tracking = requestAnimationFrame(step);
   });
   window.addEventListener("resize", scheduleGeometry);
+  window.addEventListener("resize", updateBookmarkOverflow);
   function dataRequest(el) {
     const r = { op: el.dataset.op };
     for (const [key, value] of Object.entries(el.dataset)) {

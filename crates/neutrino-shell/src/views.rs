@@ -369,6 +369,14 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
                 div class="button-row"{button class="button" type="button" data-op="native" data-action="removeBookmark" data-id=(id){"Delete"}button class="button primary" type="submit"{"Save"}}
             }}
         }
+        m if m.starts_with("bm-overflow:") => {
+            let first: usize = m[12..].parse().unwrap_or(0);
+            let (loose, folders) = bar_entries(s);
+            html! {
+                @for b in loose.iter().skip(first) {(bar_entry(Some(b), None, "menu-item"))}
+                @for f in folders.iter().skip(first.saturating_sub(loose.len())) {(bar_entry(None, Some(f), "menu-item"))}
+            }
+        }
         m if m.starts_with("bm-folder:") => {
             let folder = &m[10..];
             html! {
@@ -435,14 +443,31 @@ fn bookmark_folders(s: &Shell) -> Vec<String> {
 }
 
 /// Chrome-style bookmarks bar: loose bookmarks, then folders as menus.
-pub fn bookmarks_bar(s: &Shell) -> Markup {
+/// What the bookmarks bar holds, in order: loose bookmarks, then folders.
+fn bar_entries(s: &Shell) -> (Vec<&Value>, Vec<String>) {
     let index = array(&s.snapshot["bookmarkIndex"]);
-    let loose: Vec<&Value> = index.iter().filter(|b| ["", "Bookmarks bar"].contains(&text(b, "folder"))).take(24).collect();
+    let loose: Vec<&Value> = index.iter().filter(|b| ["", "Bookmarks bar"].contains(&text(b, "folder"))).take(60).collect();
     let folders: Vec<String> = folder_children(s, "").into_iter().filter(|f| f != "Bookmarks bar").collect();
+    (loose, folders)
+}
+fn bar_entry(b: Option<&Value>, folder: Option<&String>, class: &str) -> Markup {
+    html! {
+        @if let Some(b) = b {button class=(class) data-op="navigate" data-value=(text(b,"url")) title=(text(b,"url")){(site(b))span{(text(b,"title"))}}}
+        @if let Some(f) = folder {button class=(class) data-op="menu" data-value=(format!("bm-folder:{f}")){(icon("folder"))span{(folder_name(f))}}}
+    }
+}
+pub fn bookmarks_bar(s: &Shell) -> Markup {
+    let (loose, folders) = bar_entries(s);
     html! {nav class="bookmarks-bar" aria-label="Bookmarks bar"{
         @if loose.is_empty() && folders.is_empty() {span class="bar-empty"{"Press ⌘D to bookmark a page and it appears here."}button class="button quiet" data-op="importBookmarks"{"Import bookmarks"}}
-        @for b in loose {button class="bar-item" data-op="navigate" data-value=(text(b,"url")) title=(text(b,"url")){(site(b))span{(text(b,"title"))}}}
-        @for f in folders {button class="bar-item" data-op="menu" data-value=(format!("bm-folder:{f}")){(icon("folder"))span{(f)}}}
+        @else {
+            div class="bar-items"{
+                @for b in &loose {(bar_entry(Some(b), None, "bar-item"))}
+                @for f in &folders {(bar_entry(None, Some(f), "bar-item"))}
+            }
+            // Shown by the interface script when items don't fit, as Chrome's and Vivaldi's » menus are.
+            button class="bar-item bar-overflow" data-op="menu" data-value="bm-overflow:0" hidden aria-label="More bookmarks" title="More bookmarks"{"»"}
+        }
     }}
 }
 
