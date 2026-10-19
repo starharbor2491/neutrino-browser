@@ -8,18 +8,37 @@ use std::path::{Path, PathBuf};
 const MAX_BOOKMARKS: usize = 20_000;
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// The bookmarks file of a Chromium-family browser's default profile, under ~/Library.
-fn chromium_bookmarks(source: &str) -> Option<&'static str> {
+/// A Chromium-family browser's data folder, under ~/Library.
+fn chromium_root(source: &str) -> Option<&'static str> {
     Some(match source {
-        "chrome" => "Library/Application Support/Google/Chrome/Default/Bookmarks",
-        "edge" => "Library/Application Support/Microsoft Edge/Default/Bookmarks",
-        "brave" => "Library/Application Support/BraveSoftware/Brave-Browser/Default/Bookmarks",
-        "arc" => "Library/Application Support/Arc/User Data/Default/Bookmarks",
-        "vivaldi" => "Library/Application Support/Vivaldi/Default/Bookmarks",
-        "opera" => "Library/Application Support/com.operasoftware.Opera/Bookmarks",
-        "operagx" => "Library/Application Support/com.operasoftware.OperaGX/Bookmarks",
+        "chrome" => "Library/Application Support/Google/Chrome",
+        "edge" => "Library/Application Support/Microsoft Edge",
+        "brave" => "Library/Application Support/BraveSoftware/Brave-Browser",
+        "arc" => "Library/Application Support/Arc/User Data",
+        "vivaldi" => "Library/Application Support/Vivaldi",
+        "opera" => "Library/Application Support/com.operasoftware.Opera",
+        "operagx" => "Library/Application Support/com.operasoftware.OperaGX",
         _ => return None,
     })
+}
+
+/// The profile folder the browser last used, from its `Local State`, or `Default`.
+/// Opera keeps its one profile at the top of its folder.
+fn chromium_profile(source: &str, home: &Path) -> Option<PathBuf> {
+    let root = home.join(chromium_root(source)?);
+    if source == "opera" || source == "operagx" {
+        return Some(root);
+    }
+    let last = std::fs::metadata(root.join("Local State"))
+        .ok()
+        .filter(|m| m.len() <= 8 * 1024 * 1024)
+        .and_then(|_| std::fs::read(root.join("Local State")).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|state| state["profile"]["last_used"].as_str().map(str::to_string));
+    let name = last
+        .filter(|n| !n.is_empty() && n.len() <= 64 && !n.contains(['/', '\\']) && n != "." && n != ".." && root.join(n).is_dir())
+        .unwrap_or_else(|| "Default".into());
+    Some(root.join(name))
 }
 
 fn web(url: &str) -> bool {
@@ -131,8 +150,7 @@ pub fn history(source: &str, home: &str) -> Result<Value, &'static str> {
             |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, f64>(2)?)))
             .map_err(|_| "macOS protects Safari’s history. Allow Neutrino in System Settings → Privacy & Security → Full Disk Access, then import again.")?,
         _ => {
-            let bookmarks = chromium_bookmarks(source).ok_or("Importing from that browser isn’t supported.")?;
-            let history = home.join(bookmarks).with_file_name("History");
+            let history = chromium_profile(source, home).ok_or("Importing from that browser isn’t supported.")?.join("History");
             // Chromium counts microseconds from 1601-01-01.
             query_copy(&history, "SELECT url, COALESCE(title, ''), last_visit_time FROM urls WHERE last_visit_time > 0 ORDER BY last_visit_time DESC LIMIT 5000",
                 |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as f64 / 1e6 - 11_644_473_600.0 - REFERENCE)))?
@@ -151,8 +169,8 @@ pub fn bookmarks(source: &str, home: &str) -> Result<Value, &'static str> {
         let places = firefox_places(home).ok_or("Firefox bookmarks weren’t found on this Mac.")?;
         return Ok(json!(parse_firefox(&places)?));
     }
-    let relative = chromium_bookmarks(source).ok_or("Importing from that browser isn’t supported.")?;
-    let document: Value = serde_json::from_slice(&read_bounded(&home.join(relative))?)
+    let profile = chromium_profile(source, home).ok_or("Importing from that browser isn’t supported.")?;
+    let document: Value = serde_json::from_slice(&read_bounded(&profile.join("Bookmarks"))?)
         .map_err(|_| "That browser’s bookmarks file couldn’t be read.")?;
     Ok(json!(parse_chromium(&document)))
 }
@@ -166,8 +184,7 @@ pub fn logins(source: &str, home: &str) -> Result<Value, &'static str> {
     if !home.is_absolute() {
         return Err("Invalid home folder.");
     }
-    let relative = chromium_bookmarks(source).ok_or("Importing passwords from that browser isn’t supported.")?;
-    let path = home.join(relative).with_file_name("Login Data");
+    let path = chromium_profile(source, home).ok_or("Importing passwords from that browser isn’t supported.")?.join("Login Data");
     let copy = std::env::temp_dir().join(format!("neutrino-logins-{}.sqlite", std::process::id()));
     std::fs::write(&copy, read_bounded(&path).map_err(|_| "That browser’s saved passwords weren’t found on this Mac.")?)
         .map_err(|_| "That browser’s saved passwords couldn’t be copied for import.")?;
@@ -235,6 +252,26 @@ mod tests {
         assert_eq!(found[0]["title"], "A");
         assert!(bookmarks("chrome", home.to_str().unwrap()).is_err());
         assert!(bookmarks("vivaldi", "relative/home").is_err());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn reads_the_profile_the_browser_last_used() {
+        let home = std::env::temp_dir().join(format!("neutrino-import-profile-{}", std::process::id()));
+        let root = home.join("Library/Application Support/Google/Chrome");
+        for (profile, title) in [("Default", "Home"), ("Profile 2", "Work")] {
+            std::fs::create_dir_all(root.join(profile)).unwrap();
+            std::fs::write(root.join(profile).join("Bookmarks"), format!(r#"{{"roots":{{"bookmark_bar":{{"type":"folder","children":[{{"type":"url","name":"{title}","url":"https://a.example/"}}]}}}}}}"#)).unwrap();
+        }
+        let read = || bookmarks("chrome", home.to_str().unwrap()).unwrap()[0]["title"].clone();
+        assert_eq!(read(), "Home");
+        std::fs::write(root.join("Local State"), r#"{"profile":{"last_used":"Profile 2"}}"#).unwrap();
+        assert_eq!(read(), "Work");
+        // A name that leaves the browser's folder, or a missing profile, falls back to Default.
+        std::fs::write(root.join("Local State"), r#"{"profile":{"last_used":"../../.."}}"#).unwrap();
+        assert_eq!(read(), "Home");
+        std::fs::write(root.join("Local State"), r#"{"profile":{"last_used":"Profile 9"}}"#).unwrap();
+        assert_eq!(read(), "Home");
         std::fs::remove_dir_all(home).unwrap();
     }
 
