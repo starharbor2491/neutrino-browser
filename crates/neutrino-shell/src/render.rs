@@ -268,16 +268,22 @@ pub(crate) fn space_mark(space: &Value) -> String {
     let emoji = text(space, "emoji");
     if emoji.is_empty() { text(space, "name").chars().next().unwrap_or('S').to_string() } else { emoji.chars().take(2).collect() }
 }
+/// Built-in toolbar buttons Customize can remove, as Vivaldi's toolbar editor can.
+pub(crate) const REMOVABLE_BUTTONS: &[(&str, &str)] = &[("forward", "Forward"), ("reload", "Reload"), ("bookmark", "Bookmark")];
+pub(crate) fn button_hidden(s: &Shell, key: &str) -> bool {
+    array(&s.config()["layout"]["hiddenButtons"]).iter().any(|v| v.as_str() == Some(key))
+}
 pub(crate) fn rail_navigation(s: &Shell) -> Markup {
     html! {div class="rail-navigation" {
-        button class="icon-button" data-op="back" title="Back" aria-label="Back" disabled[!flag(&s.snapshot,"canGoBack")]{(icon("back"))}button class="icon-button" data-op="forward" title="Forward" aria-label="Forward" disabled[!flag(&s.snapshot,"canGoForward")]{(icon("forward"))}
+        button class="icon-button" data-op="back" title="Back" aria-label="Back" disabled[!flag(&s.snapshot,"canGoBack")]{(icon("back"))}
+        @if !button_hidden(s, "forward") {button class="icon-button" data-op="forward" title="Forward" aria-label="Forward" disabled[!flag(&s.snapshot,"canGoForward")]{(icon("forward"))}}
         // Vivaldi's toolbar has Rewind (the site's first page) and Fast Forward (its next page).
         @if style(s) == "vivaldi" && crate::features::on(s, "fast-forward") {
             @let blank = text(s.active(), "url").is_empty();
             button class="icon-button" data-op="page-command" data-value="rewind" title="Rewind" aria-label="Rewind" disabled[blank]{(icon("rewind"))}
             button class="icon-button" data-op="page-command" data-value="fast-forward" title="Fast Forward" aria-label="Fast Forward" disabled[blank]{(icon("fast-forward"))}
         }
-        (button(if flag(&s.snapshot,"loading"){"Stop loading"}else{"Reload page"},if flag(&s.snapshot,"loading"){"stop"}else{"reload"},if flag(&s.snapshot,"loading"){"close"}else{"reload"}))
+        @if !button_hidden(s, "reload") || flag(&s.snapshot,"loading") {(button(if flag(&s.snapshot,"loading"){"Stop loading"}else{"Reload page"},if flag(&s.snapshot,"loading"){"stop"}else{"reload"},if flag(&s.snapshot,"loading"){"close"}else{"reload"}))}
     }}
 }
 pub(crate) fn location(s: &Shell) -> Markup {
@@ -536,7 +542,7 @@ fn page_actions(s: &Shell, style: &str) -> Markup {
         @if inline {(module_tools(s))}
         @for item in items {(toolbar_item(s, item, blank))}
         @if focus {button class="button focus-exit" data-op="native" data-action="toggleFocus" aria-label="Exit Focus mode"{(icon("focus"))"Exit Focus"}}
-        @if !["chrome", "brave", "safari"].contains(&style) {(bookmark_button(s))}
+        @if !["chrome", "brave", "safari"].contains(&style) && !button_hidden(s, "bookmark") {(bookmark_button(s))}
         @if style == "safari" {button class="icon-button" data-op="newTab" title="New tab (⌘T)" aria-label="New tab"{(icon("plus"))}}
         button class="icon-button" data-op="menu" data-value="page" title=(if blank {"Page options: open a page first"} else {"Page options"}) aria-label="Page options"{(icon("more"))}
         @if ["chrome", "brave", "gx"].contains(&style) {
@@ -632,7 +638,8 @@ fn toolbar(s: &Shell, style: &str, horizontal: bool, panel: bool) -> Markup {
             @let open = s.visible_panel_key() == "safari";
             button class=(if open {"icon-button selected"} else {"icon-button"}) data-op="panel" data-value="safari" title=(if open {"Hide sidebar"} else {"Show sidebar"}) aria-label=(if open {"Hide sidebar"} else {"Show sidebar"}) aria-pressed=(open.to_string()){(icon("sidebar"))}
         }
-        div class="toolbar-controls"{(rail_navigation(s))@if style == "vivaldi" {(button("Start page","home","home"))}}
+        // Vivaldi's own Home button, unless the person added Start page among the extra buttons.
+        div class="toolbar-controls"{(rail_navigation(s))@if style == "vivaldi" && !array(&s.config()["layout"]["toolbarItems"]).iter().any(|i| i == "home") {(button("Start page","home","home"))}}
         @if !horizontal && (s.sidebar_hidden || panel) { (button(if panel{"Return to tabs"}else{"Show sidebar"},if panel{"reveal-workspace"}else{"sidebar"},"sidebar")) }
         span class="toolbar-drag" data-window-drag="true"{}
         @if horizontal {(address(s, style))}
@@ -1014,6 +1021,24 @@ fn editor_extra(s: &Shell) -> Markup {
                 @let next: Vec<&str> = if on { items.iter().copied().filter(|i| i != key).collect() } else { items.iter().copied().chain([*key]).collect() };
                 button class=(if on {"toolbar-choice selected"} else {"toolbar-choice"}) data-op="editor-value" data-key="toolbarItems" data-json=(serde_json::to_string(&next).unwrap_or_default()) aria-pressed=(on.to_string()){(icon(glyph))span{(label)}}
             }}
+            @if items.len() > 1 {
+                p class="control-label"{"Order"}
+                div class="toolbar-order"{@for (i, key) in items.iter().enumerate() {
+                    @let label = TOOLBAR_ITEMS.iter().find(|t| t.0 == *key).map(|t| t.1).unwrap_or(key);
+                    @let swap = |a: usize, b: usize| { let mut next = items.clone(); next.swap(a, b); serde_json::to_string(&next).unwrap_or_default() };
+                    div class="toolbar-order-row"{span{(label)}
+                        button class="icon-button" data-op="editor-value" data-key="toolbarItems" data-json=(swap(i, i.saturating_sub(1))) disabled[i == 0] aria-label=(format!("Move {label} earlier")) title="Move earlier"{(icon("back"))}
+                        button class="icon-button" data-op="editor-value" data-key="toolbarItems" data-json=(swap(i, (i + 1).min(items.len() - 1))) disabled[i + 1 == items.len()] aria-label=(format!("Move {label} later")) title="Move later"{(icon("forward"))}
+                    }
+                }}
+            }
+            p class="control-label"{"Built-in buttons"}
+            @for (key, label) in REMOVABLE_BUTTONS {
+                @let hidden: Vec<&str> = array(&layout["hiddenButtons"]).iter().filter_map(Value::as_str).collect();
+                @let shown = !hidden.contains(key);
+                @let next: Vec<&str> = if shown { hidden.iter().copied().chain([*key]).collect() } else { hidden.iter().copied().filter(|h| h != key).collect() };
+                button class="toggle-row" data-op="editor-value" data-key="hiddenButtons" data-json=(serde_json::to_string(&next).unwrap_or_default()) role="switch" aria-checked=(shown.to_string()){span{(label)}span class=(if shown {"switch on"} else {"switch"}){span{}}}
+            }
             @for (key, label) in [("panelBar","Panel bar"),("statusBar","Status bar"),("compactRail","Icon-only sidebar")] {button class="toggle-row" data-op="editor-value" data-key=(key) data-value=((!flag(layout,key)).to_string()) data-type="bool" role="switch" aria-checked=(flag(layout,key).to_string()){span{(label)}span class=(if flag(layout,key){"switch on"}else{"switch"}){span{}}}}
             label class="control-label"{"Split view"}(segments("editor-value","split",if text(layout,"split").is_empty(){"sideBySide"}else{text(layout,"split")},&[("sideBySide","Side by side"),("stacked","Stacked")]))
         }

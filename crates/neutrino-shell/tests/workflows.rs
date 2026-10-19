@@ -504,6 +504,21 @@ fn a_payment_form_offers_saved_cards() {
     assert!(!html.contains("Fill a saved card"));
 }
 #[test]
+fn customize_reorders_toolbar_buttons_and_removes_built_ins() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-value","key":"toolbarItems","value":["home","reader","capture"]}));
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Move Reader view earlier") && html.contains(r#"data-json="[&quot;reader&quot;,&quot;home&quot;,&quot;capture&quot;]""#));
+    s.dispatch(json!({"op":"editor-value","key":"hiddenButtons","value":["reload","forward"]}));
+    assert!(commands(&s.dispatch(json!({"op":"editor-value","key":"hiddenButtons","value":["back"]}))).is_empty());
+    assert_eq!(s.draft.as_ref().unwrap()["layout"]["hiddenButtons"], json!(["reload","forward"]));
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    let preview = &html[html.find("rail-navigation").unwrap()..];
+    let nav = &preview[..preview.find("</div>").unwrap()];
+    assert!(nav.contains(r#"data-op="back""#) && !nav.contains(r#"data-op="reload""#) && !nav.contains(r#"data-op="forward""#));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

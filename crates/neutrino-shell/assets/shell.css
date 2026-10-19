@@ -5628,6 +5628,25 @@ input[type="color"] {
 .theme-chip.selected {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--chip);
 }
+.toolbar-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.toolbar-order-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding-left: 8px;
+  border-radius: calc(7px * var(--sq));
+  background: var(--hover);
+}
+.toolbar-order-row span {
+  flex: 1;
+  font-size: 13px;
+}
 .toolbar-choices {
   display: grid;
   grid-template-columns: 1fr 1fr;

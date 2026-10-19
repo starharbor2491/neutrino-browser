@@ -243,6 +243,8 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
     public var pageTools: String?
     /// Extra toolbar buttons chosen in Customize.
     public var toolbarItems: [String]?
+    /// Built-in toolbar buttons the person removed: "forward", "reload", "bookmark".
+    public var hiddenButtons: [String]?
     /// The first split pane's share of the window, from 0.2 to 0.8.
     public var splitRatio: Double?
     /// The tab sidebar shows site icons only.

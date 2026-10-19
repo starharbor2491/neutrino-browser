@@ -1211,7 +1211,7 @@ impl Shell {
             | "cornerRadius" | "fontScale" | "spacingScale" | "typography" | "transparency"
             | "borderWidth" | "shadowStrength" | "accentHex" | "surfaceHex" | "textHex" => "theme",
             "tabsWidth" | "treeTabs" | "bookmarksBar" | "sidebarWidth" | "secondaryPanel" | "toolbarItems"
-            | "panelBar" | "statusBar" | "split" | "compactRail" => "layout",
+            | "panelBar" | "statusBar" | "split" | "compactRail" | "hiddenButtons" => "layout",
             _ => return,
         };
         let valid = match key {
@@ -1238,6 +1238,7 @@ impl Shell {
             ]
             .contains(&v.as_str().unwrap_or("")),
             "toolbarItems" => v.as_array().is_some_and(|items| items.len() <= 14 && items.iter().all(|i| crate::render::TOOLBAR_ITEMS.iter().any(|t| Some(t.0) == i.as_str()))),
+            "hiddenButtons" => v.as_array().is_some_and(|items| items.iter().all(|i| crate::render::REMOVABLE_BUTTONS.iter().any(|b| Some(b.0) == i.as_str()))),
             "split" => ["sideBySide", "stacked"].contains(&v.as_str().unwrap_or("")),
             "cornerRadius" => v.as_f64().is_some_and(|n| (0.0..=24.0).contains(&n)),
             "fontScale" => v.as_f64().is_some_and(|n| (0.85..=1.4).contains(&n)),
