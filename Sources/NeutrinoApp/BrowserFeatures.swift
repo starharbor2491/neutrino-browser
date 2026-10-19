@@ -21,6 +21,8 @@ final class BrowserFeatures {
     private(set) var siteData: [[String: String]]?
     /// Card summaries for the interface, read from Keychain when they change.
     private var cards: (profileID: UUID, list: [[String: String]])?
+    /// The tab whose page showed a payment form, to offer a saved card above it.
+    private var cardOffer: UUID?
     /// Small pictures of tabs' pages for hover previews, taken while each tab was showing.
     private var thumbnails: [UUID: NSImage] = [:]
     /// The address each Chromium thumbnail shows; Chromium pages are pictured once per page.
@@ -114,6 +116,7 @@ final class BrowserFeatures {
         if !model.isPrivate {
             if cards?.profileID != model.session.profileID { cards = (model.session.profileID, LocalCard.list(profile: model.session.profileID).map(\.summary)) }
             snapshot["cards"] = cards?.list ?? []
+            if cardOffer == model.session.selectedTabID { snapshot["cardOffer"] = true }
         }
         if let prompt = passwordPrompt, prompt.profileID == model.session.profileID {
             snapshot["passwordPrompt"] = ["origin": prompt.credential.origin, "username": prompt.credential.username, "update": prompt.update]
@@ -203,6 +206,16 @@ final class BrowserFeatures {
             blockedSeen[id] = total
         }
         if added > 0 { app.library.preferences.blockedLifetime = min(Int.max / 2, (app.library.preferences.blockedLifetime ?? 0) + added) }
+    }
+    /// After a page loads: offers saved cards when it shows a payment form.
+    func checkCardForm(_ tab: BrowserEngineTab, id: UUID, profileID: UUID) {
+        if cardOffer == id { cardOffer = nil; refresh() }
+        if cards?.profileID != profileID { cards = (profileID, LocalCard.list(profile: profileID).map(\.summary)) }
+        guard !(cards?.list.isEmpty ?? true), let url = tab.url, url.scheme == "https", let script = PageScript.source("cardForm") else { return }
+        Task { @MainActor [weak self] in
+            guard (try? await tab.runPageScript(script)) == "1", tab.url == url, let self else { return }
+            self.cardOffer = id; self.refresh()
+        }
     }
     /// A media key: toggles the page that is playing or was last paused.
     fileprivate func mediaKey(play: Bool?) {
@@ -797,7 +810,10 @@ final class BrowserFeatures {
             guard regular, let raw = command["id"] as? String, UUID(uuidString: raw) != nil else { break }
             app.perform { try SecureVault.delete(account: raw, service: LocalCard.service(profileID)) }
             cards = nil
+        case "cardOfferDismiss":
+            cardOffer = nil
         case "fillCard":
+            cardOffer = nil
             guard regular, let model, let raw = command["id"] as? String,
                   let card = LocalCard.list(profile: profileID).first(where: { $0.id == raw }),
                   let script = PageScript.source("fillCard", ["card": ["name": card.name, "number": card.number, "month": card.month, "year": card.year]]) else { break }
@@ -1181,6 +1197,7 @@ extension BrowserModel {
             Task { _ = try? await tab.runPageScript("(()=>{try{" + js + "\n}catch(e){};return 'ok'})()") }
         }
         if !isPrivate { features?.autofill(tab, profileID: session.profileID) }
+        if !isPrivate, app.feature("autofill") { features?.checkCardForm(tab, id: id, profileID: session.profileID) }
         if app.feature("spatial-navigation"), let script = PageScript.source("spatialNavigation") { Task { _ = try? await tab.runPageScript(script) } }
         if app.feature("fingerprinting"), let script = FingerprintProtection.script(exceptions: preferences.shieldsDown ?? []) { tab.installFingerprintProtection(script) }
         if app.feature("feeds"), !isPrivate, let url = tab.url, let script = PageScript.source("feedLink") {

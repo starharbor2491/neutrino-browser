@@ -1226,6 +1226,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 commands.push(json!({"op":"fillCard","id":r["id"]}));
                 s.menu.clear();
             }
+            "dismiss-offer" => commands.push(json!({"op":"cardOfferDismiss"})),
             _ => {}
         },
         "feed" => {
@@ -1491,6 +1492,8 @@ pub fn page_script(r: &Value) -> Option<String> {
         // The RSS or Atom feed a page advertises in its head, or "".
         // Brave's De-AMP: an AMP page's own canonical article, when it names one elsewhere.
         "deAmp" => "(()=>{const h=document.documentElement;if(!h||!(h.hasAttribute('amp')||h.hasAttribute('\\u26a1')))return '';const l=document.querySelector('link[rel~=canonical][href]');if(!l)return '';const c=new URL(l.href,location.href);return /^https?:$/.test(c.protocol)&&c.href!==location.href?c.href:''})()".into(),
+        // A visible payment-card field on a secure page, so Neutrino can offer a saved card.
+        "cardForm" => "(()=>{if(location.protocol!=='https:')return '';const f=document.querySelector('input[autocomplete~=cc-number],input[name*=cardnumber i],input[id*=cardnumber i],input[name*=card_number i],input[id*=card-number i]');if(!f)return '';const r=f.getBoundingClientRect();return r.width>0&&r.height>0?'1':''})()".into(),
         "feedLink" => "(()=>{const l=document.querySelector('link[rel~=alternate][href][type=\"application/rss+xml\"],link[rel~=alternate][href][type=\"application/atom+xml\"]');return l&&/^https?:/.test(l.href)?l.href:''})()".into(),
         // Vivaldi's Fast Forward: the next page in a series, or "".
         "nextPage" => "(()=>{const a=document.querySelector('link[rel~=next][href],a[rel~=next][href]');if(a)return a.href;const words=/^(next|next page|older|older posts|more|weiter|suivant|siguiente|›|»|>|→)$/i;for(const e of document.querySelectorAll('a[href]')){const t=(e.innerText||e.getAttribute('aria-label')||'').trim();if(t.length<20&&words.test(t)&&!e.href.startsWith('javascript:'))return e.href}return ''})()".into(),

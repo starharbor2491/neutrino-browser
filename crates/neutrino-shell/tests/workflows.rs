@@ -490,6 +490,20 @@ fn permission_defaults_can_refuse_every_request() {
     assert!(html.contains("Permission defaults (1 blocked)") && html.contains("Block notification requests"));
 }
 #[test]
+fn a_payment_form_offers_saved_cards() {
+    let mut s = shell();
+    s.snapshot["cards"] = json!([{"id":"k1","name":"Ada","last4":"1111","expiry":"12/30"}]);
+    s.snapshot["cardOffer"] = json!(true);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Fill a saved card on this page?") && html.contains("page-frame with-prompt") && html.contains("Ada ····1111"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"card","value":"fill","id":"k1"})))[0], json!({"op":"fillCard","id":"k1"}));
+    assert_eq!(commands(&s.dispatch(json!({"op":"card","value":"dismiss-offer"})))[0], json!({"op":"cardOfferDismiss"}));
+    // No saved card, no offer; a save-password question takes the bar first.
+    s.snapshot["passwordPrompt"] = json!({"origin":"https://example.com","username":"a"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("Fill a saved card"));
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

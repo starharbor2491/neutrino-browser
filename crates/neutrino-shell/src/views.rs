@@ -969,6 +969,25 @@ pub fn feeds_panel(s: &Shell) -> Markup {
 }
 
 /// Asks to save a password after a sign-in, above the page so nothing covers it.
+/// Chrome and Brave offer a saved card when a checkout form appears; Neutrino offers
+/// it in a bar above the page, and fills only when asked.
+pub fn card_offered(s: &Shell) -> bool {
+    flag(&s.snapshot, "cardOffer") && !array(&s.snapshot["cards"]).is_empty() && !s.private() && crate::features::on(s, "autofill") && !s.snapshot["passwordPrompt"].is_object()
+}
+pub fn card_offer(s: &Shell) -> Markup {
+    let cards = array(&s.snapshot["cards"]);
+    html! {@if card_offered(s) {
+        div class="prompt-bar" role="alertdialog" aria-label="Fill a saved card"{
+            (icon("lock"))
+            span{strong{"Fill a saved card on this page?"}small{"You’ll enter the security code yourself."}}
+            span class="spacer"{}
+            button class="button quiet" data-op="card" data-value="dismiss-offer"{"Not now"}
+            @for c in cards.iter().take(3) {
+                button class="button primary" data-op="card" data-value="fill" data-id=(text(c, "id")){(text(c, "name"))" ····"(text(c, "last4"))}
+            }
+        }
+    }}
+}
 pub fn password_prompt(s: &Shell) -> Markup {
     let p = &s.snapshot["passwordPrompt"];
     html! {@if p.is_object() {
