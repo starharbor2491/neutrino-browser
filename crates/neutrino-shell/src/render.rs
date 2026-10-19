@@ -403,7 +403,14 @@ fn vacant_page(s: &Shell) -> Markup {
             div class="start-inner"{(private_note(s))@if search {button class="start-search" data-op=(start_search_op(s)){(icon("search"))span{"Search the web privately"}}}@if sites {(shortcut_grid(s, 6, "shortcut"))}}
         }},
         "vivaldi" | "gx" => html! {section class="start-page speed-dial" aria-label="Start page"{div class="start-inner"{
-            @if style(s) == "vivaldi" {nav class="dial-tabs" aria-label="Start page sections"{button class="selected" aria-current="page"{"Speed Dial"}button data-op="screen" data-value="library" data-section="bookmarks"{"Bookmarks"}button data-op="screen" data-value="library" data-section="history"{"History"}}}
+            @if style(s) == "vivaldi" {nav class="dial-tabs" aria-label="Start page sections"{
+                button class=(if s.dial_group.is_empty() {"selected"} else {""}) data-op="dial-group" data-value="" aria-current=[s.dial_group.is_empty().then_some("page")]{"Speed Dial"}
+                @if crate::features::on(s, "speed-dial") {
+                    @for g in crate::views::dial_groups(s) {button class=(if s.dial_group == g {"selected"} else {""}) data-op="dial-group" data-value=(g) aria-current=[(s.dial_group == g).then_some("page")]{(g)}}
+                    @if !s.private() {button class="dial-add" data-op="menu" data-value="new-dial-group" title="New Speed Dial group" aria-label="New Speed Dial group"{(icon("plus"))}}
+                }
+                button data-op="screen" data-value="library" data-section="bookmarks"{"Bookmarks"}button data-op="screen" data-value="library" data-section="history"{"History"}
+            }}
             (private_note(s))
             @if clock {time class="dial-clock" data-clock="true"{}}
             @if search {form class="location dial-search" data-form="address" aria-label="Search"{(icon("search"))input name="address" placeholder="Search or enter an address" autocomplete="off" spellcheck="false" aria-label="Search or enter an address";}}
@@ -469,7 +476,8 @@ fn site_tile(title: &str, url: &str, class: &str) -> Markup {
 }
 fn shortcut_grid(s: &Shell, limit: usize, class: &str) -> Markup {
     let dial = crate::views::speed_dial(s);
-    let sites = if dial.is_empty() { top_sites(s, limit) } else { vec![] };
+    // A Speed Dial group of its own shows only its sites, even while it is empty.
+    let sites = if dial.is_empty() && s.dial_group.is_empty() { top_sites(s, limit) } else { vec![] };
     html! {div class=(format!("shortcut-grid {class}-grid")){
         @for (title, url, id) in dial.iter().take(limit) {div class="dial-entry" data-dial=(id){(site_tile(title, url, class))button class="icon-button dial-edit" data-op="menu" data-value=(format!("edit-bookmark:{id}")) aria-label=(format!("Edit {title}")){(icon("edit"))}}}
         @for (title, url) in &sites {(site_tile(title, url, class))}
@@ -1404,7 +1412,7 @@ fn menu_title(s: &Shell) -> &'static str {
 }
 fn menu(s: &Shell) -> Markup {
     let id = s.menu.split_once(':').map(|x| x.1).unwrap_or("");
-    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.modal_menu() || ["rename-space","new-space","new-folder","new-profile","find","add-site","add-site:dial"].contains(&s.menu.as_str()) || s.menu.starts_with("folder:") || s.menu.starts_with("new-folder:") || crate::views::menu_title(&s.menu).is_some(){header{strong{(crate::views::menu_title(&s.menu).unwrap_or(menu_title(s)))}(button("Close","escape","close"))}}
+    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.modal_menu() || ["rename-space","new-space","new-folder","new-profile","find","add-site","add-site:dial","new-dial-group"].contains(&s.menu.as_str()) || s.menu.starts_with("folder:") || s.menu.starts_with("new-folder:") || crate::views::menu_title(&s.menu).is_some(){header{strong{(crate::views::menu_title(&s.menu).unwrap_or(menu_title(s)))}(button("Close","escape","close"))}}
         @if let Some(markup) = crate::views::menus(s, id) {(markup)} @else {
         @match s.menu.as_str(){
             "workspaces"=>{div class="menu-label"{"Spaces"}@for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate(){button class="menu-item" data-op="switchSpace" data-id=(text(space,"id")) aria-current=[(space["id"]==s.snapshot["session"]["spaceID"]).then_some("true")]{span class="space-symbol menu-space" data-tone=(index%5){(text(space,"name").chars().next().unwrap_or('S'))}span{(text(space,"name"))}@if space["id"]==s.snapshot["session"]["spaceID"]{(icon("check"))}}}div class="menu-separator"{}(menu_item("New Space","menu","new-space","plus"))}
@@ -1413,7 +1421,8 @@ fn menu(s: &Shell) -> Markup {
                     @if flag(&s.snapshot["preferences"],"blockTrackers"){button class="toggle-row" data-op="shields-site" role="switch" aria-checked=(up.to_string()){span{strong{"Shields for this site"}}span class=(if up{"switch on"}else{"switch"}){span{}}}}
                     button class="menu-item" data-op="screen" data-value="settings" data-section="privacy"{(icon("settings"))span{"Shields settings"}}}
             }
-            m if m.starts_with("add-site")=>{label class="field"{span{"Site address"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="example.com" maxlength="2000" autocomplete="off" spellcheck="false";}button class="button primary" data-op="addSite" disabled[s.name.is_empty()]{"Add"}p class="field-help"{(if m=="add-site:dial" {"Sites you add are saved in the Speed Dial bookmarks folder."} else {"Sites you add are saved as bookmarks."})}}
+            "new-dial-group"=>{label class="field"{span{"Group name"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Work" maxlength="40" autocomplete="off";}button class="button primary" data-op="dial-group" data-value="new" disabled[s.name.trim().is_empty()]{"Create"}p class="field-help"{"Add a site to the group to keep it."}}
+            m if m.starts_with("add-site")=>{label class="field"{span{"Site address"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="example.com" maxlength="2000" autocomplete="off" spellcheck="false";}button class="button primary" data-op="addSite" disabled[s.name.is_empty()]{"Add"}p class="field-help"{(if m=="add-site:dial" {format!("Sites you add are saved in the {} bookmarks folder.", crate::views::dial_folder(s))} else {"Sites you add are saved as bookmarks.".to_string()})}}
             "notes-scope"=>{@for (value,label) in [("space","This Space"),("all","All notes")]{button class="menu-item" data-op="native" data-action="notesScope" data-value=(value){(icon(if text(&s.snapshot,"notesScope")==value{"check"}else{"folder"}))span{(label)}}}}
             "split-choose"=>{div class="menu-label"{"Open beside this page"}@for t in s.tabs().iter().filter(|t|t["id"]!=s.active()["id"] && !text(t,"url").is_empty()){button class="menu-item" data-op="split-with" data-id=(text(t,"id")){(site(t))span{(text(t,"title"))}}}@if s.tabs().iter().filter(|t|!text(t,"url").is_empty()).count()<2{p class="field-help"{"Open a second page, then choose it here."}}}
             "space"=>{div class="menu-group"{(menu_item("New folder","menu","new-folder","folder"))@if crate::features::on(s, "sessions") {(menu_item("Save tabs as session…","menu","save-session","download"))}button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))span{"Archived tabs"}}}

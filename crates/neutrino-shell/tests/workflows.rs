@@ -519,6 +519,30 @@ fn customize_reorders_toolbar_buttons_and_removes_built_ins() {
     assert!(nav.contains(r#"data-op="back""#) && !nav.contains(r#"data-op="reload""#) && !nav.contains(r#"data-op="forward""#));
 }
 #[test]
+fn speed_dial_groups_are_folders_inside_speed_dial() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("vivaldi");
+    s.snapshot["session"]["selectedTabID"] = json!("b");
+    s.snapshot["features"] = json!({"speed-dial": true});
+    s.snapshot["bookmarkIndex"] = json!([
+        {"id":"d1","title":"Mail","url":"https://mail.example/","folder":"Speed Dial"},
+        {"id":"d2","title":"Tracker","url":"https://tracker.example/","folder":"Speed Dial/Work"}]);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-op="dial-group" data-value="Work""#) && html.contains("Mail") && !html.contains("Tracker"));
+    let html = s.dispatch(json!({"op":"dial-group","value":"Work"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Tracker") && !html.contains(">Mail<"));
+    // A new group starts empty, without top sites, and new tiles go into its folder.
+    s.dispatch(json!({"op":"menu","value":"new-dial-group"}));
+    s.dispatch(json!({"op":"name","value":"Reading"}));
+    s.dispatch(json!({"op":"dial-group","value":"new"}));
+    assert_eq!(s.dial_group, "Reading");
+    s.dispatch(json!({"op":"menu","value":"add-site:dial"}));
+    s.dispatch(json!({"op":"name","value":"news.example"}));
+    let r = s.dispatch(json!({"op":"addSite"}));
+    assert_eq!(commands(&r)[0]["folder"], "Speed Dial/Reading");
+    assert!(s.dispatch(json!({"op":"dial-group","value":"Nope"})).is_object() && s.dial_group == "Reading");
+}
+#[test]
 fn expired_payment_cards_are_refused() {
     let mut s = shell();
     s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026

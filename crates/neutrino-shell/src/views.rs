@@ -411,6 +411,7 @@ pub fn menu_title(m: &str) -> Option<&'static str> {
         "clear-data" => "Clear browsing data",
         "boost" => "Site styles",
         "add-panel" => "Add a panel",
+        "new-dial-group" => "New Speed Dial group",
         "save-session" => "Save session",
         "space-style" => "Space appearance",
         "new-board" => "New board",
@@ -490,7 +491,28 @@ pub fn speed_dial(s: &Shell) -> Vec<(String, String, String)> {
     if !features::on(s, "speed-dial") {
         return vec![];
     }
-    array(&s.snapshot["bookmarkIndex"]).iter().filter(|b| text(b, "folder") == "Speed Dial").take(24).map(|b| (text(b, "title").to_string(), text(b, "url").to_string(), text(b, "id").to_string())).collect()
+    let folder = dial_folder(s);
+    array(&s.snapshot["bookmarkIndex"]).iter().filter(|b| text(b, "folder") == folder).take(24).map(|b| (text(b, "title").to_string(), text(b, "url").to_string(), text(b, "id").to_string())).collect()
+}
+/// Vivaldi's Speed Dial groups: the bookmark folders directly inside "Speed Dial".
+pub fn dial_groups(s: &Shell) -> Vec<String> {
+    let mut groups: Vec<String> = vec![];
+    for b in array(&s.snapshot["bookmarkIndex"]) {
+        if let Some(name) = text(b, "folder").strip_prefix("Speed Dial/").and_then(|rest| rest.split('/').next()) {
+            if !name.is_empty() && !groups.iter().any(|g| g == name) {
+                groups.push(name.to_string());
+            }
+        }
+    }
+    if !s.dial_group.is_empty() && !groups.contains(&s.dial_group) {
+        groups.push(s.dial_group.clone());
+    }
+    groups.truncate(12);
+    groups
+}
+/// The bookmarks folder of the Speed Dial group on show.
+pub fn dial_folder(s: &Shell) -> String {
+    if s.dial_group.is_empty() { "Speed Dial".into() } else { format!("Speed Dial/{}", s.dial_group) }
 }
 
 pub fn wallpaper_style(s: &Shell) -> String {

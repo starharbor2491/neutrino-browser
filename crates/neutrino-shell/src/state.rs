@@ -62,6 +62,8 @@ pub struct Shell {
     pub recording: String,
     pub library_filter: String,
     pub board: String,
+    /// The Speed Dial group shown on Vivaldi's start page; empty for the main one.
+    pub dial_group: String,
     order_undo: Vec<Value>,
     adjustment: String,
 }
@@ -110,6 +112,7 @@ impl Default for Shell {
             recording: String::new(),
             library_filter: String::new(),
             board: String::new(),
+            dial_group: String::new(),
             order_undo: vec![],
             adjustment: String::new(),
         }
@@ -487,7 +490,7 @@ impl Shell {
                     if let Ok(url) = Url::parse(&candidate) {
                         if ["http", "https"].contains(&url.scheme()) && url.host_str().is_some_and(|h| h.contains('.')) && !self.private() {
                             let title = url.host_str().unwrap_or("").trim_start_matches("www.").to_string();
-                            commands.push(json!({"op":"addBookmark","url":url.as_str(),"title":title,"folder":if self.menu == "add-site:dial" {"Speed Dial"} else {""}}));
+                            commands.push(json!({"op":"addBookmark","url":url.as_str(),"title":title,"folder":if self.menu == "add-site:dial" {crate::views::dial_folder(self)} else {String::new()}}));
                             self.menu.clear();
                             self.name.clear();
                         } else {

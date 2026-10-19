@@ -16,7 +16,7 @@ pub const OPS: &[&str] = &[
     "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "fake-history", "reader-speak", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "markup", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
-    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
+    "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed", "dial-group",
 ];
 
 /// Fake My History kinds: key, label, and the pages a visit can be to.
@@ -1173,6 +1173,22 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             }
         }
         "library-filter" => s.library_filter = bound(value, 80),
+        // Vivaldi's Speed Dial groups. A new group lasts once a site is added to it.
+        "dial-group" => match value {
+            "" => s.dial_group.clear(),
+            "new" => {
+                let name = bound(s.name.trim(), 40);
+                if name.is_empty() || name.contains('/') || name == "Speed Dial" {
+                    s.notice = "Give the group a name without a slash.".into();
+                } else {
+                    s.dial_group = name;
+                    s.menu.clear();
+                    s.name.clear();
+                }
+            }
+            v if crate::views::dial_groups(s).iter().any(|g| g == v) => s.dial_group = v.into(),
+            _ => {}
+        },
         "boost" => {
             let Some(site) = site_of_active(s) else { return };
             let css = text(r, "css");
