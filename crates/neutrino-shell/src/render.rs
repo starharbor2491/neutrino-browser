@@ -166,17 +166,87 @@ pub(crate) fn tab_row(t: &Value, s: &Shell, preview: bool) -> Markup {
         div class="chrome-page-row" {button class="tab-select" data-op="chrome-page" data-id=(text(t,"id")) data-page=(page["id"].as_i64().unwrap_or(0)) title=(text(page,"url")){(site(page))span{(if text(page,"title").is_empty(){host(text(page,"url"))}else{text(page,"title").into()})}}button class="tab-close" data-op="chrome-page-close" data-id=(text(t,"id")) data-page=(page["id"].as_i64().unwrap_or(0)) aria-label=(format!("Close {}",text(page,"title"))){(icon("close"))}}
     } }
 }
+/// Ancestors a tab folder may have.
+pub const MAX_FOLDER_DEPTH: usize = 3;
+/// Folders inside a folder, or the top-level ones (no parent, or a parent that's gone).
+pub(crate) fn subfolders<'a>(s: &'a Shell, parent: &str) -> Vec<&'a Value> {
+    let folders = array(&s.snapshot["folders"]);
+    folders
+        .iter()
+        .filter(|f| {
+            let p = text(f, "parentID");
+            if parent.is_empty() { p.is_empty() || !folders.iter().any(|o| text(o, "id") == p) } else { p == parent }
+        })
+        .collect()
+}
+/// How deep a folder sits: 0 at the top level.
+pub(crate) fn folder_depth(s: &Shell, id: &str) -> usize {
+    let folders = array(&s.snapshot["folders"]);
+    let mut current = id.to_string();
+    for depth in 0..=crate::render::MAX_FOLDER_DEPTH + 1 {
+        match folders.iter().find(|f| text(f, "id") == current).map(|f| text(f, "parentID")) {
+            Some(parent) if !parent.is_empty() && folders.iter().any(|f| text(f, "id") == parent) => current = parent.to_string(),
+            _ => return depth,
+        }
+    }
+    crate::render::MAX_FOLDER_DEPTH + 1
+}
+/// Whether `id` is `ancestor` or inside it.
+pub(crate) fn folder_within(s: &Shell, id: &str, ancestor: &str) -> bool {
+    let folders = array(&s.snapshot["folders"]);
+    let mut current = id.to_string();
+    for _ in 0..=crate::render::MAX_FOLDER_DEPTH + 1 {
+        if current == ancestor { return true; }
+        match folders.iter().find(|f| text(f, "id") == current).map(|f| text(f, "parentID")) {
+            Some(parent) if !parent.is_empty() => current = parent.to_string(),
+            _ => return false,
+        }
+    }
+    false
+}
+/// Levels of folders below this one, counting itself.
+pub(crate) fn folder_height_from(s: &Shell, id: &str, level: usize) -> usize {
+    if level > crate::render::MAX_FOLDER_DEPTH { return 1; }
+    1 + subfolders(s, id).iter().map(|c| folder_height_from(s, text(c, "id"), level + 1)).max().unwrap_or(0)
+}
+pub(crate) fn folder_height(s: &Shell, id: &str) -> usize {
+    folder_height_from(s, id, 0)
+}
+/// Folder menu items to add a folder inside this one and move it into another.
+fn folder_nesting(s: &Shell, id: &str) -> Markup {
+    let max = crate::render::MAX_FOLDER_DEPTH;
+    let height = folder_height(s, id);
+    let parent = array(&s.snapshot["folders"]).iter().find(|f| text(f, "id") == id).map(|f| text(f, "parentID").to_string()).unwrap_or_default();
+    let targets: Vec<&Value> = array(&s.snapshot["folders"]).iter().filter(|f| {
+        let target = text(f, "id");
+        target != parent && !folder_within(s, target, id) && folder_depth(s, target) + height <= max
+    }).collect();
+    html! {@if !s.private() {
+        @if folder_depth(s, id) < max {button class="menu-item" data-op="menu" data-value=(format!("new-folder:{id}")){(icon("folder"))"New folder inside"}}
+        @if !parent.is_empty() || !targets.is_empty() {div class="menu-separator"{}div class="menu-label"{"Move folder into"}}
+        @if !parent.is_empty() {button class="menu-item" data-op="nest-folder" data-id=(id) data-parent=""{(icon("sidebar"))"Top level"}}
+        @for f in targets {button class="menu-item" data-op="nest-folder" data-id=(id) data-parent=(text(f,"id")){(icon("folder"))(text(f,"name"))}}
+        div class="menu-separator"{}
+    }}
+}
+/// A tab folder with its subfolders first, then its tabs, as Arc nests them.
+fn folder_group(s: &Shell, f: &Value, preview: bool, depth: usize) -> Markup {
+    let children = if depth < crate::render::MAX_FOLDER_DEPTH { subfolders(s, text(f, "id")) } else { vec![] };
+    html! {div class="folder-group" data-drop-group="folder" data-folder=(text(f,"id")) data-depth=(depth) data-color=[(!text(f,"color").is_empty()).then(||text(f,"color"))] {
+        div class="folder-heading" draggable=((!preview && !s.private()).to_string()) data-folder-source=(text(f,"id")) tabindex="0" aria-label=(format!("Folder {}. Drag or use Option Shift arrow keys to reorder.",text(f,"name"))) {button data-op="toggleFolder" data-id=(text(f,"id")) aria-expanded=((!flag(f,"collapsed")).to_string()) {(icon(if flag(f,"collapsed"){"forward"}else{"down"}))(icon("folder"))span{(text(f,"name"))}}
+            button class="icon-button" data-op="menu" data-value=(format!("folder:{}",text(f,"id"))) aria-label=(format!("Options for {}",text(f,"name"))) {(icon("more"))}}
+        @if !flag(f,"collapsed"){
+            @for child in &children {(folder_group(s, child, preview, depth + 1))}
+            @for t in s.tabs().iter().filter(|t|!flag(t,"pinned")&&t["folderID"]==f["id"]&&tab_visible(t,s)){(tab_row(t,s,preview))}
+            @if children.is_empty() && !s.tabs().iter().any(|t|t["folderID"]==f["id"]){div class="folder-empty"{"Drop tabs here"}}}
+    }}
+}
 pub(crate) fn tab_groups(s: &Shell, preview: bool) -> Markup {
     html! {
         div class="tab-group pins" data-drop-group="pinned" aria-label="Pinned tabs" {
             @for t in s.tabs().iter().filter(|t|flag(t,"pinned")&&tab_visible(t,s)){(tab_row(t,s,preview))}
         }
-        @for f in array(&s.snapshot["folders"]) {div class="folder-group" data-drop-group="folder" data-folder=(text(f,"id")) data-color=[(!text(f,"color").is_empty()).then(||text(f,"color"))] {
-            div class="folder-heading" draggable=((!preview && !s.private()).to_string()) data-folder-source=(text(f,"id")) tabindex="0" aria-label=(format!("Folder {}. Drag or use Option Shift arrow keys to reorder.",text(f,"name"))) {button data-op="toggleFolder" data-id=(text(f,"id")) aria-expanded=((!flag(f,"collapsed")).to_string()) {(icon(if flag(f,"collapsed"){"forward"}else{"down"}))(icon("folder"))span{(text(f,"name"))}}
-                button class="icon-button" data-op="menu" data-value=(format!("folder:{}",text(f,"id"))) aria-label=(format!("Options for {}",text(f,"name"))) {(icon("more"))}}
-            @if !flag(f,"collapsed"){@for t in s.tabs().iter().filter(|t|!flag(t,"pinned")&&t["folderID"]==f["id"]&&tab_visible(t,s)){(tab_row(t,s,preview))}
-                @if !s.tabs().iter().any(|t|t["folderID"]==f["id"]){div class="folder-empty"{"Drop tabs here"}}}
-        }}
+        @for f in subfolders(s, "") {(folder_group(s, f, preview, 0))}
         div class="tab-group today" data-drop-group="today" aria-label="Unpinned tabs" {
             div class="group-label"{span{"Tabs"}@if !s.tab_undo.is_empty(){button data-op="undo-tabs" title="Undo the last tab move"{(icon("undo"))"Undo"}}}
             @for t in s.tabs().iter().filter(|t|!flag(t,"pinned")&&text(t,"folderID").is_empty()&&tab_visible(t,s)){(tab_row(t,s,preview))}
@@ -1231,6 +1301,7 @@ fn menu_title(s: &Shell) -> &'static str {
         "discard-editor" => "Unsaved changes",
         "reset-modules" => "Reset modules",
         m if m.starts_with("folder:") => "Folder",
+        m if m.starts_with("new-folder:") => "New folder inside",
         "add-site:dial" => "Add to Speed Dial",
         m if m.starts_with("delete-") => "Delete",
         _ => "",
@@ -1238,7 +1309,7 @@ fn menu_title(s: &Shell) -> &'static str {
 }
 fn menu(s: &Shell) -> Markup {
     let id = s.menu.split_once(':').map(|x| x.1).unwrap_or("");
-    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.modal_menu() || ["rename-space","new-space","new-folder","new-profile","find","add-site","add-site:dial"].contains(&s.menu.as_str()) || s.menu.starts_with("folder:") || crate::views::menu_title(&s.menu).is_some(){header{strong{(crate::views::menu_title(&s.menu).unwrap_or(menu_title(s)))}(button("Close","escape","close"))}}
+    html! {div class=(if s.modal_menu(){"menu-scrim modal-menu"}else{"menu-scrim anchored-menu"}) data-dismiss="true"{section class="popover-menu" data-menu=(s.menu.as_str()) role="dialog" aria-modal=(s.modal_menu().to_string()) aria-label=(if s.menu=="notes-scope"{"Notes scope"}else{"Browser options"}){@if s.modal_menu() || ["rename-space","new-space","new-folder","new-profile","find","add-site","add-site:dial"].contains(&s.menu.as_str()) || s.menu.starts_with("folder:") || s.menu.starts_with("new-folder:") || crate::views::menu_title(&s.menu).is_some(){header{strong{(crate::views::menu_title(&s.menu).unwrap_or(menu_title(s)))}(button("Close","escape","close"))}}
         @if let Some(markup) = crate::views::menus(s, id) {(markup)} @else {
         @match s.menu.as_str(){
             "workspaces"=>{div class="menu-label"{"Spaces"}@for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate(){button class="menu-item" data-op="switchSpace" data-id=(text(space,"id")) aria-current=[(space["id"]==s.snapshot["session"]["spaceID"]).then_some("true")]{span class="space-symbol menu-space" data-tone=(index%5){(text(space,"name").chars().next().unwrap_or('S'))}span{(text(space,"name"))}@if space["id"]==s.snapshot["session"]["spaceID"]{(icon("check"))}}}div class="menu-separator"{}(menu_item("New Space","menu","new-space","plus"))}
@@ -1269,7 +1340,8 @@ fn menu(s: &Shell) -> Markup {
                 div class="menu-separator"{}div class="menu-label"{"Move to"}@if flag(t,"pinned") || !text(t,"folderID").is_empty(){button class="menu-item" data-op="move-tab" data-id=(id) data-group="today"{(icon("sidebar"))"Tabs"}}@for f in array(&s.snapshot["folders"]).iter().filter(|f|f["id"]!=t["folderID"]){button class="menu-item" data-op="move-tab" data-id=(id) data-group="folder" data-folder-id=(text(f,"id")){(icon("folder"))(text(f,"name"))}}
                 @for (index,space) in array(&s.snapshot["spaces"]).iter().filter(|v|v["profileID"]==s.snapshot["session"]["profileID"]).enumerate().filter(|(_,v)|v["id"]!=s.snapshot["session"]["spaceID"]){button class="menu-item" data-op="move-space" data-id=(id) data-space-id=(text(space,"id")){span class="space-symbol menu-space" data-tone=(index%5){(text(space,"name").chars().next().unwrap_or('S'))}span{(text(space,"name"))}}}
                 
-            }} @else if s.menu.starts_with("folder:"){label class="field"{span{"Rename folder"}input data-name="true" value=(s.name.as_str()) placeholder="New name" maxlength="80"; }button class="button" data-op="renameFolder" data-id=(id) disabled[s.name.is_empty()]{"Rename"}(crate::views::folder_menu_extra(id, array(&s.snapshot["folders"]).iter().find(|f|text(f,"id")==id).map(|f|text(f,"color")).unwrap_or("")))button class="menu-item" data-op="deleteFolder" data-id=(id){(icon("close"))"Remove folder; keep its tabs"}}
+            }} @else if s.menu.starts_with("new-folder:"){label class="field"{span{"Folder name"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Give it a name" maxlength="80" autocomplete="off";}button class="button primary" data-op="createFolder" data-id=(id) disabled[s.name.is_empty()]{"Create"}}
+            @else if s.menu.starts_with("folder:"){label class="field"{span{"Rename folder"}input data-name="true" value=(s.name.as_str()) placeholder="New name" maxlength="80"; }button class="button" data-op="renameFolder" data-id=(id) disabled[s.name.is_empty()]{"Rename"}(crate::views::folder_menu_extra(id, array(&s.snapshot["folders"]).iter().find(|f|text(f,"id")==id).map(|f|text(f,"color")).unwrap_or("")))(folder_nesting(s, id))button class="menu-item" data-op="deleteFolder" data-id=(id){(icon("close"))"Remove folder; keep its tabs"}}
             }
         }
         }

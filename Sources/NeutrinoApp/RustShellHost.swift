@@ -784,7 +784,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             guard let folder = app.library.spaces?[spaceIndex].folders.last else { return }
             for i in model.session.tabs.indices where [id, onto].contains(model.session.tabs[i].id) { model.session.tabs[i].folderID = folder.id; model.session.tabs[i].parentID = nil }
         case "createFolder":
-            if let name = command["name"] as? String { app.createFolder(name: name, spaceID: model?.session.spaceID) }
+            if let name = command["name"] as? String { app.createFolder(name: name, spaceID: model?.session.spaceID, parentID: id) }
+        case "nestFolder":
+            if let id { app.nestFolder(id, parentID: (command["parent"] as? String).flatMap(UUID.init(uuidString:)), spaceID: model?.session.spaceID) }
         case "createSpace":
             if let model, let name = command["name"] as? String, let id = app.createSpace(name: name, profileID: profileID) { model.switchSpace(id) }
         case "createProfile":
@@ -795,7 +797,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if operation == "toggleFolder" { app.toggleFolder(id, spaceID: model.session.spaceID) }
             else if operation == "renameFolder", let name = command["name"] as? String { app.library.spaces?[spaceIndex].folders[folderIndex].name = String(name.prefix(80)) }
             else {
-                for i in model.session.tabs.indices where model.session.tabs[i].folderID == id { model.session.tabs[i].folderID = nil }
+                // Its tabs and subfolders move up to the folder it was in.
+                let parent = app.library.spaces?[spaceIndex].folders[folderIndex].parentID
+                for i in model.session.tabs.indices where model.session.tabs[i].folderID == id { model.session.tabs[i].folderID = parent }
+                for i in app.library.spaces?[spaceIndex].folders.indices ?? 0..<0 where app.library.spaces?[spaceIndex].folders[i].parentID == id {
+                    app.library.spaces?[spaceIndex].folders[i].parentID = parent
+                }
                 app.library.spaces?[spaceIndex].folders.removeAll { $0.id == id }
             }
         case "renameSpace":

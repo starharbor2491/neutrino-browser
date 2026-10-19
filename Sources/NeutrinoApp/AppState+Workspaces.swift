@@ -71,13 +71,50 @@ import NeutrinoCore
     library.spaces = (library.spaces ?? []) + [space]
     return space.id
   }
-  func createFolder(name: String, spaceID: UUID?) {
+  func createFolder(name: String, spaceID: UUID?, parentID: UUID? = nil) {
     let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !finalQuitDataFrozen, !name.isEmpty,
       let i = library.spaces?.firstIndex(where: { $0.id == spaceID }),
       (library.spaces?[i].folders.count ?? 100) < 100
     else { return }
-    library.spaces?[i].folders.append(TabFolder(name: String(name.prefix(80))))
+    var folder = TabFolder(name: String(name.prefix(80)))
+    if let parentID, let folders = library.spaces?[i].folders, Self.folderDepth(parentID, in: folders).map({ $0 < Self.maxFolderDepth }) == true {
+      folder.parentID = parentID
+    }
+    library.spaces?[i].folders.append(folder)
+  }
+  /// Ancestors a folder may have; matches the interface's limit.
+  static let maxFolderDepth = 3
+  /// A folder's number of ancestors, or nil when it's missing or its parents loop.
+  static func folderDepth(_ id: UUID, in folders: [TabFolder]) -> Int? {
+    var current = id
+    for depth in 0...maxFolderDepth + 1 {
+      guard let folder = folders.first(where: { $0.id == current }) else { return nil }
+      guard let parent = folder.parentID, folders.contains(where: { $0.id == parent }) else { return depth }
+      current = parent
+    }
+    return nil
+  }
+  /// Moves a folder into another one, or to the top level when `parentID` is nil.
+  func nestFolder(_ id: UUID, parentID: UUID?, spaceID: UUID?) {
+    guard !finalQuitDataFrozen, let i = library.spaces?.firstIndex(where: { $0.id == spaceID }),
+      var folders = library.spaces?[i].folders, let index = folders.firstIndex(where: { $0.id == id })
+    else { return }
+    if let parentID {
+      // The new parent can't be the folder or inside it, and the deepest subfolder must stay within the limit.
+      func height(_ folder: UUID, _ level: Int) -> Int {
+        level > Self.maxFolderDepth ? 1 : 1 + (folders.filter { $0.parentID == folder }.map { height($0.id, level + 1) }.max() ?? 0)
+      }
+      var ancestor: UUID? = parentID
+      for _ in 0...Self.maxFolderDepth + 1 {
+        guard let current = ancestor else { break }
+        if current == id { return }
+        ancestor = folders.first(where: { $0.id == current })?.parentID
+      }
+      guard let depth = Self.folderDepth(parentID, in: folders), depth + height(id, 0) <= Self.maxFolderDepth else { return }
+    }
+    folders[index].parentID = parentID
+    library.spaces?[i].folders = folders
   }
   func toggleFolder(_ id: UUID, spaceID: UUID?) {
     guard !finalQuitDataFrozen, let i = library.spaces?.firstIndex(where: { $0.id == spaceID }),

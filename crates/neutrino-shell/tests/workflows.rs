@@ -278,6 +278,30 @@ fn downloads_show_progress_and_pause_or_resume() {
     assert!(!html.contains("downloadOpen") && !html.contains("downloadCancel") && html.contains("downloadRemove"));
 }
 #[test]
+fn folders_nest_inside_folders_within_the_depth_limit() {
+    let mut s = shell();
+    s.snapshot["folders"] = json!([{"id":"f1","name":"Work"},{"id":"f2","name":"Projects","parentID":"f1"},{"id":"f3","name":"Alpha","parentID":"f2"},{"id":"f4","name":"Inbox"}]);
+    s.snapshot["session"]["tabs"][1]["folderID"] = json!("f3");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    let at = |name: &str| html.find(&format!("<span>{name}</span>")).unwrap();
+    assert!(at("Work") < at("Projects") && at("Projects") < at("Alpha") && html.contains("data-depth=\"2\""));
+    // Projects (two levels) can't go into Alpha, which is inside it, and can move to the top.
+    let menu = s.dispatch(json!({"op":"menu","value":"folder:f2"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("data-parent=\"\"") && menu.contains("data-parent=\"f4\"") && !menu.contains("data-parent=\"f3\""));
+    assert!(commands(&s.dispatch(json!({"op":"nest-folder","id":"f1","parent":"f3"}))).is_empty());
+    assert_eq!(commands(&s.dispatch(json!({"op":"nest-folder","id":"f4","parent":"f3"})))[0], json!({"op":"nestFolder","id":"f4","parent":"f3"}));
+    // Inbox inside Alpha would be a fourth level, so Alpha offers no new folder inside after it.
+    s.snapshot["folders"][3]["parentID"] = json!("f3");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let menu = s.dispatch(json!({"op":"menu","value":"folder:f4"}))["html"].as_str().unwrap().to_string();
+    assert!(!menu.contains("new-folder:f4"));
+    let normalized = neutrino_shell::core_request(json!({"op":"normalizeSpace","value":{"id":"s","name":"S","profileID":"p","tabs":[],"folders":[{"id":"a","name":"A","parentID":"b"},{"id":"b","name":"B","parentID":"a"},{"id":"c","name":"C","parentID":"gone"}]}})).unwrap();
+    assert!(array_all_null(&normalized["folders"], "parentID"));
+}
+fn array_all_null(v: &Value, key: &str) -> bool {
+    v.as_array().unwrap().iter().all(|f| f[key].is_null())
+}
+#[test]
 fn closing_palette_restores_page_identity() {
     let mut s = shell();
     s.dispatch(json!({"op":"palette"}));

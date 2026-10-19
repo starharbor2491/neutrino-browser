@@ -13,7 +13,7 @@ pub const OPS: &[&str] = &[
     "tab-action", "rename-tab", "select-index", "tab-step", "reopen-closed", "find-open", "find-query",
     "find-step", "find-close", "address-input", "suggest-move", "suggest-accept", "page-command",
     "nav-history", "go-history", "site-setting", "clear-data", "site-data", "edit-bookmark", "reading",
-    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "delete-space",
+    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
@@ -900,6 +900,16 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             let gradient: Vec<&str> = array(&r["gradient"]).iter().filter_map(Value::as_str).filter(|h| crate::appearance::hex(h)).take(2).collect();
             if regular && (emoji.chars().count() <= 2) {
                 commands.push(json!({"op":"setSpaceAppearance","id":target,"emoji":emoji,"gradient":gradient}));
+            }
+        }
+        "nest-folder" => {
+            let (id, parent) = (text(r, "id"), text(r, "parent"));
+            let folders = array(&s.snapshot["folders"]);
+            let exists = |f: &str| folders.iter().any(|v| text(v, "id") == f);
+            let fits = parent.is_empty() || (exists(parent) && !crate::render::folder_within(s, parent, id) && crate::render::folder_depth(s, parent) + crate::render::folder_height(s, id) <= crate::render::MAX_FOLDER_DEPTH);
+            if regular && exists(id) && fits {
+                commands.push(json!({"op":"nestFolder","id":id,"parent":parent}));
+                s.menu.clear();
             }
         }
         "folder-color" => {

@@ -167,6 +167,7 @@ fn session(mut s: Value) -> Value {
     let selected = text(&s, "selectedTabID").to_owned();
     select(s, &selected)
 }
+use crate::render::MAX_FOLDER_DEPTH;
 fn space(mut s: Value) -> Value {
     let name = text(&s, "name").trim().chars().take(80).collect::<String>();
     s["name"] = json!(if name.is_empty() { "Space" } else { &name });
@@ -179,6 +180,26 @@ fn space(mut s: Value) -> Value {
         f["name"] = json!(text(f, "name").chars().take(80).collect::<String>());
     }
     let ids: HashSet<_> = folders.iter().map(|f| text(f, "id").to_owned()).collect();
+    // A nested folder's parent must exist, without loops, at most three levels up.
+    let parents: HashMap<String, String> = folders.iter().map(|f| (text(f, "id").to_owned(), text(f, "parentID").to_owned())).collect();
+    for f in &mut folders {
+        let id = text(f, "id").to_owned();
+        let mut current = text(f, "parentID").to_owned();
+        let mut depth = 0;
+        let valid = loop {
+            if current.is_empty() {
+                break true;
+            }
+            if current == id || depth >= MAX_FOLDER_DEPTH || !ids.contains(&current) {
+                break false;
+            }
+            current = parents.get(&current).cloned().unwrap_or_default();
+            depth += 1;
+        };
+        if !valid || f["parentID"].as_str() == Some("") {
+            f["parentID"] = Value::Null;
+        }
+    }
     s["folders"] = json!(folders);
     if let Some(tabs) = s["tabs"].as_array_mut() {
         for t in tabs {

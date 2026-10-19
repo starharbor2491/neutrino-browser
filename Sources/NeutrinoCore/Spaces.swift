@@ -7,6 +7,8 @@ public struct TabFolder: Identifiable, Codable, Equatable, Sendable {
   public var collapsed: Bool
   /// One of the tab-group colors: grey, blue, red, yellow, green, pink, purple, cyan.
   public var color: String?
+  /// The folder this one sits in, for Arc-style nested folders.
+  public var parentID: UUID?
   public init(id: UUID = UUID(), name: String, collapsed: Bool = false) {
     self.id = id
     self.name = name

@@ -696,7 +696,8 @@ svg {
 .folder-heading:focus-within > .icon-button {
   opacity: 1;
 }
-.folder-group > .tab-row {
+.folder-group > .tab-row,
+.folder-group > .folder-group {
   margin-left: 14px;
 }
 .folder-empty {
