@@ -552,6 +552,7 @@ fn safari_sidebar(s: &Shell) -> Markup {
     let spaces: Vec<&Value> = array(&s.snapshot["spaces"]).iter().filter(|v| v["profileID"] == s.snapshot["session"]["profileID"]).collect();
     let reading = crate::features::on(s, "reading-list");
     html! {aside class="workspace-panel safari-sidebar" aria-label="Sidebar" {
+        div class="safari-sidebar-top traffic-clearance" data-window-drag="true"{}
         nav class="safari-sidebar-list" {
             @if !s.private() {
                 div class="safari-sidebar-label"{"Tab Groups"}
@@ -622,7 +623,8 @@ pub(crate) fn shields_lowered(s: &Shell) -> bool {
     array(&s.snapshot["preferences"]["shieldsDown"]).iter().any(|h| h.as_str() == Some(site.as_str()))
 }
 fn toolbar(s: &Shell, style: &str, horizontal: bool, panel: bool) -> Markup {
-    let lead = horizontal && (style == "safari" || text(&s.config()["layout"], "tabs") == "bottom");
+    // Window controls sit above Safari's sidebar while it is open.
+    let lead = horizontal && (style == "safari" || text(&s.config()["layout"], "tabs") == "bottom") && !(style == "safari" && s.visible_panel_key() == "safari");
     html! {header class="page-toolbar" {
         @if lead {div class="traffic-clearance" data-window-drag="true"{}}
         @if horizontal && style == "vivaldi" {(button("Panel", "panel-toggle", "sidebar"))}
@@ -764,9 +766,12 @@ fn browser(s: &Shell, preview: bool) -> Markup {
     let space_style = if gradient.len() == 2 && !s.private() { format!(";--space-from:{};--space-to:{}", gradient[0], gradient[1]) } else { String::new() };
     let compact = flag(&s.config()["layout"], "compactRail") && !horizontal;
     let width = if compact { 64. } else { width };
-    html! {div class=(format!("browser-shell style-{style} placement-{} {} {} {} {}{}{}",placement,if panel{"with-panel"}else{""},if s.sidebar_hidden{"rail-hidden"}else{""},if preview{"editing-preview"}else{""},if strip{"with-strip"}else{""},if s.rail_peek && !preview {" rail-peek"}else{""},if compact {" compact-rail"} else {""})) style=(format!("--rail-width:{width}px;--panel-width:{}px{space_style}",s.config()["layout"]["sidebarWidth"].as_f64().unwrap_or(300.))) data-navigation=(text(&s.config()["layout"],"navigation")) data-panel=(if strip {"leading"} else {text(&s.config()["layout"],"sidebar")}) data-tone=[(!s.private()).then_some(tone).flatten()] data-gradient=[(!space_style.is_empty()).then_some("true")] {
+    // Safari's sidebar runs the full window height, beside its toolbar and tab bar.
+    let safari_side = style == "safari" && panel_key == "safari" && !preview;
+    html! {div class=(format!("browser-shell style-{style} placement-{} {} {} {} {}{}{}{}",placement,if panel{"with-panel"}else{""},if s.sidebar_hidden{"rail-hidden"}else{""},if preview{"editing-preview"}else{""},if strip{"with-strip"}else{""},if s.rail_peek && !preview {" rail-peek"}else{""},if compact {" compact-rail"} else {""},if safari_side {" safari-sidebar-open"} else {""})) style=(format!("--rail-width:{width}px;--panel-width:{}px{space_style}",s.config()["layout"]["sidebarWidth"].as_f64().unwrap_or(300.))) data-navigation=(text(&s.config()["layout"],"navigation")) data-panel=(if strip {"leading"} else {text(&s.config()["layout"],"sidebar")}) data-tone=[(!s.private()).then_some(tone).flatten()] data-gradient=[(!space_style.is_empty()).then_some("true")] {
         div class="window-grip" data-window-drag="true"{}
         @if !horizontal || preview {(rail(s,preview))}
+        @if safari_side {(safari_sidebar(s))}
         @if s.sidebar_hidden && !horizontal && !preview {div class="rail-edge" data-rail-edge="true" aria-hidden="true"{}}
 
         @if !horizontal && !s.sidebar_hidden && !compact {div class="rail-resizer" role="separator" tabindex="0" aria-label="Sidebar width" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="340" aria-valuenow=(width) data-resize="rail" {}}
@@ -793,7 +798,7 @@ fn browser(s: &Shell, preview: bool) -> Markup {
             @else {(vacant(s))}
             @if !preview {(crate::views::capture_overlay(s))(crate::views::markup_editor(s))(split_drop(s))}
         }
-        @if panel {(workspace_panel(s,if panel_key.is_empty(){"bookmarks"}else{panel_key}))}}
+        @if panel && !safari_side {(workspace_panel(s,if panel_key.is_empty(){"bookmarks"}else{panel_key}))}}
         @if horizontal && placement=="bottom"{(horizontal_tabs(s,preview))}
         @if status {(status_bar(s))}
         }

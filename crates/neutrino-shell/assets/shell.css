@@ -6707,7 +6707,23 @@ body.split-armed .split-drop {
   margin-top: 4px;
 }
 
-/* Safari sidebar */
+/* Safari sidebar: full window height, with the window controls above its list */
+.style-safari.safari-sidebar-open {
+  grid-template-columns: 240px minmax(0, 1fr);
+  padding-left: 0;
+}
+.style-safari.safari-sidebar-open > .safari-sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+  padding-top: 0;
+  border-radius: 0;
+  background: var(--rail, var(--bg));
+}
+.safari-sidebar .safari-sidebar-top {
+  width: auto;
+  height: 42px;
+}
 .style-safari .safari-sidebar {
   order: -1;
   width: 240px;
