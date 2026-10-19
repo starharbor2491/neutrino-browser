@@ -103,3 +103,17 @@ One builder made all changes; one read-only critic scored each build from 1 (gen
 The critic's pass was conditional on two items, both addressed after scoring. The palette fix it could not see in the served build now renders site icons and readable addresses; a layout regression in that change was caught while verifying it. WebKit, which hosts the shell on macOS, has no `corner-shape`, so controls, rows, menus and the palette now use a superellipse nine-slice mask there. Focus rings move inside masked controls, the palette's shadow moves to an unmasked frame, and anchored menus take theirs from a drop-shadow on their layer. The fallback was checked by forcing it in Chromium; it still needs a native WebKit capture. Native page layers use continuous corners.
 
 Open findings at the passing score: the start page's open-page tiles repeat the sidebar; toolbar controls rely on native tooltips while the sidebar uses faster custom ones; Settings General is sparse; the setup illustration stays static across steps; module cards leave space between text and actions; hover and selection remain close on the dark rail; tab-row actions shift the title on hover; Settings and Library use sliders and bookmark glyphs rather than a gear and a book.
+
+## Parity review loop (Arc, Opera GX, Vivaldi, Brave)
+
+The target was every local feature of the four browsers, with vendor cloud services (sync, VPN, wallets, rewards, hosted AI, remote safe-browsing lists) excluded, and each browser's setup and post-setup surface reproduced when a person picks it. A read-only critic kept a matrix of features and scored each build; the builder made every change. A row counts as **WORKING** when the critic used it end to end in the preview harness, and **WORKING (N)** when the interface half worked there and the critic read a real Swift or Objective-C++ handler for the native half. WORKING (N) is code review, not a Mac run. A control that does nothing counts as MISSING and is logged as a defect. [Laws of UX](https://lawsofux.com/) violations were logged as defects in the same way.
+
+| Round | Build | Rows | WORKING | WORKING (N) | PARTIAL | MISSING |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | `52fa0b3` | 141 | 11 | 24 | 30 | 76 |
+| 1 | `ddb6ffa`, `4d0c968`, `a17972d` | 146 | 15 | 76 | 44 | 11 |
+| 2 | `10e1da0` | 148 | 18 | 88 | 37 | 5 |
+
+Round 0's critical defect was that horizontal-tab layouts hid every menu in an invisible rail; Round 0 also found that every preset ran the same setup and landed on the same start page. Round 1 added per-browser setup flows and start pages, web panels, tab islands, the Vivaldi status bar and import from installed browsers. Round 2 found one dead switch (Safari's Reading List start-page option) and credited nested bookmark folders, filter-list subscriptions and the password vault. The builder then added feeds, clear-on-quit, pausable downloads, nested tab folders, Now Playing, password import from Chromium browsers, reader images and read-aloud, board images, fingerprinting protection, Chromium tracking-parameter removal, Fake My History, capture mark-up and Brave's sidebar.
+
+Not implemented at the end of Round 2's response: tiling three or more pages, extension toolbar popups, passkeys, password import from Firefox and Safari, audio and font farbling, URL-pattern filter rules and scriptlets, GX Mods and RGX, Vivaldi Mail and Calendar, drag-to-split, hard GX CPU limits and offline media saving.
