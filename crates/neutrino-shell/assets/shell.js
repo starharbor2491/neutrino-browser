@@ -1415,8 +1415,12 @@
     document.body.classList.toggle("split-armed", on);
     scheduleGeometry();
   }
+  // Moving between elements fires dragenter on the new one just before dragleave on
+  // the old one; a dragleave with no fresh dragenter means the drag left the interface.
+  let dragEnteredAt = 0;
+  document.addEventListener("dragenter", () => { dragEnteredAt = performance.now(); });
   document.addEventListener("dragleave", (e) => {
-    if (e.relatedTarget || !canSplitDrop() || !lastDragPoint) return;
+    if (e.relatedTarget || performance.now() - dragEnteredAt < 8 || !canSplitDrop() || !lastDragPoint) return;
     const frame = root.querySelector(".page-frame")?.getBoundingClientRect();
     if (frame && lastDragPoint.x > frame.left - 48 && lastDragPoint.x < frame.right && lastDragPoint.y > frame.top - 48 && lastDragPoint.y < frame.bottom)
       armSplit(true);
