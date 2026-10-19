@@ -551,15 +551,31 @@
     }
   }
   // Keep the selected tab visible after it changes, in the sidebar and in tab strips.
+  let revealUntil = 0, revealTimer = 0;
+  // Brings the active tab fully into view at once if it isn't.
+  function settleActiveTab() {
+    const tab = root.querySelector(".browser-shell:not(.editing-preview) .tab-row.active[data-tab]");
+    const scroller = tab?.closest(".tabs-scroll, .horizontal-tab-scroll");
+    if (!scroller || performance.now() > revealUntil) return;
+    const r = tab.getBoundingClientRect(), box = scroller.getBoundingClientRect();
+    if (r.left < box.left - 1 || r.right > box.right + 1 || r.top < box.top - 1 || r.bottom > box.bottom + 1)
+      tab.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+  }
   function revealActiveTab() {
     const tab = root.querySelector(".browser-shell:not(.editing-preview) .tab-row.active[data-tab]");
     const id = tab?.dataset.tab || null;
     if (!tab || id === activeTab) {
       activeTab = id;
+      // A re-render soon after restores the old scroll position, which stops the smooth
+      // scroll short, and tab widths keep settling for a moment: finish the reveal then.
+      settleActiveTab();
       return;
     }
     activeTab = id;
+    revealUntil = performance.now() + 1500;
     tab.scrollIntoView({ block: "nearest", inline: "nearest", behavior: motionAllowed() ? "smooth" : "auto" });
+    clearTimeout(revealTimer);
+    revealTimer = setTimeout(settleActiveTab, 600);
   }
   function updateClocks() {
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

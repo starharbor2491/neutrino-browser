@@ -1483,6 +1483,10 @@ li.done .guide-check {
 .browser-shell[data-panel="leading"] .workspace-panel {
   order: -1;
 }
+/* As in Vivaldi, Opera GX and Brave, the panel opens beside the strip, which stays at the edge. */
+.browser-shell[data-panel="leading"] .panel-strip {
+  order: -2;
+}
 .app-shell[data-density="compact"] .tab-select {
   min-height: 32px;
   padding-top: 5px;

@@ -525,6 +525,8 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             shortcutMap = Dictionary(list.compactMap { $0.count == 2 ? ($0[0], $0[1]) : nil }, uniquingKeysWith: { _, last in last })
         }
         findOpen = response["findOpen"] as? Bool == true
+        // Read aloud belongs to the Reader: leaving it stops the speech.
+        if response["screen"] as? String != "reader", readerVoice?.speaking == true { readerVoice?.stop() }
         features.sampleResources = response["performanceVisible"] as? Bool == true
         renderGeneration += 1
         var result = response; result["generation"] = renderGeneration
