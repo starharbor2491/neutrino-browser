@@ -33,7 +33,20 @@ final class ChromiumTab: BrowserEngineTab {
     }
     private var page: UnsafeMutableRawPointer?
     private let hostView: NSView
-    private var pageURL: URL? { didSet { if oldValue?.host != pageURL?.host { updateBlockingPolicy(); applyScriptPolicy() } } }
+    private var pageURL: URL? { didSet { if oldValue?.host != pageURL?.host { siteChanged() } } }
+    private var shieldsLowered = false
+    /// Per-site policies follow the page's site. Commands run after the current
+    /// engine callback returns, never from inside it.
+    private func siteChanged() {
+        let lowered = ContentBlocking.isException(pageURL?.host, in: blockingExceptions)
+        let blockingChanged = lowered != shieldsLowered
+        shieldsLowered = lowered
+        Task { @MainActor [weak self] in
+            guard let self, self.page != nil else { return }
+            if blockingChanged { self.updateBlockingPolicy() }
+            self.applyScriptPolicy()
+        }
+    }
     private var scriptsDisabled = false
     private var blockedCount = 0
     private var blockedAtPage = 0
@@ -235,13 +248,22 @@ final class ChromiumTab: BrowserEngineTab {
         let enabled = blockingEnabled && !ContentBlocking.isException(pageURL?.host, in: blockingExceptions)
         command(Int(NEUTRINO_CEF_SET_BLOCKING), text: ContentBlocking.domains(ads: blockAds, custom: blockingCustom).joined(separator: "\n"), value: enabled ? 1 : 0)
     }
+    /// The isolated world page tools use for the current document, created once per document.
+    private var toolWorld: (revision: UUID, unique: String)?
     private func evaluateIsolated(_ expression: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> Any {
         let revision = navigationRevision
-        _ = try await request("Runtime.enable",parameters:[:])
-        let tree = try await request("Page.getFrameTree", parameters: [:])
-        guard let body = try JSONSerialization.jsonObject(with: tree) as? [String: Any], let frameTree = body["frameTree"] as? [String: Any], let frame = frameTree["frame"] as? [String: Any], let frameID = frame["id"] as? String else { throw ValidationError("The page is unavailable.") }
-        let world = try await request("Page.createIsolatedWorld", parameters: ["frameId": frameID, "worldName": "org.neutrino.reader"])
-        guard navigationRevision == revision, let value = try JSONSerialization.jsonObject(with: world) as? [String: Any], let contextID = value["executionContextId"] as? Int, let unique = readerContexts[contextID] else { throw ValidationError("The page changed. Try again.") }
+        guard !loading else { throw ValidationError("The page is still loading. Try again in a moment.") }
+        let unique: String
+        if let world = toolWorld, world.revision == revision, readerContexts.values.contains(world.unique) {
+            unique = world.unique
+        } else {
+            _ = try await request("Runtime.enable",parameters:[:])
+            let tree = try await request("Page.getFrameTree", parameters: [:])
+            guard let body = try JSONSerialization.jsonObject(with: tree) as? [String: Any], let frameTree = body["frameTree"] as? [String: Any], let frame = frameTree["frame"] as? [String: Any], let frameID = frame["id"] as? String else { throw ValidationError("The page is unavailable.") }
+            let world = try await request("Page.createIsolatedWorld", parameters: ["frameId": frameID, "worldName": "org.neutrino.reader"])
+            guard navigationRevision == revision, let value = try JSONSerialization.jsonObject(with: world) as? [String: Any], let contextID = value["executionContextId"] as? Int, let created = readerContexts[contextID] else { throw ValidationError("The page changed. Try again.") }
+            unique = created; toolWorld = (revision, created)
+        }
         let result = try await request("Runtime.evaluate", parameters: ["expression": expression, "returnByValue": true, "uniqueContextId": unique, "timeout": 5000, "userGesture": userGesture, "awaitPromise": wait != nil], timeout: wait ?? .seconds(15))
         guard navigationRevision == revision, let response = try JSONSerialization.jsonObject(with: result) as? [String: Any], response["exceptionDetails"] == nil, let object = response["result"] as? [String: Any] else { throw ValidationError("The page could not complete this request.") }
         return object["value"] ?? ""
@@ -313,10 +335,19 @@ final class ChromiumTab: BrowserEngineTab {
             _ = try? await self?.request("Network.emulateNetworkConditions", parameters: ["offline": false, "latency": 0, "downloadThroughput": rate, "uploadThroughput": rate])
         }
     }
+    /// Profile preferences wait until this tab's page has finished loading, so
+    /// they never reach the engine while it is still creating the browser.
+    private var privacy: (httpsOnly: Bool, cookies: Bool, localIP: Bool)?
     override func setPrivacyPreferences(httpsOnly: Bool, blockThirdPartyCookies: Bool, hideLocalIP: Bool) {
-        command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: httpsOnly ? 1 : 0)
-        command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: blockThirdPartyCookies ? 1 : 0)
-        command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: hideLocalIP ? 1 : 0)
+        privacy = (httpsOnly, blockThirdPartyCookies, hideLocalIP)
+        if activeContentKnown && !loading { sendPrivacyPreferences() }
+    }
+    private func sendPrivacyPreferences() {
+        guard let privacy else { return }
+        self.privacy = nil
+        command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: privacy.httpsOnly ? 1 : 0)
+        command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: privacy.cookies ? 1 : 0)
+        command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: privacy.localIP ? 1 : 0)
     }
     /// Cookies and cached files of this tab's Chromium profile, for all time.
     override func clearWebsiteData(cookies: Bool, cache: Bool) async {
@@ -522,7 +553,14 @@ final class ChromiumTab: BrowserEngineTab {
             if let value = value["canGoForward"] as? Bool { canGoForward = value }
             if let value = value["zoom"] as? Double, value.isFinite, value > 0, zoom != value { zoom = value }
             onChange?(event == Int32(NEUTRINO_CEF_FINISHED))
-            if event == Int32(NEUTRINO_CEF_FINISHED) { onPageLoaded?() }
+            if event == Int32(NEUTRINO_CEF_FINISHED) {
+                let revision = navigationRevision
+                Task { @MainActor [weak self] in
+                    guard let self, self.page != nil, self.navigationRevision == revision, !self.loading else { return }
+                    self.sendPrivacyPreferences()
+                    self.onPageLoaded?()
+                }
+            }
         case Int32(NEUTRINO_CEF_ERROR):
             errorMessage = value["message"] as? String
             loading = false; progress = 0
@@ -581,7 +619,7 @@ final class ChromiumTab: BrowserEngineTab {
                 } else if let id = value["id"] as? Int { readerContexts.removeValue(forKey: id) }
             } else if let id = value["id"] as? Int, id > 0,
                       let uniqueID = value["uniqueID"] as? String, !uniqueID.isEmpty, uniqueID.utf8.count <= 256 {
-                if readerContexts.count >= 16 { readerContexts.removeAll() }
+                if readerContexts.count >= 16 { readerContexts.remove(at: readerContexts.startIndex) }
                 readerContexts[id] = uniqueID
             }
         case Int32(NEUTRINO_CEF_RESULT):

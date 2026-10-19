@@ -50,7 +50,7 @@ final class BrowserFeatures {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
                 guard let self, let model = self.model, !model.isClosed else { return }
-                await self.sampleMedia(model)
+                await self.sampleMedia(model, includeChromium: tick % 3 == 0)
                 if tick % 10 == 0 { self.sleepIdleTabs(model) }
                 if tick % 200 == 0 { self.archiveIdleTabs(model) }
                 if self.sampleResources || self.limitsEnabled { await self.sampleUsage(model) }
@@ -131,11 +131,14 @@ final class BrowserFeatures {
 
     // MARK: Sampling
 
-    private func sampleMedia(_ model: BrowserModel) async {
+    /// WebKit tabs are checked every pass. Chromium tabs answer through DevTools, so
+    /// only the selected tab and the one already playing are checked, less often.
+    private func sampleMedia(_ model: BrowserModel, includeChromium: Bool) async {
         guard let script = PageScript.source("mediaState") else { return }
-        var playing = Set<UUID>()
+        var playing = audible.filter { id in model.liveEngineTab(id)?.engineID == .chromium && !includeChromium }
         var current = media
-        for (id, page) in model.liveEngineTabs.prefix(40) where page.url != nil {
+        for (id, page) in model.liveEngineTabs.prefix(40) where page.url != nil && !page.loading {
+            if page.engineID == .chromium && (!includeChromium || (id != model.session.selectedTabID && id != media?.id && !audible.contains(id))) { continue }
             guard let raw = try? await page.runPageScript(script), let data = raw.data(using: .utf8),
                   let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if state["audible"] as? Bool == true { playing.insert(id) }
@@ -169,8 +172,9 @@ final class BrowserFeatures {
         enforceLimits(model, memory: memory, processor: processor)
         if sampleResources { refresh() }
     }
+    /// A page loaded in this session counts as used when it loaded, whatever its saved date.
     private func lastUsed(_ id: UUID, _ model: BrowserModel) -> Date {
-        model.session.tabs.first(where: { $0.id == id })?.lastUsedAt ?? firstSeen[id] ?? Date()
+        max(model.session.tabs.first(where: { $0.id == id })?.lastUsedAt ?? .distantPast, firstSeen[id] ?? Date())
     }
     /// Above a memory or processor limit for two samples in a row, the least
     /// recently used background tab goes to sleep.
@@ -193,7 +197,10 @@ final class BrowserFeatures {
         for id in model.liveEngineTabs.map(\.id) where firstSeen[id] == nil { firstSeen[id] = now }
         guard minutes > 0, app.feature("tab-sleep") else { return }
         let cutoff = now.addingTimeInterval(-Double(minutes) * 60)
-        for id in model.liveEngineTabs.map(\.id) where !audible.contains(id) && lastUsed(id, model) < cutoff { model.sleepTab(id) }
+        for id in model.liveEngineTabs.map(\.id) where !audible.contains(id) && lastUsed(id, model) < cutoff {
+            model.sleepTab(id)
+            if model.liveEngineTab(id) == nil { firstSeen.removeValue(forKey: id) }
+        }
     }
     /// Arc archives tabs left unused for the chosen number of days, as it does at launch.
     private func archiveIdleTabs(_ model: BrowserModel) {
