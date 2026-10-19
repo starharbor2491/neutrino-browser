@@ -5,6 +5,15 @@ import Testing
 
 extension NativeIntegrationTests {
 struct ChromiumProfileDataTests {
+    @Test func importedChromiumPasswordsDecryptWithTheBrowsersKey() throws {
+        // Generated with OpenSSL: "v10" + AES-128-CBC(PBKDF2-SHA1("peanuts", "saltysalt", 1003), IV of spaces).
+        let key = try #require(BrowserPasswordImport.derivedKey(Data("peanuts".utf8)))
+        #expect(key == Data([0xd9, 0xa0, 0x9d, 0x49, 0x9b, 0x4e, 0x1b, 0x74, 0x61, 0xf2, 0x8e, 0x67, 0x97, 0x2c, 0x6d, 0xbd]))
+        let value = try #require(Data(base64Encoded: "djEw1Gxrxl8Tz/u9oy2vHmuOIw=="))
+        #expect(BrowserPasswordImport.decrypt(value, key: key) == "hunter2 é")
+        #expect(BrowserPasswordImport.decrypt(Data("v11".utf8) + value.dropFirst(3), key: key) == nil)
+        #expect(BrowserPasswordImport.decrypt(value, key: Data(repeating: 1, count: 16)) == nil)
+    }
     @Test func erasesOnlySelectedProfileAndDoesNotFollowInteriorLinks() throws {
         let root = temporaryDirectory(), id = UUID(), other = UUID()
         defer { try? FileManager.default.removeItem(at: root) }

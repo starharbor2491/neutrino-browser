@@ -13,7 +13,7 @@ pub const OPS: &[&str] = &[
     "tab-action", "rename-tab", "select-index", "tab-step", "reopen-closed", "find-open", "find-query",
     "find-step", "find-close", "address-input", "suggest-move", "suggest-accept", "page-command",
     "nav-history", "go-history", "site-setting", "clear-data", "site-data", "edit-bookmark", "reading",
-    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "delete-space",
+    "session", "board", "web-panel", "favorite", "space-appearance", "folder-color", "nest-folder", "browser-passwords", "delete-space",
     "delete-profile", "capture-mode", "capture-area", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed",
@@ -556,6 +556,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
         "tidy-tabs" => "tidy-tabs",
         "address-book" | "card" => "autofill",
         "feed" => "feeds",
+        "browser-passwords" => "password-manager",
         "page-command" if value == "panic" => "panic",
         "page-command" if value == "break" => "break-mode",
         "page-command" if value == "fast-forward" || value == "rewind" => "fast-forward",
@@ -900,6 +901,13 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             let gradient: Vec<&str> = array(&r["gradient"]).iter().filter_map(Value::as_str).filter(|h| crate::appearance::hex(h)).take(2).collect();
             if regular && (emoji.chars().count() <= 2) {
                 commands.push(json!({"op":"setSpaceAppearance","id":target,"emoji":emoji,"gradient":gradient}));
+            }
+        }
+        // Saved passwords from a Chromium-family browser, decrypted by the host with that browser's Keychain key.
+        "browser-passwords" => {
+            if regular && crate::onboarding::PASSWORD_SOURCES.contains(&value) {
+                commands.push(json!({"op":"importBrowserPasswords","value":value}));
+                s.notice = "macOS may ask to let Neutrino use the browser’s password key.".into();
             }
         }
         "nest-folder" => {

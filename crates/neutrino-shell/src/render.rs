@@ -1045,7 +1045,11 @@ fn settings(s: &Shell) -> Markup {
                     label class="field"{span{"Password"}span class="password-field"{input name="password" type="password" autocomplete="new-password" required="";button class="button quiet" type="button" data-generate="password"{"Generate"}}}
                     button class="button primary" type="submit"{"Save login"}
                 }}
-                div class="button-row"{button class="button" data-op="native" data-action="importPasswords"{"Import CSV…"}button class="button" data-op="native" data-action="exportPasswords" disabled[array(&s.snapshot["credentials"]).is_empty()]{"Export CSV…"}}}
+                div class="button-row"{button class="button" data-op="native" data-action="importPasswords"{"Import CSV…"}button class="button" data-op="native" data-action="exportPasswords" disabled[array(&s.snapshot["credentials"]).is_empty()]{"Export CSV…"}}
+                @if !s.private() {details class="credential-disclosure"{summary{"Import from another browser"}
+                    p class="field-help"{"Reads the browser’s saved passwords on this Mac. macOS asks before Neutrino can use that browser’s password key."}
+                    div class="button-row"{@for id in crate::onboarding::PASSWORD_SOURCES {button class="button" data-op="browser-passwords" data-value=(id){(crate::onboarding::IMPORT_SOURCES.iter().find(|(i, _)| i == id).map(|(_, n)| *n).unwrap_or(id))}}}
+                }}}
             }
             "updates"|"engines"=>{h2{"Updates"}p class="section-description"{(text(&s.snapshot["updates"],"version"))}(toggle("Automatic updates","Update Neutrino and Chromium together after you quit. Your data stays in place.","automaticUpdates",flag(&s.snapshot["updates"],"automatic"),false))div class="settings-group"{
                 p{(text(&s.snapshot["updates"],"message"))}

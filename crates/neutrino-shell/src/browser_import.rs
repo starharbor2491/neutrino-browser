@@ -157,9 +157,58 @@ pub fn bookmarks(source: &str, home: &str) -> Result<Value, &'static str> {
     Ok(json!(parse_chromium(&document)))
 }
 
+/// Saved logins of a Chromium-family browser: `[{origin, username, encrypted}]`, where
+/// `encrypted` is the stored value in base64. Only the host can decrypt it, with the
+/// browser's key from Keychain, so passwords never pass through here in plain text.
+pub fn logins(source: &str, home: &str) -> Result<Value, &'static str> {
+    use base64::Engine;
+    let home = Path::new(home);
+    if !home.is_absolute() {
+        return Err("Invalid home folder.");
+    }
+    let relative = chromium_bookmarks(source).ok_or("Importing passwords from that browser isn’t supported.")?;
+    let path = home.join(relative).with_file_name("Login Data");
+    let copy = std::env::temp_dir().join(format!("neutrino-logins-{}.sqlite", std::process::id()));
+    std::fs::write(&copy, read_bounded(&path).map_err(|_| "That browser’s saved passwords weren’t found on this Mac.")?)
+        .map_err(|_| "That browser’s saved passwords couldn’t be copied for import.")?;
+    let result = (|| {
+        let db = rusqlite::Connection::open_with_flags(&copy, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| "That browser’s saved passwords couldn’t be opened.")?;
+        let mut query = db
+            .prepare("SELECT origin_url, username_value, password_value FROM logins LIMIT 5000")
+            .map_err(|_| "That browser’s saved passwords use an unsupported format.")?;
+        let rows = query
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Vec<u8>>(2)?)))
+            .map_err(|_| "That browser’s saved passwords couldn’t be read.")?;
+        Ok(rows
+            .flatten()
+            .filter(|(origin, username, secret)| web(origin) && origin.len() <= 2048 && username.len() <= 500 && !secret.is_empty() && secret.len() <= 16_384)
+            .map(|(origin, username, secret)| json!({"origin": origin, "username": username, "encrypted": base64::engine::general_purpose::STANDARD.encode(secret)}))
+            .collect::<Vec<_>>())
+    })();
+    let _ = std::fs::remove_file(&copy);
+    result.map(|found| json!(found))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_chromium_logins_as_encrypted_values() {
+        let home = std::env::temp_dir().join(format!("neutrino-logins-test-{}", std::process::id()));
+        let folder = home.join("Library/Application Support/BraveSoftware/Brave-Browser/Default");
+        std::fs::create_dir_all(&folder).unwrap();
+        let db = rusqlite::Connection::open(folder.join("Login Data")).unwrap();
+        db.execute_batch("CREATE TABLE logins (origin_url TEXT, username_value TEXT, password_value BLOB);
+            INSERT INTO logins VALUES ('https://a.example/', 'me', X'763130AA'), ('https://never.example/', '', X''), ('android://app', 'x', X'7631');").unwrap();
+        drop(db);
+        let found = logins("brave", home.to_str().unwrap()).unwrap();
+        assert_eq!(found.as_array().unwrap().len(), 1);
+        assert_eq!(found[0]["encrypted"], "djEwqg==");
+        assert!(logins("safari", home.to_str().unwrap()).is_err());
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn chromium_bookmarks_flatten_folders_and_skip_non_web_addresses() {

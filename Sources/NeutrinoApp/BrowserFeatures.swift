@@ -785,6 +785,22 @@ final class BrowserFeatures {
                 } catch { self?.app.notice = error.localizedDescription }
             }
         case "importPasswords": guard regular else { break }; importPasswords(profileID)
+        case "importBrowserPasswords":
+            guard regular, app.feature("password-manager"), let source = command["value"] as? String else { break }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let found = try await BrowserPasswordImport.read(source: source)
+                    var imported = 0
+                    for login in found.logins.prefix(5000) {
+                        guard let address = URL(string: login.origin), let origin = try? LocalCredential.origin(for: address) else { continue }
+                        if (try? LocalCredential(origin: origin, username: login.username, password: login.password).save(profile: profileID)) != nil { imported += 1 }
+                    }
+                    self.credentialsChanged = true
+                    self.app.notice = "Imported \(imported) passwords from \(found.name) into Keychain."
+                } catch { self.app.notice = error.localizedDescription }
+                self.refresh()
+            }
         case "exportPasswords": guard regular else { break }; exportPasswords(profileID)
         default: return false
         }

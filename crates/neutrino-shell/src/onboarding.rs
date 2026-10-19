@@ -20,6 +20,9 @@ pub const IMPORT_SOURCES: &[(&str, &str)] = &[
     ("operagx", "Opera GX"),
 ];
 
+/// Browsers whose saved passwords can be imported: those that keep them in Chromium's format.
+pub const PASSWORD_SOURCES: &[&str] = &["chrome", "edge", "brave", "arc", "vivaldi", "opera", "operagx"];
+
 pub fn render(s: &Shell) -> Markup {
     let preset = text(&s.setup, "preset");
     let flow = setup_flow(preset);
@@ -77,6 +80,10 @@ fn import_list(s: &Shell) -> Markup {
                 }
             }
             button class="mimic-row" role="listitem" data-op="importBookmarks" {span class="site-icon blank-icon"{(icon("download"))}span{"A bookmarks file (HTML)"}span class="mimic-row-action"{"Choose…"}}
+            @if PASSWORD_SOURCES.contains(&done) && crate::features::on(s, "password-manager") {
+                @let name = IMPORT_SOURCES.iter().find(|(id, _)| *id == done).map(|(_, n)| *n).unwrap_or("");
+                button class="mimic-row" role="listitem" data-op="browser-passwords" data-value=(done) {span class="site-icon blank-icon"{(icon("key"))}span{"Passwords from "(name)}span class="mimic-row-action"{"Import"}}
+            }
         }
         @if !text(&s.snapshot, "importStatus").is_empty() {p class="mimic-note" role="status"{(text(&s.snapshot, "importStatus"))}}
     }
