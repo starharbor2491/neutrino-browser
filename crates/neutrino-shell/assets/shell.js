@@ -8,6 +8,8 @@
     currentEditing = false,
     generation = 0,
     drag = null,
+    splitArmed = false,
+    lastDragPoint = null,
     resize = null,
     adjustment = null,
     adjustmentSequence = 0,
@@ -819,7 +821,7 @@
           kind: "geometry",
           generation,
           overlay:
-            currentOverlay || drag?.kind === "component" || !!overlapsMenu ||
+            currentOverlay || drag?.kind === "component" || splitArmed || !!overlapsMenu ||
             // The icon-only sidebar expands over the page while hovered.
             !!root.querySelector(".compact-rail:not(.editing-preview) > .workspace-rail:hover"),
           editing: currentEditing,
@@ -1128,11 +1130,24 @@
       });
       return;
     }
+    // Up and Down move through a menu's items, starting from its filter field.
+    const listMenu = e.target.closest?.(".popover-menu");
+    if (listMenu && !e.altKey && !command && ["ArrowDown", "ArrowUp"].includes(e.key) && e.target.matches("input[data-name], button.menu-item")) {
+      const items = [...listMenu.querySelectorAll("button.menu-item:not(:disabled)")].filter((x) => x.getClientRects().length);
+      if (items.length) {
+        e.preventDefault();
+        const at = items.indexOf(e.target), field = listMenu.querySelector("input[data-name]");
+        const next = e.key === "ArrowDown" ? items[at + 1] || items[0] : at > 0 ? items[at - 1] : field || items[items.length - 1];
+        next.focus();
+      }
+      return;
+    }
     if (e.key === "Enter" && e.target.matches("input[data-name]")) {
+      // Tab search opens the first match, as Chrome's does.
       const action = e.target
         .closest(".popover-menu")
-        ?.querySelector("button.primary[data-op]");
-      if (action && e.target.value.trim()) {
+        ?.querySelector('button.primary[data-op], [data-menu="tab-search"] button[data-op="selectTab"]');
+      if (action && (e.target.value.trim() || action.dataset.op === "selectTab")) {
         e.preventDefault();
         send({ ...action.dataset });
       }
@@ -1385,10 +1400,31 @@
         ? e.target.closest("[data-space]")
         : drag.kind === "folder"
           ? e.target.closest("[data-folder-source]")
-          : e.target.closest("[data-tab],[data-space],[data-drop-group]");
+          : e.target.closest("[data-split-side],[data-tab],[data-space],[data-drop-group]");
   }
+  // Arc and Vivaldi: a tab dragged onto the page opens beside it. Native pages sit
+  // above the interface, so the drop zone appears (and the pages step aside) once the
+  // drag reaches the page, or leaves the interface right beside it.
+  function canSplitDrop() {
+    const zone = root.querySelector(".split-drop");
+    return !!(drag && drag.kind === "tab" && zone && zone.dataset.current !== drag.id);
+  }
+  function armSplit(on) {
+    if (splitArmed === on) return;
+    splitArmed = on;
+    document.body.classList.toggle("split-armed", on);
+    scheduleGeometry();
+  }
+  document.addEventListener("dragleave", (e) => {
+    if (e.relatedTarget || !canSplitDrop() || !lastDragPoint) return;
+    const frame = root.querySelector(".page-frame")?.getBoundingClientRect();
+    if (frame && lastDragPoint.x > frame.left - 48 && lastDragPoint.x < frame.right && lastDragPoint.y > frame.top - 48 && lastDragPoint.y < frame.bottom)
+      armSplit(true);
+  });
   document.addEventListener("dragover", (e) => {
     if (!drag) return;
+    lastDragPoint = { x: e.clientX, y: e.clientY };
+    if (canSplitDrop() && e.target.closest?.(".page-frame")) armSplit(true);
     clearTargets();
     const target = dropTarget(e);
     if (!target) return;
@@ -1401,7 +1437,7 @@
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     target.classList.add(
-      stacking(e, target) ? "drop-stack"
+      stacking(e, target) || nesting(e, target) ? "drop-stack"
         : target.dataset.tab || drag.kind === "folder" || drag.kind === "space"
         ? "drop-before"
         : "drop-hover",
@@ -1416,15 +1452,32 @@
   // Vivaldi: a tab dropped on the middle of another loose tab stacks the two.
   function stacking(e, target) {
     if (!drag || drag.kind !== "tab" || !target.dataset.tab || target.dataset.tab === drag.id) return false;
-    if (!root.querySelector(".browser-shell.style-vivaldi") || target.closest("[data-folder]")) return false;
+    // Loose tab rows carry an empty data-folder; only a tab already in a folder or stack is excluded.
+    if (!root.querySelector(".browser-shell.style-vivaldi") || target.closest("[data-folder]:not([data-folder=''])")) return false;
     const r = target.getBoundingClientRect();
     return e.clientX > r.left + r.width * 0.25 && e.clientX < r.right - r.width * 0.25;
+  }
+  // Arc: a folder dropped on the middle of another folder's heading goes inside it.
+  function nesting(e, target) {
+    if (!drag || drag.kind !== "folder" || !target.dataset.folderSource || target.dataset.folderSource === drag.id) return false;
+    const r = target.getBoundingClientRect();
+    return e.clientY > r.top + r.height * 0.25 && e.clientY < r.bottom - r.height * 0.25;
   }
   document.addEventListener("drop", (e) => {
     if (!drag) return;
     const target = dropTarget(e);
     if (!target) return;
     e.preventDefault();
+    if (target.dataset.splitSide) {
+      send({ op: "split-with", id: drag.id });
+      cleanupDrag();
+      return;
+    }
+    if (nesting(e, target)) {
+      send({ op: "nest-folder", id: drag.id, parent: target.dataset.folderSource });
+      cleanupDrag();
+      return;
+    }
     if (stacking(e, target)) {
       send({ op: "stack-tabs", id: drag.id, onto: target.dataset.tab });
       cleanupDrag();
@@ -1458,6 +1511,8 @@
   });
   function cleanupDrag() {
     drag = null;
+    lastDragPoint = null;
+    armSplit(false);
     document.body.classList.remove(
       "dragging-tab",
       "dragging-component",

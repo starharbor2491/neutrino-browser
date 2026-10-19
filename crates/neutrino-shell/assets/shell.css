@@ -1258,8 +1258,36 @@ li.done .guide-check {
   margin: 0;
   background: var(--hover);
 }
+.horizontal-group .tab-row {
+  container: strip-tab / inline-size;
+}
 .horizontal-group .tab-row.active {
-  min-width: 96px;
+  min-width: 120px;
+}
+/* As in Chrome, the selected tab always shows its close button, and a crowded
+   inactive tab keeps only its icon. */
+.horizontal-group .tab-row.active .tab-close {
+  opacity: 1;
+  width: 26px;
+}
+.horizontal-group .tab-row .tab-menu {
+  display: none;
+}
+@container strip-tab (max-width: 150px) {
+  .tab-select {
+    padding-inline: 6px;
+  }
+}
+@container strip-tab (max-width: 76px) {
+  .tab-row:not(.active) .tab-close {
+    display: none !important;
+  }
+  .tab-row:not(.active) .tab-select {
+    justify-content: center;
+  }
+  .tab-row:not(.active) .tab-select > span:not(.site-icon) {
+    display: none;
+  }
 }
 .horizontal-group .tab-select {
   overflow: hidden;
@@ -4059,6 +4087,25 @@ details.start-guide > .guide-keys {
 .strip-button.selected {
   box-shadow: inset 2px 0 0 var(--accent);
 }
+.strip-button {
+  position: relative;
+}
+.strip-badge {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 15px;
+  text-align: center;
+  pointer-events: none;
+}
 .panel-strip [data-tip]::after {
   left: calc(100% + 8px);
   bottom: auto;
@@ -4591,6 +4638,11 @@ details.start-guide > .guide-keys {
 }
 .style-safari .horizontal-group .tab-row.active {
   background: var(--raised);
+}
+/* Inactive labels on the tinted Chrome and Safari strips stay above 4.5:1. */
+.style-chrome .horizontal-group .tab-row:not(.active) .tab-select,
+.style-safari .horizontal-group .tab-row:not(.active) .tab-select {
+  color: color-mix(in oklab, var(--ink) 62%, var(--muted));
 }
 .style-safari .toolbar-drag {
   flex: 0;
@@ -5628,6 +5680,41 @@ input[type="color"] {
 }
 .split-canvas[data-axis="stacked"] > .split-divider::after {
   inset: 3px 30%;
+}
+/* Drag a tab onto the page to open it in split view */
+.split-drop {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+body.split-armed .split-drop {
+  display: flex;
+}
+.split-drop-zone {
+  width: 50%;
+  margin: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed color-mix(in oklab, var(--accent) 60%, transparent);
+  border-radius: calc(12px * var(--sq));
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+  pointer-events: auto;
+  transition: background var(--t-fast);
+}
+.split-drop-zone .icon {
+  width: 22px;
+  height: 22px;
+}
+.split-drop-zone.drop-hover {
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 /* Hidden sidebar: reveal at the window edge */
 .rail-edge {
@@ -6852,8 +6939,18 @@ input[type="color"] {
   flex: 1;
 }
 .chip-remove {
-  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  margin: -3px -6px -3px 2px;
+  border-radius: calc(6px * var(--sq));
   opacity: 0.6;
+}
+.chip-remove:hover {
+  opacity: 1;
+  background: var(--hover);
 }
 .feed-entries {
   display: flex;

@@ -714,8 +714,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "clearNotice": app.notice = nil
         case "uninstall": AppUninstaller.request(app)
         case "newTab":
-            guard let value=command["url"] as? String, let url=URL(string:value), AddressResolver.isWebURL(url) else { return }
-            model?.newTab(url:url, parentID:(command["parentID"] as? String).flatMap(UUID.init(uuidString:)))
+            let parent=(command["parentID"] as? String).flatMap(UUID.init(uuidString:))
+            // Without an address this is a blank tab showing the start page; the shell focuses its address field.
+            guard let value=command["url"] as? String else { model?.newTab(parentID:parent); return }
+            guard let url=URL(string:value), AddressResolver.isWebURL(url) else { return }
+            model?.newTab(url:url, parentID:parent)
             pendingPageFocus=model?.session.selectedTabID
         case "selectTab": if let id { model?.selectTab(id) }
         case "selectChromePage", "closeChromePage":

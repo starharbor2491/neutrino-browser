@@ -389,6 +389,17 @@ impl Shell {
                     self.selected_result = request["index"].as_u64().unwrap_or(0) as usize;
                     return self.dispatch(json!({"op":"activate-result"}));
                 }
+                // Chrome, Safari, Brave, Opera GX and Vivaldi add a tab showing their start
+                // page with the address field focused; Arc and Neutrino ask in the command bar.
+                "newTab" if crate::render::opens_blank_tab(self) => {
+                    let parent = self.tabs().iter().find(|t| t["id"] == request["parentID"]).map(|t| t["id"].clone()).unwrap_or(Value::Null);
+                    commands.push(json!({"op":"newTab","parentID":parent}));
+                    self.palette = false;
+                    self.menu.clear();
+                    self.close_screen();
+                    self.sidebar_hidden = false;
+                    self.focus = "address-input".into();
+                }
                 "newTab" => {
                     self.palette_serial = self.palette_serial.wrapping_add(1);
                     self.palette = true;

@@ -942,6 +942,10 @@ pub fn privacy_extra(s: &Shell) -> Markup {
 }
 
 /// Vivaldi's Feeds panel: newest entries from every subscription, unread first in weight.
+/// Unread entries across this Profile's feeds, for the Feeds button's badge.
+pub fn feeds_unread(s: &Shell) -> usize {
+    profile_items(s, "feeds").iter().flat_map(|f| array(&f["entries"]).iter()).filter(|e| !flag(e, "read")).count()
+}
 pub fn feeds_panel(s: &Shell) -> Markup {
     let feeds = profile_items(s, "feeds");
     let mut entries: Vec<(&Value, &Value)> = feeds.iter().flat_map(|f| array(&f["entries"]).iter().map(move |e| (*f, e))).collect();

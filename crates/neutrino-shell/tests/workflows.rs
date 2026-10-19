@@ -289,6 +289,7 @@ fn folders_nest_inside_folders_within_the_depth_limit() {
     let menu = s.dispatch(json!({"op":"menu","value":"folder:f2"}))["html"].as_str().unwrap().to_string();
     assert!(menu.contains("data-parent=\"\"") && menu.contains("data-parent=\"f4\"") && !menu.contains("data-parent=\"f3\""));
     assert!(commands(&s.dispatch(json!({"op":"nest-folder","id":"f1","parent":"f3"}))).is_empty());
+    assert!(s.notice.contains("can’t go inside one of its own folders"));
     assert_eq!(commands(&s.dispatch(json!({"op":"nest-folder","id":"f4","parent":"f3"})))[0], json!({"op":"nestFolder","id":"f4","parent":"f3"}));
     // Inbox inside Alpha would be a fourth level, so Alpha offers no new folder inside after it.
     s.snapshot["folders"][3]["parentID"] = json!("f3");
@@ -411,6 +412,56 @@ fn captures_can_be_marked_up_before_saving() {
     let r = s.dispatch(json!({"op":"markup","value":"copy","data":"data:image/png;base64,QUJD"}));
     assert_eq!(commands(&r)[0], json!({"op":"markupSave","data":"data:image/png;base64,QUJD","copy":true}));
     assert!(commands(&s.dispatch(json!({"op":"markup","value":"save","data":"javascript:alert(1)"}))).is_empty());
+}
+#[test]
+fn new_tab_follows_the_chosen_browser() {
+    let mut s = shell();
+    // Neutrino and Arc ask in the command bar.
+    s.dispatch(json!({"op":"newTab"}));
+    assert!(s.palette);
+    s.dispatch(json!({"op":"escape"}));
+    for preset in ["chrome", "safari", "brave", "gx", "vivaldi"] {
+        s.snapshot["configuration"]["theme"]["preset"] = json!(preset);
+        let r = s.dispatch(json!({"op":"newTab"}));
+        assert!(!s.palette, "{preset}");
+        assert_eq!(commands(&r), &[json!({"op":"newTab","parentID":null})]);
+        assert_eq!(r["focus"], "address-input");
+    }
+    // The empty tab is listed, and its start page's search box is the address field.
+    s.snapshot["session"]["tabs"].as_array_mut().unwrap().push(json!({"id":"n","title":"New tab","pinned":false}));
+    s.snapshot["session"]["selectedTabID"] = json!("n");
+    s.snapshot["configuration"]["theme"]["preset"] = json!("chrome");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-tab="n""#) && html.contains(r#"class="start-search" data-op="focus-address""#));
+    s.snapshot["configuration"]["theme"]["preset"] = json!("arc");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains(r#"data-tab="n""#));
+}
+#[test]
+fn a_tab_dragged_onto_the_page_can_open_in_split_view() {
+    let mut s = shell();
+    // With no other page open there is nothing to show beside this one.
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("split-drop"));
+    s.snapshot["session"]["tabs"][2]["url"] = json!("https://example.com/c");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"class="split-drop" data-current="a""#));
+    // Only a tab with a page can join, and never the current one.
+    assert!(commands(&s.dispatch(json!({"op":"split-with","id":"a"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"split-with","id":"b"}))).is_empty());
+    assert_eq!(commands(&s.dispatch(json!({"op":"split-with","id":"c"})))[0], json!({"op":"splitWith","id":"c"}));
+    s.snapshot["session"]["split"] = json!({"first":"a","second":"c"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("split-drop"));
+}
+#[test]
+fn expired_payment_cards_are_refused() {
+    let mut s = shell();
+    s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026
+    let r = s.dispatch(json!({"op":"card","value":"save","name":"Ada","number":"4111 1111 1111 1111","expiry":"09/26"}));
+    assert!(commands(&r).is_empty() && s.notice.contains("expired"));
+    let r = s.dispatch(json!({"op":"card","value":"save","name":"Ada","number":"4111 1111 1111 1111","expiry":"10/26"}));
+    assert_eq!(commands(&r)[0]["op"], "saveCard");
 }
 #[test]
 fn closing_palette_restores_page_identity() {

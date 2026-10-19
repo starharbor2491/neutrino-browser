@@ -405,6 +405,18 @@ pub fn parse_rules(source: &str) -> Vec<String> {
 }
 
 /// Whether a card number passes the Luhn check card issuers use.
+/// The UTC year and month of a time in seconds since 2001-01-01.
+fn year_month(seconds: f64) -> (u32, u32) {
+    // Days since 0000-03-01, from Howard Hinnant's civil_from_days.
+    let z = (seconds / 86_400.).floor().clamp(-1e6, 1e6) as i32 as i64 + 11_323 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    ((yoe + era * 400 + i64::from(month <= 2)) as u32, month as u32)
+}
 fn luhn(number: &str) -> bool {
     let digits: Vec<u32> = number.chars().filter_map(|c| c.to_digit(10)).collect();
     (12..=19).contains(&digits.len())
@@ -979,6 +991,8 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             if regular && exists(id) && fits {
                 commands.push(json!({"op":"nestFolder","id":id,"parent":parent}));
                 s.menu.clear();
+            } else if regular && exists(id) && id != parent {
+                s.notice = format!("Folders go up to {} levels deep, and a folder can’t go inside one of its own folders.", crate::render::MAX_FOLDER_DEPTH + 1);
             }
         }
         "folder-color" => {
@@ -1195,6 +1209,13 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 if !luhn(&number) || !(1..=12).contains(&month) || !(2000..=2100).contains(&year) {
                     s.notice = "Check the card number and the expiry date (MM/YY).".into();
                     return;
+                }
+                // A card is valid through the end of its expiry month.
+                if let Some(now) = s.snapshot["now"].as_f64().filter(|n| *n > 0.) {
+                    if (year, month) < year_month(now) {
+                        s.notice = "This card has expired. Check the expiry date (MM/YY).".into();
+                        return;
+                    }
                 }
                 commands.push(json!({"op":"saveCard","name":bound(text(r, "name"), 80),"number":number,"month":month,"year":year}));
                 s.notice = "Card saved in Keychain.".into();

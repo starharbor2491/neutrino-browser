@@ -96,8 +96,11 @@ pub(crate) fn tab_visible(tab: &Value, s: &Shell) -> bool {
     if !tab["favoriteID"].is_null() && style(s) == "arc" && tab["id"] != s.snapshot["session"]["selectedTabID"] {
         return false;
     }
+    // Arc and Neutrino keep an empty tab out of the list until it has a page; the
+    // layouts whose New tab adds a tab list it at once, as their browsers do.
     if text(tab, "url").is_empty()
         && text(tab, "title") == "New tab"
+        && !opens_blank_tab(s)
         && s.snapshot["chromePageCounts"][text(tab, "id")]
             .as_u64()
             .unwrap_or(0)
@@ -291,6 +294,14 @@ pub(crate) fn style(s: &Shell) -> &str {
         _ => "neutrino",
     }
 }
+/// Layouts whose New tab adds a tab with the start page, as their browsers do.
+pub(crate) fn opens_blank_tab(s: &Shell) -> bool {
+    ["chrome", "safari", "brave", "gx", "vivaldi"].contains(&style(s))
+}
+/// The start page's search box: the address field when New tab already made this tab.
+fn start_search_op(s: &Shell) -> &'static str {
+    if opens_blank_tab(s) { "focus-address" } else { "newTab" }
+}
 fn rail(s: &Shell, preview: bool) -> Markup {
     let horizontal = ["top", "bottom"].contains(&text(&s.config()["layout"], "tabs"));
     let bottom = text(&s.config()["layout"], "navigation") == "bottom";
@@ -368,7 +379,7 @@ fn vacant_page(s: &Shell) -> Markup {
         "arc" => html! {section class="start-page arc-empty" aria-label="New tab"{button class="arc-hint" data-op="newTab"{kbd{"⌘T"}span{"Search or open a site"}}}},
         "chrome" => html! {section class="start-page chrome-start" aria-label="New tab"{div class="start-inner"{
             (private_note(s))
-            @if search {button class="start-search" data-op="newTab"{(icon("search"))span{"Search or type a URL"}}}
+            @if search {button class="start-search" data-op=(start_search_op(s)){(icon("search"))span{"Search or type a URL"}}}
             @if sites {(shortcut_grid(s, 8, "shortcut"))}
         }}},
         "brave" => html! {section class="start-page brave-start" aria-label="New tab"{
@@ -379,7 +390,7 @@ fn vacant_page(s: &Shell) -> Markup {
                 span class="spacer"{}
                 @if clock {time class="brave-clock" data-clock="true"{}}
             }
-            div class="start-inner"{(private_note(s))@if search {button class="start-search" data-op="newTab"{(icon("search"))span{"Search the web privately"}}}@if sites {(shortcut_grid(s, 6, "shortcut"))}}
+            div class="start-inner"{(private_note(s))@if search {button class="start-search" data-op=(start_search_op(s)){(icon("search"))span{"Search the web privately"}}}@if sites {(shortcut_grid(s, 6, "shortcut"))}}
         }},
         "vivaldi" | "gx" => html! {section class="start-page speed-dial" aria-label="Start page"{div class="start-inner"{
             @if style(s) == "vivaldi" {nav class="dial-tabs" aria-label="Start page sections"{button class="selected" aria-current="page"{"Speed Dial"}button data-op="screen" data-value="library" data-section="bookmarks"{"Bookmarks"}button data-op="screen" data-value="library" data-section="history"{"History"}}}
@@ -636,7 +647,8 @@ fn panel_strip(s: &Shell) -> Markup {
                 "reading" if crate::features::on(s, "reading-list") => ("reading", "Reading List", "book"),
                 _ => ("", "", ""),
             };
-            @if !key.is_empty() {button class=(if open == key {"strip-button selected"} else {"strip-button"}) data-op="panel" data-value=(if open == key {""} else {key}) data-tip=(label) aria-label=(label) aria-pressed=((open == key).to_string()){(icon(glyph))}}
+            @let unread = if key == "feeds" { crate::views::feeds_unread(s) } else { 0 };
+            @if !key.is_empty() {button class=(if open == key {"strip-button selected"} else {"strip-button"}) data-op="panel" data-value=(if open == key {""} else {key}) data-tip=(label) aria-label=(if unread > 0 {format!("{label}, {unread} unread")} else {label.to_string()}) aria-pressed=((open == key).to_string()){(icon(glyph))@if unread > 0 {span class="strip-badge" aria-hidden="true"{(if unread > 99 {"99+".to_string()} else {unread.to_string()})}}}}
         }
         @if !s.private() {span class="strip-divider"{}(crate::views::web_panel_buttons(s))}
         span class="spacer"{}
@@ -764,7 +776,7 @@ fn browser(s: &Shell, preview: bool) -> Markup {
             }} @else if let Some(message)=s.snapshot["pageError"].as_str(){(page_error(message,text(s.active(),"id")))}
             @else if !text(s.active(),"url").is_empty() {div class="native-page" data-page=(text(s.active(),"id")){(page_backdrop(s,text(s.active(),"id")))@if preview {div class="preview-webpage"{p{"Your page"}small{(host(text(s.active(),"url")))}}}}}
             @else {(vacant(s))}
-            @if !preview {(crate::views::capture_overlay(s))(crate::views::markup_editor(s))}
+            @if !preview {(crate::views::capture_overlay(s))(crate::views::markup_editor(s))(split_drop(s))}
         }
         @if panel {(workspace_panel(s,if panel_key.is_empty(){"bookmarks"}else{panel_key}))}}
         @if horizontal && placement=="bottom"{(horizontal_tabs(s,preview))}
@@ -774,6 +786,16 @@ fn browser(s: &Shell, preview: bool) -> Markup {
     }}
 }
 
+/// Arc and Vivaldi: a tab dragged onto the page opens beside it. Shown only during the drag.
+fn split_drop(s: &Shell) -> Markup {
+    let ready = s.screen == "browse"
+        && s.snapshot["session"]["split"].is_null()
+        && !text(s.active(), "url").is_empty()
+        && s.tabs().iter().filter(|t| !text(t, "url").is_empty()).count() > 1;
+    html! {@if ready {div class="split-drop" data-current=(text(s.active(),"id")) aria-hidden="true"{
+        div class="split-drop-zone" data-split-side="trailing"{(icon("split"))span{"Open in split view"}}
+    }}}
+}
 fn page_backdrop(s: &Shell, id: &str) -> Markup {
     let image = s.snapshot["pageBackdrops"][id].as_str().unwrap_or("");
     html! {@if (s.palette || !s.menu.is_empty()) && image.starts_with("data:image/png;base64,") && image.len()<=2_100_000 {img class="page-backdrop" src=(image) alt="" aria-hidden="true";}}
