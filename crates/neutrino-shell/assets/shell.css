@@ -1315,6 +1315,7 @@ li.done .guide-check {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-height: 28px;
   font-size: 11px;
   color: var(--muted);
 }
@@ -4216,7 +4217,7 @@ details.start-guide > .guide-keys {
   align-items: center;
   justify-content: center;
   min-width: 26px;
-  height: 22px;
+  height: 24px;
   padding: 0 4px;
   border-radius: calc(4px * var(--sq));
   color: var(--muted);
