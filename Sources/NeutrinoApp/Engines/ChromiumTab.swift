@@ -388,6 +388,11 @@ final class ChromiumTab: BrowserEngineTab {
         }
     }
     private var permissionDefaults: Set<String>?
+    private var sitePermissions: [String: SiteSettings]?, sentSitePermissions: [String: SiteSettings] = [:]
+    override func setSitePermissions(_ sites: [String: SiteSettings]) {
+        sitePermissions = sites.filter { $0.value.camera != nil || $0.value.microphone != nil || sentSitePermissions[$0.key] != nil }
+        if activeContentKnown && !loading { sendPrivacyPreferences() }
+    }
     override func setPermissionDefaults(blocked: Set<String>) {
         permissionDefaults = blocked
         if activeContentKnown && !loading { sendPrivacyPreferences() }
@@ -398,6 +403,18 @@ final class ChromiumTab: BrowserEngineTab {
             command(Int(NEUTRINO_CEF_PREFERENCE), text: "https_only_mode_enabled", value: privacy.httpsOnly ? 1 : 0)
             command(Int(NEUTRINO_CEF_PREFERENCE), text: "profile.cookie_controls_mode", value: privacy.cookies ? 1 : 0)
             command(Int(NEUTRINO_CEF_PREFERENCE), text: "webrtc.ip_handling_policy", value: privacy.localIP ? 1 : 0)
+        }
+        if let sites = sitePermissions {
+            sitePermissions = nil
+            // Chromium keeps its own record per origin; the site and its www name both get the choice.
+            for (site, settings) in sites.sorted(by: { $0.key < $1.key }).prefix(300) where site.count <= 253 && !site.contains("/") {
+                guard sentSitePermissions[site] != settings else { continue }
+                sentSitePermissions[site] = settings
+                for (kind, choice) in [("camera", settings.camera), ("microphone", settings.microphone)] {
+                    let value: Double = choice == "allow" ? 1 : choice == "block" ? 2 : 0
+                    for host in [site, "www." + site] { command(Int(NEUTRINO_CEF_SITE_PERMISSION), text: kind + "\nhttps://" + host + "/", value: value) }
+                }
+            }
         }
         if let blocked = permissionDefaults {
             permissionDefaults = nil

@@ -41,7 +41,10 @@ enum { NEUTRINO_CEF_LOAD = 1, NEUTRINO_CEF_RELOAD, NEUTRINO_CEF_STOP,
        /* Value 1 removes tracking parameters from top-level addresses, 0 keeps them. */
        NEUTRINO_CEF_STRIP_TRACKING,
        /* Value is a number of seconds; deletes the Profile's cookies created within it. */
-       NEUTRINO_CEF_CLEAR_COOKIES_SINCE };
+       NEUTRINO_CEF_CLEAR_COOKIES_SINCE,
+       /* Text is "camera" or "microphone", a newline and an http(s) site address;
+          value 1 allows, 2 blocks and 0 returns the site to the default. */
+       NEUTRINO_CEF_SITE_PERMISSION };
 
 /// Versioned ABI loaded only from an explicitly installed engine package.
 typedef struct neutrino_cef_api {

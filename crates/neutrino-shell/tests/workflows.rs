@@ -228,6 +228,42 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn choosing_a_mode_drops_a_themes_window_colours() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["surfaceHex"] = json!("1c1420");
+    s.snapshot["configuration"]["theme"]["textHex"] = json!("f3edf2");
+    s.snapshot["configuration"]["theme"]["themePack"] = json!("GX Classic");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-value","key":"colorMode","value":"dark"}));
+    let theme = &s.draft.as_ref().unwrap()["theme"];
+    assert!(theme["surfaceHex"].is_null() && theme["textHex"].is_null() && theme["themePack"].is_null());
+    assert_eq!(theme["colorMode"], "dark");
+}
+#[test]
+fn sleeping_the_current_tab_moves_to_a_neighbour_first() {
+    let mut s = shell();
+    s.snapshot["session"]["tabs"][2]["url"] = json!("https://example.com/c");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let r = s.dispatch(json!({"op":"run-action","value":"sleep-tab"}));
+    assert_eq!(commands(&r), &[json!({"op":"selectTab","id":"b"}), json!({"op":"sleepTab","id":"a"})][..]);
+    s.snapshot["session"]["tabs"] = json!([{"id":"a","title":"Alpha","url":"https://example.com/a"}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(commands(&s.dispatch(json!({"op":"run-action","value":"sleep-tab"}))).is_empty());
+    assert!(s.notice.contains("Open another tab first"));
+}
+#[test]
+fn blank_tabs_take_each_browsers_name() {
+    let mut s = shell();
+    s.snapshot["session"]["tabs"].as_array_mut().unwrap().push(json!({"id":"n","title":"New tab","pinned":false}));
+    for (preset, name) in [("chrome", "New Tab"), ("brave", "New Tab"), ("gx", "Speed Dial"), ("safari", "Start Page"), ("vivaldi", "Start Page")] {
+        s.snapshot["configuration"]["theme"]["preset"] = json!(preset);
+        let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+        assert!(html.contains(&format!("aria-label=\"{name}\"")), "{preset}");
+        assert!(!html.contains("Extension pages"), "{preset}");
+    }
+}
+#[test]
 fn background_music_offers_tracks_and_volume() {
     let mut s = shell();
     s.snapshot["preferences"]["backgroundMusic"] = json!(true);

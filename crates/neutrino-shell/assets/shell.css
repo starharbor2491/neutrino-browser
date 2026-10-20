@@ -3587,10 +3587,18 @@ li.done .guide-check {
 .drop-denied {
   cursor: not-allowed;
 }
-.app-shell[data-preset="gx"] {
+/* GX's dark grounds, unless its Light appearance is chosen. */
+.app-shell[data-preset="gx"]:not([data-mode="light"]) {
   --bg: #18141b;
   --rail: #18141b;
   --surface: #231e28;
+}
+@media (prefers-color-scheme: light) {
+  .app-shell[data-preset="gx"][data-mode="system"] {
+    --bg: #ececf0;
+    --rail: #ececf0;
+    --surface: #f7f7fa;
+  }
 }
 .app-shell[data-preset="arc"] .pins .tab-row {
   background: var(--hover);
@@ -4566,19 +4574,40 @@ details.start-guide > .guide-keys {
 /* ---- Opera GX: dark, angular, neon accent */
 .style-gx {
   --gx-glow: 0 0 0 1px color-mix(in oklab, var(--accent) 60%, transparent), 0 0 18px color-mix(in oklab, var(--accent) 30%, transparent);
+  /* Derived from the window's own ground and text, so any mode or theme stays legible. */
+  --gx-ground: color-mix(in oklab, var(--bg) 62%, #000);
+  --gx-tab: color-mix(in oklab, var(--bg) 93%, var(--ink));
+  --gx-tab-active: color-mix(in oklab, var(--bg) 85%, var(--ink));
+  --gx-strip: color-mix(in oklab, var(--bg) 85%, #000);
+  --gx-edge: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+/* GX's Light appearance: a lighter frame around the same angular layout. */
+.app-shell[data-mode="light"] .style-gx {
+  --gx-ground: color-mix(in oklab, var(--bg) 90%, #000);
+  --gx-tab: color-mix(in oklab, var(--surface) 50%, var(--bg));
+  --gx-tab-active: var(--surface);
+  --gx-strip: var(--surface);
+}
+@media (prefers-color-scheme: light) {
+  .app-shell[data-mode="system"] .style-gx {
+    --gx-ground: color-mix(in oklab, var(--bg) 90%, #000);
+    --gx-tab: color-mix(in oklab, var(--surface) 50%, var(--bg));
+    --gx-tab-active: var(--surface);
+    --gx-strip: var(--surface);
+  }
 }
 .style-gx.browser-shell {
-  background: #0d0b10;
+  background: var(--gx-ground);
 }
 .style-gx .horizontal-tabs {
   padding: 6px 6px 2px;
 }
 .style-gx .horizontal-group .tab-row {
-  background: #1a1620;
+  background: var(--gx-tab);
   border-radius: calc(3px * var(--sq));
 }
 .style-gx .horizontal-group .tab-row.active {
-  background: #26202d;
+  background: var(--gx-tab-active);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 .style-gx .page-frame {
@@ -4587,11 +4616,11 @@ details.start-guide > .guide-keys {
 }
 .style-gx .address-group,
 .style-gx .dial-search {
-  background: #1a1620;
+  background: var(--gx-tab);
   border-radius: calc(4px * var(--sq));
 }
 .style-gx .panel-strip {
-  background: #121016;
+  background: var(--gx-strip);
   border-radius: calc(4px * var(--sq));
   margin-right: 6px;
 }
@@ -4604,7 +4633,7 @@ details.start-guide > .guide-keys {
 }
 .style-gx .dial {
   border-radius: calc(4px * var(--sq));
-  box-shadow: inset 0 0 0 1px #ffffff12;
+  box-shadow: inset 0 0 0 1px var(--gx-edge);
 }
 /* ---- Vivaldi: tabs, toolbar, panel bar, status bar; flat and configurable */
 .style-vivaldi.browser-shell {
@@ -5893,10 +5922,17 @@ body.split-armed .split-drop {
 .browser-shell.placement-trailing.rail-peek > .workspace-rail {
   left: auto;
   right: 6px;
+  animation-name: peek-in-trailing;
 }
 @keyframes peek-in {
   from {
     transform: translateX(-16px);
+    opacity: 0;
+  }
+}
+@keyframes peek-in-trailing {
+  from {
+    transform: translateX(16px);
     opacity: 0;
   }
 }

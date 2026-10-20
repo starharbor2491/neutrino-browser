@@ -1287,7 +1287,14 @@ impl Shell {
                 self.push_undo();
             }
             self.adjustment = gesture;
-            self.draft.as_mut().unwrap()[target][key] = v.clone();
+            let draft = self.draft.as_mut().unwrap();
+            draft[target][key] = v.clone();
+            // A theme's window colours belong to its own mode; choosing another mode drops them.
+            if key == "colorMode" && !draft["theme"]["surfaceHex"].is_null() {
+                for k in ["surfaceHex", "textHex", "themePack"] {
+                    draft["theme"][k] = Value::Null;
+                }
+            }
         }
     }
     fn dock(&mut self, r: &Value) {

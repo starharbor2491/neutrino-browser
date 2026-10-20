@@ -277,6 +277,7 @@ final class BrowserModel: ObservableObject {
         tab.setPermissionDefaults(blocked: Set([("camera", preferences.blockCamera), ("microphone", preferences.blockMicrophone),
                                                 ("location", preferences.blockLocation), ("notifications", preferences.blockNotifications)]
             .filter { $0.1 == true }.map(\.0)))
+        if !isPrivate { tab.setSitePermissions(preferences.siteSettings ?? [:]) }
         if app.feature("fingerprinting"), let script = FingerprintProtection.script(exceptions: preferences.shieldsDown ?? []) { tab.installFingerprintProtection(script) }
     }
     func updatePagePolicies() { webTabs.values.forEach(applyPagePolicy); webTabs.values.forEach { $0.applyScriptPolicy() } }

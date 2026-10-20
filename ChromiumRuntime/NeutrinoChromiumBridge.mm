@@ -1618,6 +1618,20 @@ void Command(void* opaque,int command,const char* text,double value) {
       else Message(owner,NEUTRINO_CEF_NOTICE,"Chrome can’t do that for this page.");
       break;
     }
+    case NEUTRINO_CEF_SITE_PERMISSION: {
+      // A site's own camera or microphone choice, made in Neutrino's site settings.
+      const std::string spec=text ? text : "";
+      const auto split=spec.find('\n');
+      if (split==std::string::npos || spec.size()>600 || !(value==0 || value==1 || value==2)) break;
+      const std::string kind=spec.substr(0,split), site=spec.substr(split+1);
+      if ((kind!="camera" && kind!="microphone") || (site.rfind("https://",0)!=0 && site.rfind("http://",0)!=0)) break;
+      auto context=host->GetRequestContext();
+      if (!context) break;
+      context->SetContentSetting(site,site,
+          kind=="camera" ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA : CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC,
+          value==1 ? CEF_CONTENT_SETTING_VALUE_ALLOW : value==2 ? CEF_CONTENT_SETTING_VALUE_BLOCK : CEF_CONTENT_SETTING_VALUE_DEFAULT);
+      break;
+    }
     case NEUTRINO_CEF_PREFERENCE: {
       const std::string name=text ? text : "";
       // Default permission for a kind of request: 2 blocks every request, 3 asks.
@@ -1628,7 +1642,18 @@ void Command(void* opaque,int command,const char* text,double value) {
       if (!permission && name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode" && name!="webrtc.ip_handling_policy") break;
       if (!std::isfinite(value) || value<0 || value>(permission ? 3 : 2) || (permission && value<2)) break;
       auto context=host->GetRequestContext();
-      if (!context || !context->CanSetPreference(name)) break;
+      if (!context) break;
+      if (permission) {
+        // CEF's documented way to set a default: a content setting with no URLs.
+        const cef_content_setting_types_t type=
+            name=="profile.default_content_setting_values.media_stream_camera" ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA :
+            name=="profile.default_content_setting_values.media_stream_mic" ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC :
+            name=="profile.default_content_setting_values.geolocation" ? CEF_CONTENT_SETTING_TYPE_GEOLOCATION :
+            CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS;
+        context->SetContentSetting(CefString(),CefString(),type,
+            value==2 ? CEF_CONTENT_SETTING_VALUE_BLOCK : CEF_CONTENT_SETTING_VALUE_ASK);
+      }
+      if (!context->CanSetPreference(name)) break;
       auto preference=CefValue::Create();
       if (permission || name=="profile.cookie_controls_mode") preference->SetInt(static_cast<int>(value));
       // Keep the local network address out of WebRTC unless a proxy carries the call.

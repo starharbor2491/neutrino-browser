@@ -953,6 +953,12 @@
     document.addEventListener(type, (e) => {
       if (e.target.closest?.(".compact-rail > .workspace-rail")) scheduleGeometry();
     });
+  // A sidebar sliding or expanding over the page: measure again where it comes to rest,
+  // so the part of the page left uncovered matches the sidebar's final place.
+  for (const type of ["animationend", "transitionend"])
+    root.addEventListener(type, (e) => {
+      if (e.target.matches?.(".workspace-rail")) scheduleGeometry();
+    });
   let tracking = 0;
   root.addEventListener("transitionrun", (e) => {
     if (!e.target.matches?.(".browser-shell") || e.propertyName !== "grid-template-columns") return;
@@ -1547,6 +1553,8 @@
     if (canSplitDrop() && e.target.closest?.(".page-frame")) armSplit(true);
     clearTargets();
     const target = dropTarget(e);
+    // Leaving the tab's middle for anywhere else starts the stack dwell over.
+    if (!target || target !== stackDwell.target) resetDwell();
     if (!target) return;
     if (
       (drag.kind === "tab" && target.dataset.tab === drag.id) ||
@@ -1572,7 +1580,12 @@
   // Vivaldi: a tab dropped on the middle of another loose tab stacks the two.
   // Stacking is deliberate: the pointer rests on the middle of a loose tab, along the
   // list's own axis, for a moment. A quicker drop reorders, as in every other layout.
-  let stackDwell = { target: null, since: 0 };
+  let stackDwell = { target: null, since: 0 },
+    stackTimer = 0;
+  function resetDwell() {
+    clearTimeout(stackTimer);
+    stackDwell = { target: null, since: 0 };
+  }
   function stacking(e, target) {
     if (!drag || drag.kind !== "tab" || !target.dataset.tab || target.dataset.tab === drag.id) return false;
     if (!root.querySelector(".browser-shell[data-stacks]")) return false;
@@ -1582,11 +1595,19 @@
     const r = target.getBoundingClientRect();
     const across = target.closest(".horizontal-tabs") ? [e.clientX, r.left, r.width] : [e.clientY, r.top, r.height];
     if (!(across[0] > across[1] + across[2] * 0.25 && across[0] < across[1] + across[2] * 0.75)) {
-      stackDwell = { target: null, since: 0 };
+      resetDwell();
       return false;
     }
     if (stackDwell.target !== target) {
+      resetDwell();
       stackDwell = { target, since: performance.now() };
+      // A still pointer may send no further dragover; the ring still turns when the drop would stack.
+      stackTimer = setTimeout(() => {
+        if (drag && stackDwell.target === target && target.isConnected) {
+          target.classList.remove("drop-before");
+          target.classList.add("drop-stack");
+        }
+      }, 610);
       return false;
     }
     return performance.now() - stackDwell.since >= 600;
@@ -1645,7 +1666,7 @@
   });
   function cleanupDrag() {
     drag = null;
-    stackDwell = { target: null, since: 0 };
+    resetDwell();
     lastDragPoint = null;
     armSplit(false);
     document.body.classList.remove(

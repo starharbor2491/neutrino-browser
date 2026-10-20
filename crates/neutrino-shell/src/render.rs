@@ -161,10 +161,10 @@ pub(crate) fn tab_row(t: &Value, s: &Shell, preview: bool) -> Markup {
     html! {div class=(format!("tab-row{}{}",if selected{" active"}else{""},if sleeping{" sleeping"}else{""})) data-tab=(text(t,"id")) data-group=(group) data-folder=(text(t,"folderID")) draggable=((!preview).to_string()) {
         @if children {button class="branch" data-op="toggleBranch" data-id=(text(t,"id")) aria-label=(format!("{} {}",if flag(t,"collapsed"){"Expand"}else{"Collapse"},text(t,"title"))) {(icon(if flag(t,"collapsed"){"forward"}else{"down"}))}}
         @let thumb = s.snapshot["tabThumbnails"][text(t,"id")].as_str().filter(|v| flag(&s.config()["layout"], "tabThumbnails") && v.starts_with("data:image/jpeg;base64,") && v.len() <= 60_000);
-        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::title(t)) title=[(!crate::features::on(s, "tab-previews")).then(|| crate::views::hover_card(s,t))] {@if let Some(src) = thumb {img class="tab-thumb" src=(src) alt="";}(site(t)) span{(crate::views::title(t))}}
+        button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::tab_title(s,t)) title=[(!crate::features::on(s, "tab-previews")).then(|| crate::views::hover_card(s,t))] {@if let Some(src) = thumb {img class="tab-thumb" src=(src) alt="";}(site(t)) span{(crate::views::tab_title(s,t))}}
         (crate::views::tab_audio(s, t))
-        button class="tab-close" data-op="closeTab" data-id=(text(t,"id")) title="Close tab (⌘W)" aria-label=(format!("Close {}",crate::views::title(t))) {(icon("close"))}
-        button class="tab-menu" data-op="menu" data-value=(format!("tab:{}",text(t,"id"))) title="Tab options" aria-label=(format!("Options for {}",crate::views::title(t))) {(icon("more"))}
+        button class="tab-close" data-op="closeTab" data-id=(text(t,"id")) title="Close tab (⌘W)" aria-label=(format!("Close {}",crate::views::tab_title(s,t))) {(icon("close"))}
+        button class="tab-menu" data-op="menu" data-value=(format!("tab:{}",text(t,"id"))) title="Tab options" aria-label=(format!("Options for {}",crate::views::tab_title(s,t))) {(icon("more"))}
     }
     @for page in array(&s.snapshot["chromePages"][text(t,"id")]).iter().filter(|p|!flag(p,"selected") && !text(p,"url").is_empty() && !text(p,"url").starts_with("chrome://")) {
         div class="chrome-page-row" {button class="tab-select" data-op="chrome-page" data-id=(text(t,"id")) data-page=(page["id"].as_i64().unwrap_or(0)) title=(text(page,"url")){(site(page))span{(if text(page,"title").is_empty(){host(text(page,"url"))}else{text(page,"title").into()})}}button class="tab-close" data-op="chrome-page-close" data-id=(text(t,"id")) data-page=(page["id"].as_i64().unwrap_or(0)) aria-label=(format!("Close {}",text(page,"title"))){(icon("close"))}}
@@ -482,11 +482,14 @@ fn private_note(s: &Shell) -> Markup {
 }
 /// Sites for start-page tiles: bookmarks, then the pages visited most recently.
 fn top_sites(s: &Shell, limit: usize) -> Vec<(String, String)> {
+    // Sites kept in a Speed Dial group stay in that group.
+    let grouped: std::collections::HashSet<&str> = array(&s.snapshot["bookmarkIndex"]).iter()
+        .filter(|b| text(b, "folder").starts_with("Speed Dial/")).map(|b| text(b, "url")).collect();
     let mut seen = std::collections::HashSet::new();
     let mut sites = vec![];
     for entry in array(&s.snapshot["bookmarks"]).iter().chain(array(&s.snapshot["history"])).chain(s.tabs().iter().filter(|t| flag(t, "pinned"))) {
         let url = text(entry, "url");
-        if url.is_empty() || !seen.insert(host(url)) {
+        if url.is_empty() || grouped.contains(url) || !seen.insert(host(url)) {
             continue;
         }
         sites.push((text(entry, "title").to_string(), url.to_string()));
@@ -660,7 +663,7 @@ fn address(s: &Shell, style: &str) -> Markup {
     html! {
         div class="address-group" {
             (location(s))
-            @if ["chrome", "brave", "safari"].contains(&style) {(bookmark_button(s))}
+            @if ["chrome", "brave", "safari"].contains(&style) && !button_hidden(s, "bookmark") {(bookmark_button(s))}
             @if style == "brave" {
                 @let count = s.snapshot["blockedCount"].as_u64().filter(|n| *n > 0 && shields);
                 button class=(if shields {"shields-button on"} else {"shields-button"}) data-op="menu" data-value="shields" title=(if shields {"Shields are up for this site"} else {"Shields are down for this site"}) aria-label=(match count {Some(n) => format!("Shields: {n} blocked on this page"), None => "Shields".into()}){(icon("shield"))@if let Some(n) = count {span class="shield-count"{(if n > 99 {"99+".to_string()} else {n.to_string()})}}}

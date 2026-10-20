@@ -25,10 +25,28 @@ pub fn title(t: &Value) -> &str {
     let custom = text(t, "customTitle");
     if !custom.is_empty() {
         custom
-    } else if text(t, "url").is_empty() {
-        "Extension pages"
+    } else if text(t, "title").is_empty() {
+        "New tab"
     } else {
         text(t, "title")
+    }
+}
+/// A tab's name as the chosen browser shows it: a blank tab is Chrome's and Brave's
+/// "New Tab", Opera's "Speed Dial" and Safari's and Vivaldi's "Start Page".
+pub fn tab_title<'a>(s: &Shell, t: &'a Value) -> &'a str {
+    let name = title(t);
+    if !text(t, "url").is_empty() || !text(t, "customTitle").is_empty() || !["New tab", "New Tab"].contains(&name) {
+        return name;
+    }
+    // A Chromium tab holding pages an extension opened, with no web page of its own.
+    if s.snapshot["chromePageCounts"][text(t, "id")].as_u64().is_some_and(|n| n > 1) {
+        return "Extension pages";
+    }
+    match crate::render::style(s) {
+        "chrome" | "brave" | "arc" => "New Tab",
+        "gx" => "Speed Dial",
+        "safari" | "vivaldi" => "Start Page",
+        _ => "New tab",
     }
 }
 /// A setting switch that sends a typed preference.
@@ -392,11 +410,11 @@ pub fn menus(s: &Shell, id: &str) -> Option<Markup> {
         // Chrome's tab search: every open tab in this Space, filtered as you type.
         "tab-search" => {
             let query = s.name.to_lowercase();
-            let tabs: Vec<&Value> = s.tabs().iter().filter(|t| query.is_empty() || title(t).to_lowercase().contains(&query) || text(t, "url").to_lowercase().contains(&query)).collect();
+            let tabs: Vec<&Value> = s.tabs().iter().filter(|t| query.is_empty() || tab_title(s, t).to_lowercase().contains(&query) || text(t, "url").to_lowercase().contains(&query)).collect();
             html! {
                 label class="field"{span{"Search open tabs"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Title or address" maxlength="200" autocomplete="off";}
                 @if tabs.is_empty() {p class="field-help"{"No open tab matches."}}
-                @for t in tabs.iter().take(60) {button class="menu-item" data-op="selectTab" data-id=(text(t,"id")){(site(t))span{(title(t))@if !text(t,"url").is_empty() {small{(host(text(t,"url")))}}}}}
+                @for t in tabs.iter().take(60) {button class="menu-item" data-op="selectTab" data-id=(text(t,"id")){(site(t))span{(tab_title(s, t))@if !text(t,"url").is_empty() {small{(host(text(t,"url")))}}}}}
             }
         }
         m if m.starts_with("bm-overflow:") => {
@@ -603,7 +621,7 @@ pub fn media_card(s: &Shell) -> Markup {
     let Some(t) = s.tabs().iter().find(|t| text(t, "id") == id) else { return html! {} };
     let playing = flag(media, "playing");
     html! {div class="media-card" role="group" aria-label="Now playing"{
-        button class="media-title" data-op="selectTab" data-id=(id) title="Go to tab"{(site(t))span{strong{(title(t))}small{(host(text(t,"url")))}}}
+        button class="media-title" data-op="selectTab" data-id=(id) title="Go to tab"{(site(t))span{strong{(tab_title(s, t))}small{(host(text(t,"url")))}}}
         div class="media-controls"{
             button class="icon-button" data-op="page-command" data-value="media" data-id=(id) aria-label=(if playing {"Pause"} else {"Play"}){(icon(if playing {"pause"} else {"play"}))}
             button class="icon-button" data-op="tab-action" data-value="mute" data-id=(id) aria-label=(if flag(t,"muted") {"Unmute"} else {"Mute"}){(icon(if flag(t,"muted") {"muted"} else {"volume"}))}
@@ -1313,7 +1331,7 @@ pub fn interface_css(s: &Shell) -> Option<String> {
 
 pub fn hover_card(s: &Shell, t: &Value) -> String {
     let id = text(t, "id");
-    let mut parts = vec![title(t).to_string()];
+    let mut parts = vec![tab_title(s, t).to_string()];
     if !text(t, "url").is_empty() {
         parts.push(readable(text(t, "url")));
     }

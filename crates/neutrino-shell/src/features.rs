@@ -524,14 +524,20 @@ pub fn pattern_url_filter(rule: &str) -> Option<(String, bool)> {
     if !hostname(host) {
         return None;
     }
-    let (tail, anchored) = tail.strip_suffix('|').map_or((tail, false), |t| (t, true));
+    let (tail, mut anchored) = tail.strip_suffix('|').map_or((tail, false), |t| (t, true));
     let mut filter = format!(r"^[a-z]+://([^/]+\.)?{}", host.replace('.', r"\."));
+    // A separator is any character but a letter, digit, '_', '-', '.' or '%', as in the C++ matcher.
+    const SEPARATOR: &str = "[^a-zA-Z0-9_.%-]";
     let chars: Vec<char> = tail.chars().collect();
     for (i, c) in chars.iter().enumerate() {
         match c {
             '*' => filter.push_str(".*"),
-            // A separator; at the end it may also be the end of the address, which WebKit can't say, so it is left out.
-            '^' => if i + 1 < chars.len() { filter.push_str("[/:?&=]") },
+            // At the end a separator may also be the end of the address; WebKit has no '|', so the group is optional.
+            '^' if i + 1 == chars.len() => {
+                filter.push_str(&format!("({SEPARATOR}.*)?$"));
+                anchored = false;
+            }
+            '^' => filter.push_str(SEPARATOR),
             '.' | '?' => { filter.push('\\'); filter.push(*c) }
             c if c.is_ascii_alphanumeric() || "/_-=&%~,;".contains(*c) => filter.push(*c),
             _ => return None,
@@ -746,6 +752,22 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 }
                 "bookmark" if !url.is_empty() && regular => commands.push(json!({"op":"addBookmark","url":url,"title":t["title"]})),
                 "sleep" if !url.is_empty() && id != s.active()["id"] => commands.push(json!({"op":"sleepTab","id":id})),
+                // As Vivaldi hibernates the tab you're on: move to a neighbour first, then sleep it.
+                "sleep" if !url.is_empty() => {
+                    let tabs = s.tabs();
+                    let at = tabs.iter().position(|x| x["id"] == id).unwrap_or(0);
+                    let neighbour = tabs.iter().skip(at + 1).chain(tabs[..at].iter().rev())
+                        .find(|x| x["id"] != id && crate::render::tab_visible(x, s)).map(|x| x["id"].clone());
+                    match neighbour {
+                        Some(next) if s.snapshot["session"]["split"].is_null() => {
+                            commands.push(json!({"op":"selectTab","id":next}));
+                            commands.push(json!({"op":"sleepTab","id":id}));
+                        }
+                        Some(_) => s.notice = "Tiled pages stay awake. Remove this page from the tiles first.".into(),
+                        None => s.notice = "Open another tab first; the tab you’re on can’t sleep.".into(),
+                    }
+                }
+                "sleep" => s.notice = "This tab has no page to put to sleep.".into(),
                 "new-right" => commands.push(json!({"op":"newTabAfter","id":id})),
                 "close-others" | "close-right" => {
                     let others: Vec<Value> = if value == "close-others" {
@@ -1644,7 +1666,7 @@ pub fn page_script(r: &Value) -> Option<String> {
         "farbling" => {
             let seed: String = text(r, "seed").chars().filter(|c| c.is_ascii_alphanumeric()).take(64).collect();
             let off: Vec<&str> = array(&r["exceptions"]).iter().filter_map(Value::as_str).filter(|h| h.len() <= 253 && h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')).take(500).collect();
-            format!(r#"(()=>{{if(window.__neutrinoFarbling)return;window.__neutrinoFarbling=1;const host=(location.hostname||'').toLowerCase();const site=host.split('.').slice(-2).join('.');const off={};if(off.includes(host)||off.includes(site))return;let seed=2166136261;for(const c of {}+'|'+site){{seed^=c.charCodeAt(0);seed=Math.imul(seed,16777619)}}const hash=(n)=>{{let x=(seed^Math.imul(n+1,2654435761))>>>0;x^=x>>>16;x=Math.imul(x,2246822507)>>>0;x^=x>>>13;return x>>>0}};const nativeToString=Function.prototype.toString;const originals=new WeakMap();const wrap=(fn,original)=>{{originals.set(fn,original);return fn}};Function.prototype.toString=wrap(function toString(){{return nativeToString.call(originals.get(this)||this)}},nativeToString);const farble=(data)=>{{const pixels=data.length>>2;if(!pixels)return;for(let i=0;i<8;i++){{const h=hash(i);const p=(h%pixels)*4+(h>>>24)%3;data[p]^=1}}}};const _getImageData=CanvasRenderingContext2D.prototype.getImageData;const _toDataURL=HTMLCanvasElement.prototype.toDataURL;const _toBlob=HTMLCanvasElement.prototype.toBlob;const copy=(canvas)=>{{try{{const w=canvas.width,h=canvas.height;if(!w||!h||w*h>16e6)return canvas;const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.drawImage(canvas,0,0);const d=_getImageData.call(x,0,0,w,h);farble(d.data);x.putImageData(d,0,0);return c}}catch(_){{return canvas}}}};CanvasRenderingContext2D.prototype.getImageData=wrap(function getImageData(...a){{const d=_getImageData.apply(this,a);farble(d.data);return d}},_getImageData);HTMLCanvasElement.prototype.toDataURL=wrap(function toDataURL(...a){{return _toDataURL.apply(copy(this),a)}},_toDataURL);HTMLCanvasElement.prototype.toBlob=wrap(function toBlob(...a){{return _toBlob.apply(copy(this),a)}},_toBlob);for(const proto of [window.WebGLRenderingContext,window.WebGL2RenderingContext].filter(Boolean).map(c=>c.prototype)){{const _getParameter=proto.getParameter;proto.getParameter=wrap(function getParameter(p){{if(p===37445)return 'Apple Inc.';if(p===37446)return 'Apple GPU';return _getParameter.call(this,p)}},_getParameter)}}const fudge=1+((hash(7)%1000)-500)*1e-7;if(window.AudioBuffer){{const _getChannelData=AudioBuffer.prototype.getChannelData;const done=new WeakSet();AudioBuffer.prototype.getChannelData=wrap(function getChannelData(...a){{const d=_getChannelData.apply(this,a);if(!done.has(d)){{done.add(d);for(let i=0;i<d.length;i++)d[i]*=fudge}}return d}},_getChannelData)}}if(window.AnalyserNode){{const getFloat=AnalyserNode.prototype.getFloatFrequencyData;AnalyserNode.prototype.getFloatFrequencyData=wrap(function getFloatFrequencyData(array){{getFloat.call(this,array);for(let i=0;i<array.length;i++)array[i]*=fudge}},getFloat)}}const cores=navigator.hardwareConcurrency||4;const shown=Math.max(2,Math.min(cores,2+hash(99)%Math.max(1,cores-1)));try{{const real=Object.getOwnPropertyDescriptor(Navigator.prototype,'hardwareConcurrency');Object.defineProperty(Navigator.prototype,'hardwareConcurrency',{{get:wrap(function get(){{return shown}},real&&real.get||nativeToString),configurable:true,enumerable:true}})}}catch(_){{}}}})()"#, serde_json::to_string(&off).unwrap_or_else(|_| "[]".into()), quote(&seed))
+            format!(r#"(()=>{{if(window.__neutrinoFarbling)return;window.__neutrinoFarbling=1;const host=(location.hostname||'').toLowerCase();const site=host.split('.').slice(-2).join('.');const off={};if(off.includes(host)||off.includes(site))return;let seed=2166136261;for(const c of {}+'|'+site){{seed^=c.charCodeAt(0);seed=Math.imul(seed,16777619)}}const hash=(n)=>{{let x=(seed^Math.imul(n+1,2654435761))>>>0;x^=x>>>16;x=Math.imul(x,2246822507)>>>0;x^=x>>>13;return x>>>0}};const nativeToString=Function.prototype.toString;const originals=new WeakMap();const wrap=(impl,original)=>{{const name=original.name;const m={{[name](...a){{return impl.apply(this,a)}}}}[name];try{{Object.defineProperty(m,'length',{{value:original.length,configurable:true}})}}catch(_){{}}originals.set(m,original);return m}};Function.prototype.toString=wrap(function toString(){{return nativeToString.call(originals.get(this)||this)}},nativeToString);const farble=(data)=>{{const pixels=data.length>>2;if(!pixels)return;for(let i=0;i<8;i++){{const h=hash(i);const p=(h%pixels)*4+(h>>>24)%3;data[p]^=1}}}};const _getImageData=CanvasRenderingContext2D.prototype.getImageData;const _toDataURL=HTMLCanvasElement.prototype.toDataURL;const _toBlob=HTMLCanvasElement.prototype.toBlob;const copy=(canvas)=>{{try{{const w=canvas.width,h=canvas.height;if(!w||!h||w*h>16e6)return canvas;const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.drawImage(canvas,0,0);const d=_getImageData.call(x,0,0,w,h);farble(d.data);x.putImageData(d,0,0);return c}}catch(_){{return canvas}}}};CanvasRenderingContext2D.prototype.getImageData=wrap(function getImageData(...a){{const d=_getImageData.apply(this,a);farble(d.data);return d}},_getImageData);HTMLCanvasElement.prototype.toDataURL=wrap(function toDataURL(...a){{return _toDataURL.apply(copy(this),a)}},_toDataURL);HTMLCanvasElement.prototype.toBlob=wrap(function toBlob(...a){{return _toBlob.apply(copy(this),a)}},_toBlob);for(const proto of [window.WebGLRenderingContext,window.WebGL2RenderingContext].filter(Boolean).map(c=>c.prototype)){{const _getParameter=proto.getParameter;proto.getParameter=wrap(function getParameter(p){{if(p===37445)return 'Apple Inc.';if(p===37446)return 'Apple GPU';return _getParameter.call(this,p)}},_getParameter)}}const fudge=1+((hash(7)%1000)-500)*1e-7;if(window.AudioBuffer){{const _getChannelData=AudioBuffer.prototype.getChannelData;const done=new WeakSet();AudioBuffer.prototype.getChannelData=wrap(function getChannelData(...a){{const d=_getChannelData.apply(this,a);if(!done.has(d)){{done.add(d);for(let i=0;i<d.length;i++)d[i]*=fudge}}return d}},_getChannelData);const _copyFromChannel=AudioBuffer.prototype.copyFromChannel;if(_copyFromChannel)AudioBuffer.prototype.copyFromChannel=wrap(function copyFromChannel(...a){{try{{AudioBuffer.prototype.getChannelData.call(this,a[1])}}catch(_){{}}return _copyFromChannel.apply(this,a)}},_copyFromChannel)}}if(window.AnalyserNode){{const A=AnalyserNode.prototype;for(const key of ['getFloatFrequencyData','getFloatTimeDomainData']){{const f=A[key];if(f)A[key]=wrap(function(array){{f.call(this,array);for(let i=0;i<array.length;i++)array[i]*=fudge}},f)}}for(const key of ['getByteFrequencyData','getByteTimeDomainData']){{const f=A[key];if(f)A[key]=wrap(function(array){{f.call(this,array);const n=array.length;if(n)for(let i=0;i<8;i++){{const h=hash(40+i);array[h%n]^=1}}}},f)}}}}const cores=navigator.hardwareConcurrency||4;const shown=Math.max(2,Math.min(cores,2+hash(99)%Math.max(1,cores-1)));try{{const real=Object.getOwnPropertyDescriptor(Navigator.prototype,'hardwareConcurrency');Object.defineProperty(Navigator.prototype,'hardwareConcurrency',{{get:wrap(function get(){{return shown}},real&&real.get||nativeToString),configurable:true,enumerable:true}})}}catch(_){{}}}})()"#, serde_json::to_string(&off).unwrap_or_else(|_| "[]".into()), quote(&seed))
         }
         // The article's large images for Reader, each with the start of the paragraph it follows.
         "readerImages" => "(()=>{const root=document.querySelector('article')||document.querySelector('main')||document.body;if(!root)return '[]';const blocks=new Set(['P','H1','H2','H3','H4','H5','H6','LI','BLOCKQUOTE','PRE']);const out=[];const seen=new Set();for(const img of root.querySelectorAll('img')){if(out.length>=12)break;const src=img.currentSrc||img.src;if(!/^https?:/.test(src)||seen.has(src))continue;const w=img.naturalWidth||img.width,h=img.naturalHeight||img.height,shown=img.getBoundingClientRect();if(w<200||h<120||shown.width<100||shown.height<60||img.closest('nav,footer,aside,form'))continue;seen.add(src);let anchor='';const walk=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT);walk.currentNode=img;while(walk.previousNode()){const e=walk.currentNode;if(blocks.has(e.tagName)&&!e.contains(img)){const t=(e.innerText||'').trim().replace(/\\s+/g,' ');if(t){anchor=t.slice(0,80);break}}}out.push({src,alt:(img.alt||'').slice(0,200),anchor})}return JSON.stringify(out)})()".into(),
@@ -1652,7 +1674,7 @@ pub fn page_script(r: &Value) -> Option<String> {
         "resourceHosts" => "(()=>{const out={};const seen=new Set();for(const e of document.querySelectorAll('script[src],img[src],iframe[src],link[href][rel~=stylesheet],embed[src],source[src],video[src],audio[src]')){try{const x=new URL(e.getAttribute('src')||e.getAttribute('href'),location.href);if(x.hostname===location.hostname||seen.has(x.href))continue;seen.add(x.href);const h=x.hostname.toLowerCase();if(!(h in out)&&Object.keys(out).length>=500)continue;out[h]=(out[h]||0)+1}catch(_){}}return JSON.stringify(out)})()".into(),
         // The RSS or Atom feed a page advertises in its head, or "".
         // Brave's De-AMP: an AMP page's own canonical article, when it names one elsewhere.
-        "deAmp" => "(()=>{const h=document.documentElement;if(!h||!(h.hasAttribute('amp')||h.hasAttribute('\\u26a1')))return '';const l=document.querySelector('link[rel~=canonical][href]');if(!l)return '';const c=new URL(l.href,location.href);return /^https?:$/.test(c.protocol)&&c.href!==location.href?c.href:''})()".into(),
+        "deAmp" => "(()=>{const h=document.documentElement;if(!h||!(h.hasAttribute('amp')||h.hasAttribute('\\u26a1')||h.hasAttribute('\\u26a1\\ufe0f')))return '';const l=document.querySelector('link[rel~=canonical][href]');if(!l)return '';const c=new URL(l.href,location.href);return /^https?:$/.test(c.protocol)&&c.href!==location.href?c.href:''})()".into(),
         // A visible payment-card field on a secure page, so Neutrino can offer a saved card.
         "cardForm" => "(()=>{if(location.protocol!=='https:')return '';const f=document.querySelector('input[autocomplete~=cc-number],input[name*=cardnumber i],input[id*=cardnumber i],input[name*=card_number i],input[id*=card-number i]');if(!f)return '';const r=f.getBoundingClientRect();return r.width>0&&r.height>0?'1':''})()".into(),
         "feedLink" => "(()=>{const l=document.querySelector('link[rel~=alternate][href][type=\"application/rss+xml\"],link[rel~=alternate][href][type=\"application/atom+xml\"]');return l&&/^https?:/.test(l.href)?l.href:''})()".into(),
@@ -1777,7 +1799,10 @@ mod tests {
         let rules = parse_patterns_up_to(list, 100);
         assert_eq!(rules, vec!["||example.com/ads/*$third-party", "||cdn.example.org^*banner|", "||tracker.example/pixel?id="]);
         assert_eq!(pattern_url_filter(&rules[0]), Some((r"^[a-z]+://([^/]+\.)?example\.com/ads/.*".to_string(), true)));
-        assert_eq!(pattern_url_filter(&rules[1]), Some((r"^[a-z]+://([^/]+\.)?cdn\.example\.org[/:?&=].*banner$".to_string(), false)));
+        assert_eq!(pattern_url_filter(&rules[1]), Some((r"^[a-z]+://([^/]+\.)?cdn\.example\.org[^a-zA-Z0-9_.%-].*banner$".to_string(), false)));
+        // A trailing separator also matches the end of the address, and nothing longer.
+        let banner = pattern_url_filter("||shop.test/banner^").unwrap().0;
+        assert_eq!(banner, r"^[a-z]+://([^/]+\.)?shop\.test/banner([^a-zA-Z0-9_.%-].*)?$");
         assert_eq!(pattern_url_filter(&rules[2]).unwrap().0, r"^[a-z]+://([^/]+\.)?tracker\.example/pixel\?id=");
         assert!(pattern_url_filter("||nohost").is_none() && pattern_url_filter("example.com/x").is_none());
     }

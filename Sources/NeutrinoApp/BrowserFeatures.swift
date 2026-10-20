@@ -1264,7 +1264,8 @@ extension BrowserModel {
            let url = tab.url, let script = PageScript.source("deAmp") {
             Task { [weak self] in
                 guard let value = try? await tab.runPageScript(script), let canonical = URL(string: value),
-                      AddressResolver.isWebURL(canonical), let self, tab.url == url, self.deAmped[id] != canonical else { return }
+                      // Back on the AMP page left last time means the canonical page redirected here: stop.
+                      AddressResolver.isWebURL(canonical), let self, tab.url == url, self.deAmped[id] != url else { return }
                 self.deAmped[id] = url
                 tab.load(canonical)
             }
