@@ -252,7 +252,7 @@ jobs:
           else
             gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
           fi
-          # The Homebrew cask for this release; committing it as Casks/neutrino.rb updates the tap.
+          # The Homebrew cask for this release, also committed to main below.
           python3 scripts/update-cask.py --version "$release_version" --zip "release/Neutrino-$release_version-AppleSilicon.app.zip" --output release/neutrino.rb
           gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json release/neutrino.rb --clobber
           gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
@@ -265,3 +265,17 @@ jobs:
             gh release upload "$NEUTRINO_RELEASE_TAG" release/preview.xml --clobber
             python3 scripts/publish-appcast.py preview
           fi
+      - name: Point the Homebrew tap at this release
+        if: github.ref == 'refs/heads/main'
+        run: |
+          release_version="${NEUTRINO_RELEASE_TAG#v}"
+          # Rewrite only the version and checksum on the current main, keeping any cask edits made since this build.
+          git fetch origin main
+          git checkout -q origin/main
+          python3 scripts/update-cask.py --version "$release_version" --zip "release/Neutrino-$release_version-AppleSilicon.app.zip"
+          if git diff --quiet Casks/neutrino.rb; then exit 0; fi
+          git config user.name 'Neutrino release automation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -q -m "Point the Homebrew cask at $NEUTRINO_RELEASE_TAG" Casks/neutrino.rb
+          # A fast-forward-only push rejects concurrent main changes; the release's neutrino.rb stays correct either way.
+          git push origin HEAD:main
