@@ -1083,8 +1083,10 @@
       };
       form.elements.key.value = "";
       send(request);
-    } else if (form.dataset.form === "assistant")
+    } else if (form.dataset.form === "assistant") {
       send({ op: "assistant", value: new FormData(form).get("prompt") });
+      form.reset();
+    }
   });
   document.addEventListener("keydown", (e) => {
     const typing =

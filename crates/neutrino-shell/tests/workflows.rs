@@ -228,6 +228,26 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn assistant_keeps_a_thread_and_streams_the_answer() {
+    let mut s = shell();
+    s.snapshot["preferences"]["ai"] = json!({"provider":"local","endpoint":"http://localhost:11434/v1","model":"llama"});
+    s.snapshot["assistantTurns"] = json!([{"question":"What is this?","answer":"A test page."}]);
+    s.snapshot["assistantQuestion"] = json!("And who wrote it?");
+    s.snapshot["assistantResponse"] = json!("The page names");
+    s.snapshot["assistantBusy"] = json!(true);
+    s.snapshot["assistantSource"] = json!("selection");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = s.dispatch(json!({"op":"screen","value":"assistant"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("A test page.") && html.contains("And who wrote it?") && html.contains("The page names"));
+    assert!(html.contains("assistant-response live") && html.contains("data-op=\"cancelAI\"") && html.contains("Answered from the text you selected."));
+    assert!(commands(&s.dispatch(json!({"op":"assistant-clear"}))).is_empty());
+    s.snapshot["assistantBusy"] = json!(false);
+    s.snapshot["assistantQuestion"] = json!("");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("New conversation") && html.contains("Ask a follow-up") && !html.contains("The page names"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"assistant-clear"})))[0], json!({"op":"assistantClear"}));
+}
+#[test]
 fn split_view_tiles_up_to_four_pages() {
     let tabs = json!([{"id":"a","url":"https://a.example/"},{"id":"b","url":"https://b.example/"},{"id":"c","url":"https://c.example/"},{"id":"d","url":"https://d.example/"},{"id":"e","url":"https://e.example/"}]);
     let session = |split: Value| json!({"profileID":"p1","selectedTabID":"c","tabs":tabs,"split":split});

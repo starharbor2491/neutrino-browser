@@ -1297,7 +1297,34 @@ fn ai_form(s: &Shell) -> Markup {
 }
 
 fn assistant(s: &Shell) -> Markup {
-    html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect an AI provider","Ask questions about the page you’re reading. You need an API key, an OpenAI account, or a local model.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Set up a provider"}} @else {p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider."}div class="assistant-response"{(text(&s.snapshot,"assistantResponse"))}form data-form="assistant"{label class="field"{span{"Your question"}textarea name="prompt" placeholder="What would you like to know?" required{}}button class="button primary" type="submit" disabled[flag(&s.snapshot,"assistantBusy")]{(if flag(&s.snapshot,"assistantBusy"){"Thinking…"}else{"Share page and ask"})}}}}}
+    let busy = flag(&s.snapshot, "assistantBusy");
+    let turns = array(&s.snapshot["assistantTurns"]);
+    let pending = text(&s.snapshot, "assistantQuestion");
+    let turn = |question: &str, answer: &str, live: bool| html! {
+        div class="assistant-turn" {
+            p class="assistant-question"{(question)}
+            div class=(if live {"assistant-response live"} else {"assistant-response"}) aria-live=[live.then_some("polite")] aria-busy=[live.then_some("true")] {
+                @if answer.is_empty() {span class="assistant-typing" aria-label="Answering"{i{}i{}i{}}} @else {(answer)}
+            }
+        }
+    };
+    html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect an AI provider","Ask questions about the page you’re reading. You need an API key, an OpenAI account, or a local model.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Set up a provider"}} @else {
+        p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider; if you’ve selected text on the page, only the selection is shared."}
+        @if !turns.is_empty() || !pending.is_empty() {
+            div class="assistant-thread"{
+                @for t in turns {(turn(text(t,"question"),text(t,"answer"),false))}
+                @if !pending.is_empty() {(turn(pending,text(&s.snapshot,"assistantResponse"),true))}
+            }
+            @if text(&s.snapshot,"assistantSource")=="selection" {p class="field-help"{"Answered from the text you selected."}}
+        }
+        form data-form="assistant"{label class="field"{span{@if turns.is_empty(){"Your question"}@else{"Ask a follow-up"}}textarea name="prompt" placeholder="What would you like to know?" required{}}
+            div class="button-row"{
+                button class="button primary" type="submit" disabled[busy]{(if busy {"Answering…"} else if turns.is_empty() {"Share page and ask"} else {"Ask"})}
+                @if busy {button class="button" type="button" data-op="cancelAI"{"Stop"}}
+                @else if !turns.is_empty() {button class="button" type="button" data-op="assistant-clear"{"New conversation"}}
+            }
+        }
+    }}}
 }
 fn module_glyph(id: &str) -> &str {
     let feature = match id.strip_prefix("org.neutrino.").unwrap_or("") {

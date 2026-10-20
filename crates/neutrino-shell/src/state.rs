@@ -998,6 +998,11 @@ impl Shell {
                         commands.push(json!({"op":"assistant","value":prompt,"selection":flag(&request,"selection")}));
                     }
                 }
+                "assistant-clear" => {
+                    if !flag(&self.snapshot, "assistantBusy") {
+                        commands.push(json!({"op":"assistantClear"}));
+                    }
+                }
                 "native" => {
                     // Finite allowlist for identifier-based platform services, never an arbitrary selector.
                     let action = text(&request, "action");

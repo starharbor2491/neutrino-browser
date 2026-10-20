@@ -68,6 +68,16 @@ import CSQLite
     session.normalize()
     #expect(session.tabs[9].parentID == nil)
 }
+@Test func chatStreamReadsServerSentPieces() {
+    #expect(ChatStream.event(#"data: {"choices":[{"delta":{"content":"Hel"}}]}"#) == .text("Hel"))
+    #expect(ChatStream.event(#"data:{"choices":[{"delta":{"role":"assistant"}}]}"#) == .ignored)
+    #expect(ChatStream.event("data: [DONE]") == .done)
+    #expect(ChatStream.event(": keep-alive") == .ignored)
+    #expect(ChatStream.event(#"data: {"error":{"message":"Rate limited"}}"#) == .failed("Rate limited"))
+    #expect(ChatStream.event("data: not json") == .ignored)
+    #expect(ChatStream.text(of: "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" there\"}}]}\ndata: [DONE]\n") == "Hi there")
+    #expect(ChatStream.text(of: "{\"choices\":[]}") == nil)
+}
 @Test func splitTilesUpToFourPagesAndShrinksAsTheyClose() throws {
     let tabs = (0..<5).map { _ in BrowserTab() }
     var session = WindowSession(profileID: UUID(), tabs: tabs)

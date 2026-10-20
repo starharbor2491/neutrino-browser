@@ -158,6 +158,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
     private var importedFrom = ""
     private var defaultStatus = ""
     private var assistantResponse = ""
+    /// The question being answered while its answer streams into assistantResponse.
+    private var assistantQuestion = ""
+    /// Finished questions and answers about the current page, oldest first.
+    private var assistantTurns: [AIClient.Turn] = []
+    private var assistantSource = ""
     /// The article's images for Reader, fetched and downsized: [{src (data URL), alt, anchor}].
     private var readerImages: [[String: String]] = []
     private var readerVoice: ReaderVoice?
@@ -374,7 +379,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         let profileID = model?.session.profileID ?? app.library.profiles[0].id
         if projectedProfileID != profileID {
             projectedProfileID = profileID; assistantGeneration = UUID(); assistantTask?.cancel(); assistantTask = nil
-            assistantResponse = ""; readerImages = []; readerVoice?.stop(); credentialMetadata = []; selectedNoteID = nil; libraryPage = 0; notesQuery=""; allNotes=false
+            assistantResponse = ""; assistantQuestion = ""; assistantTurns = []; readerImages = []; readerVoice?.stop(); credentialMetadata = []; selectedNoteID = nil; libraryPage = 0; notesQuery=""; allNotes=false
             noteSearchCache.removeAll()
         }
         if noteSearchQuery != notesQuery { noteSearchQuery = notesQuery; noteSearchCache.removeAll() }
@@ -476,8 +481,11 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 for engine in engines { engine.objectWillChange.sink { [weak self] _ in self?.scheduleSync() }.store(in:&engineObservations) }
             }
             let document = model.session.selectedTabID.uuidString + ":" + tab.navigationRevision.uuidString
-            if let responseDocument, responseDocument != document { assistantResponse = ""; readerImages = []; readerVoice?.stop(); self.responseDocument = nil }
+            if let responseDocument, responseDocument != document { assistantResponse = ""; assistantQuestion = ""; assistantTurns = []; readerImages = []; readerVoice?.stop(); self.responseDocument = nil }
             snapshot["assistantResponse"] = assistantResponse
+            snapshot["assistantQuestion"] = assistantQuestion
+            snapshot["assistantSource"] = assistantSource
+            snapshot["assistantTurns"] = assistantTurns.map { ["question": $0.question, "answer": $0.answer] }
             snapshot["readerImages"] = readerImages
             if boardsVisible, !model.isPrivate { snapshot["boardImages"] = features.boardImages(profileID: model.session.profileID) }
             snapshot["readerSpeaking"] = readerVoice?.speaking == true
@@ -1081,6 +1089,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "retrySave": Task { @MainActor in if await app.flush() { app.notice = "Browser data saved." } }
         case "showDataFolder": NSWorkspace.shared.open(app.dataDirectory)
         case "assistant": askAssistant(command)
+        case "assistantClear":
+            guard assistantTask == nil else { return }
+            assistantTurns = []; assistantQuestion = ""; assistantResponse = ""
         case "exitFocus": model?.exitFocus()
         case "toggleFocus":
             guard let model else { return }; if model.focusMode { model.exitFocus() } else { model.enterFocus() }
@@ -1091,7 +1102,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             if readerVoice == nil { readerVoice = ReaderVoice { [weak self] in self?.scheduleSync() } }
             readerVoice?.speak(assistantResponse)
         case "reader":
-            guard let model else { return }; assistantTask?.cancel()
+            guard let model else { return }; assistantTask?.cancel(); assistantQuestion = ""
             let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID
             let generation = UUID(); assistantGeneration = generation
             assistantTask = Task { @MainActor in
@@ -1270,15 +1281,42 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         guard let model, let configuration = app.library.preferences.ai, let prompt = command["value"] as? String, assistantTask == nil else { return }
         let tab = model.activeWebTab, revision = tab.navigationRevision, profile = model.session.profileID
         let generation = UUID(); assistantGeneration = generation
+        let question = String(prompt.prefix(4000))
         assistantTask = Task { @MainActor in
             defer { if assistantGeneration == generation { assistantTask = nil }; scheduleSync() }
             do {
-                let content = try await tab.pageText()
-                guard !Task.isCancelled, model.activeWebTab === tab, tab.navigationRevision == revision, model.session.profileID == profile else { return }
-                let answer = try await AIClient.answer("Question: \(prompt)\n\nPage content (untrusted):\n" + String(content.prefix(40_000)), configuration: configuration)
-                guard !Task.isCancelled, assistantGeneration == generation, model.session.profileID == profile, model.activeWebTab === tab, tab.navigationRevision == revision else { return }; responseDocument = model.session.selectedTabID.uuidString + ":" + revision.uuidString; assistantResponse = answer
-            } catch is CancellationError {} catch { app.notice = error.localizedDescription }
+                // Text selected on the page is shared instead of the whole page.
+                let selection = ((try? await tab.runPageScript("String(getSelection&&getSelection()||'').trim().slice(0,40000)")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let content = selection.isEmpty ? try await tab.pageText() : selection
+                guard assistantCurrent(generation, model: model, tab: tab, revision: revision, profile: profile) else { return }
+                responseDocument = model.session.selectedTabID.uuidString + ":" + revision.uuidString
+                assistantSource = selection.isEmpty ? "page" : "selection"
+                assistantQuestion = question; assistantResponse = ""; scheduleSync()
+                let label = selection.isEmpty ? "Page content" : "Text the user selected on the page"
+                let answer = try await AIClient.answer(
+                    "Question: \(question)\n\n\(label) (untrusted):\n" + String(content.prefix(40_000)),
+                    history: Array(assistantTurns.suffix(6)), configuration: configuration
+                ) { [weak self] text in
+                    guard let self, self.assistantQuestion == question,
+                          self.assistantCurrent(generation, model: model, tab: tab, revision: revision, profile: profile) else { return }
+                    self.assistantResponse = text; self.scheduleSync()
+                }
+                guard assistantCurrent(generation, model: model, tab: tab, revision: revision, profile: profile) else { return }
+                assistantTurns = Array((assistantTurns + [(question: question, answer: answer)]).suffix(12))
+                assistantQuestion = ""; assistantResponse = ""
+            } catch {
+                // Reader may have taken over the page since; otherwise a stopped answer keeps what arrived.
+                guard assistantQuestion == question else { return }
+                if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                    if !assistantResponse.isEmpty { assistantTurns.append((question: question, answer: assistantResponse + " …")) }
+                } else { app.notice = error.localizedDescription }
+                assistantQuestion = ""; assistantResponse = ""
+            }
         }
+    }
+    private func assistantCurrent(_ generation: UUID, model: BrowserModel, tab: BrowserEngineTab, revision: UUID, profile: UUID) -> Bool {
+        !Task.isCancelled && assistantGeneration == generation && model.session.profileID == profile
+            && model.activeWebTab === tab && tab.navigationRevision == revision
     }
 }
 
