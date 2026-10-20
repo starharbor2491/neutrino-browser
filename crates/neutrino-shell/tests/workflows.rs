@@ -228,6 +228,20 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn background_music_offers_tracks_and_volume() {
+    let mut s = shell();
+    s.snapshot["preferences"]["backgroundMusic"] = json!(true);
+    s.snapshot["preferences"]["musicTrack"] = json!("rain");
+    s.snapshot["preferences"]["musicVolume"] = json!(0.25);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"appearance"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-music-track=\"rain\"") && html.contains("data-music-volume=\"0.25\"") && html.contains("data-sounds=\"music\""));
+    assert!(html.contains("data-key=\"musicTrack\" data-value=\"pulse\"") && html.contains("aria-pressed=\"true\">Quiet<"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"setting","key":"musicTrack","value":"pulse"})))[0], json!({"op":"preference","key":"musicTrack","value":"pulse"}));
+    assert!(commands(&s.dispatch(json!({"op":"setting","key":"musicTrack","value":"techno"}))).is_empty());
+}
+#[test]
 fn mouse_gestures_run_the_action_chosen_for_each_shape() {
     let mut s = shell();
     assert_eq!(commands(&s.dispatch(json!({"op":"gesture","value":"L"})))[0], json!({"op":"back"}));

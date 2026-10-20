@@ -626,15 +626,80 @@
     osc.stop(t + length + 0.02);
   }
   window.neutrinoSound = tone;
-  function updateSounds() {
-    const want = sounds().includes("music") && !document.hidden;
-    if (want && !music) {
-      const ctx = context(),
-        master = ctx.createGain();
-      master.gain.value = 0.0001;
-      master.gain.linearRampToValueAtTime(0.03, ctx.currentTime + 3);
-      master.connect(ctx.destination);
-      const voices = [110, 164.81, 220, 277.18].map((f, i) => {
+  function musicSettings() {
+    const shell = root.querySelector(".app-shell");
+    const volume = Number(shell?.dataset.musicVolume ?? 0.5);
+    return {
+      track: shell?.dataset.musicTrack || "drift",
+      level: 0.06 * (Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.5),
+    };
+  }
+  // Opera GX's background music, generated rather than sampled: Drift (slow pads),
+  // Pulse (an arpeggio over a bass note) or Rain (soft brown noise and chimes).
+  function playTrack(track, ctx, master) {
+    const sources = [],
+      timers = [];
+    const note = (freq, at, length, peak, type, out) => {
+      const osc = ctx.createOscillator(),
+        g = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak, at + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + length);
+      osc.connect(g).connect(out);
+      osc.start(at);
+      osc.stop(at + length + 0.05);
+    };
+    if (track === "pulse") {
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 1400;
+      filter.connect(master);
+      const notes = [220, 261.63, 329.63, 392, 329.63, 261.63, 196, 246.94];
+      let step = 0,
+        next = ctx.currentTime + 0.1;
+      const schedule = () => {
+        while (next < ctx.currentTime + 0.6) {
+          note(notes[step % 8] * (step % 32 < 16 ? 1 : 0.89), next, 0.4, 0.5, "triangle", filter);
+          next += 0.3;
+          step++;
+        }
+      };
+      schedule();
+      timers.push(setInterval(schedule, 200));
+      const bass = ctx.createOscillator(),
+        level = ctx.createGain();
+      bass.frequency.value = 55;
+      level.gain.value = 0.45;
+      bass.connect(level).connect(master);
+      bass.start();
+      sources.push(bass);
+    } else if (track === "rain") {
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate),
+        data = buffer.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < data.length; i++) {
+        last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+        data[i] = last * 3.5;
+      }
+      const rain = ctx.createBufferSource(),
+        filter = ctx.createBiquadFilter();
+      rain.buffer = buffer;
+      rain.loop = true;
+      filter.type = "lowpass";
+      filter.frequency.value = 900;
+      rain.connect(filter).connect(master);
+      rain.start();
+      sources.push(rain);
+      const chimes = [523.25, 659.25, 783.99, 987.77];
+      timers.push(
+        setInterval(() => {
+          if (Math.random() < 0.5) note(chimes[Math.floor(Math.random() * 4)], ctx.currentTime, 2.5, 0.25, "sine", master);
+        }, 2400),
+      );
+    } else {
+      [110, 164.81, 220, 277.18].forEach((f, i) => {
         const osc = ctx.createOscillator(),
           lfo = ctx.createOscillator(),
           depth = ctx.createGain(),
@@ -648,14 +713,36 @@
         osc.connect(g).connect(master);
         osc.start();
         lfo.start();
-        return [osc, lfo];
+        sources.push(osc, lfo);
       });
-      music = { master, voices };
-    } else if (!want && music) {
-      const { master, voices } = music;
-      music = null;
-      master.gain.linearRampToValueAtTime(0.0001, audio.currentTime + 0.6);
-      setTimeout(() => voices.flat().forEach((v) => v.stop()), 700);
+    }
+    return () => {
+      timers.forEach(clearInterval);
+      sources.forEach((source) => source.stop());
+    };
+  }
+  function stopMusic() {
+    const { master, stop } = music;
+    music = null;
+    master.gain.cancelScheduledValues(audio.currentTime);
+    master.gain.setValueAtTime(master.gain.value, audio.currentTime);
+    master.gain.linearRampToValueAtTime(0.0001, audio.currentTime + 0.6);
+    setTimeout(stop, 700);
+  }
+  function updateSounds() {
+    const want = sounds().includes("music") && !document.hidden;
+    const { track, level } = musicSettings();
+    if (music && (!want || music.track !== track)) stopMusic();
+    if (want && !music) {
+      const ctx = context(),
+        master = ctx.createGain();
+      master.gain.value = 0.0001;
+      master.gain.linearRampToValueAtTime(level, ctx.currentTime + 3);
+      master.connect(ctx.destination);
+      music = { master, track, level, stop: playTrack(track, ctx, master) };
+    } else if (want && music.level !== level) {
+      music.level = level;
+      music.master.gain.linearRampToValueAtTime(level, audio.currentTime + 0.3);
     }
   }
   document.addEventListener("visibilitychange", updateSounds);

@@ -1269,6 +1269,17 @@ pub fn appearance_extra(s: &Shell) -> Markup {
             (setting_toggle("Interface sounds", "Soft clicks when you open, close and switch tabs.", "interfaceSounds", p["interfaceSounds"].as_bool().unwrap_or(gx)))
             (setting_toggle("Keyboard sounds", "A key click as you type.", "keyboardSounds", flag(p,"keyboardSounds")))
             (setting_toggle("Background music", "A quiet generated soundtrack while the browser is in front.", "backgroundMusic", flag(p,"backgroundMusic")))
+            @if flag(p,"backgroundMusic") {
+                label class="control-label"{"Track"}
+                (crate::render::segments("setting","musicTrack",p["musicTrack"].as_str().unwrap_or("drift"),&features::MUSIC_TRACKS.iter().map(|t| (t.0, t.1)).collect::<Vec<_>>()))
+                label class="control-label"{"Music volume"}
+                @let volume = p["musicVolume"].as_f64().unwrap_or(0.5);
+                @let levels = [(0.25, "Quiet"), (0.5, "Medium"), (0.9, "Loud")];
+                @let index = levels.iter().position(|l| (l.0 - volume).abs() < 0.01);
+                div class="segments" role="group" style=(format!("--count:3;--index:{}", index.unwrap_or(1))) data-selected=(index.is_some().to_string()) {
+                    @for (i, (value, label)) in levels.iter().enumerate() {button class=(if Some(i) == index {"selected"} else {""}) data-op="setting" data-key="musicVolume" data-value=(value) data-type="number" aria-pressed=((Some(i) == index).to_string()){(label)}}
+                }
+            }
             }
         }
         div class="settings-group"{(module_toggle(s, "interface-css", "Interface CSS", "Restyle Neutrino’s own interface with your CSS."))}

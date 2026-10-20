@@ -1014,6 +1014,7 @@ final class BrowserFeatures {
         case "keyboardSounds": preferences.keyboardSounds = value as? Bool
         case "backgroundMusic": preferences.backgroundMusic = value as? Bool
         case "musicVolume": preferences.musicVolume = value as? Double
+        case "musicTrack": preferences.musicTrack = ["drift", "pulse", "rain"].contains(value as? String ?? "") ? value as? String : nil
         case "defaultSearchID": preferences.defaultSearchID = text()
         case "interfaceCSS": preferences.interfaceCSS = text()
         case "startupPages": preferences.startupPages = (value as? [String]).flatMap { $0.isEmpty ? nil : Array($0.prefix(20)) }

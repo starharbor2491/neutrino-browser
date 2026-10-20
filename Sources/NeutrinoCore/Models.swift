@@ -357,6 +357,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var keyboardSounds: Bool?
     public var backgroundMusic: Bool?
     public var musicVolume: Double?
+    /// The generated background track: drift, pulse or rain.
+    public var musicTrack: String?
     public var littleArc: Bool?
     /// Built-in feature modules already offered to this library, so removed ones stay removed.
     public var seededFeatures: [String]?

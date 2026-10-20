@@ -20,6 +20,12 @@ pub const OPS: &[&str] = &[
     "gesture", "gesture-action",
 ];
 
+/// Opera GX's background music, generated in the interface: (id, name, what it sounds like).
+pub const MUSIC_TRACKS: &[(&str, &str, &str)] = &[
+    ("drift", "Drift", "Slow pads"),
+    ("pulse", "Pulse", "An arpeggio over a bass note"),
+    ("rain", "Rain", "Soft rain and chimes"),
+];
 /// Mouse gesture shapes, drawn as strokes left, right, up and down, and what each does
 /// until the person changes it: back, forward, reload, new tab and close tab as in Opera and Vivaldi.
 pub const GESTURES: &[(&str, &str)] = &[
@@ -671,6 +677,7 @@ fn valid_setting(key: &str, v: &Value) -> bool {
         | "interfaceSounds" | "clearHistoryOnQuit" | "clearCookiesOnQuit" | "clearCacheOnQuit"
         | "blockCamera" | "blockMicrophone" | "blockLocation" | "blockNotifications" => v.is_boolean(),
         "musicVolume" => v.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)),
+        "musicTrack" => MUSIC_TRACKS.iter().any(|t| Some(t.0) == v.as_str()),
         "defaultSearchID" => v.as_str().is_some_and(|id| id.len() <= 64),
         "interfaceCSS" => v.as_str().is_some_and(|css| css.len() <= 65_536 && !css.contains('<')),
         "startupPages" => v.as_array().is_some_and(|pages| pages.len() <= 20 && pages.iter().all(|p| p.as_str().and_then(web_address).is_some())),
