@@ -122,11 +122,13 @@ jobs:
           match=re.fullmatch(r'(\d+\.\d+\.\d+)-preview\.(\d+)',old)
           if not match: raise SystemExit('Invalid preview version')
           Path('PREVIEW_VERSION').write_text(match[1]+'-preview.'+str(int(match[2])+1)+'\n')
-          Path('PREVIEW_NAME').write_text('Neutrino — Chromium '+candidate['version'].split('chromium-')[1]+'\n')
+          chromium=candidate['version'].split('chromium-')[1]
+          Path('PREVIEW_NAME').write_text('Neutrino — Chromium '+chromium+'\n')
+          Path('PREVIEW_NOTES.md').write_text('- Updates the Blink engine to Chromium '+chromium+'.\n')
           PY
           git config user.name 'Neutrino release automation'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ChromiumRuntime/cef-version.json PREVIEW_VERSION PREVIEW_NAME
+          git add ChromiumRuntime/cef-version.json PREVIEW_VERSION PREVIEW_NAME PREVIEW_NOTES.md
           git commit -m 'Update verified upstream Chromium runtime'
           # A fast-forward-only push rejects concurrent main changes.
           git push origin HEAD:main
