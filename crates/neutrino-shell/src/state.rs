@@ -579,7 +579,10 @@ impl Shell {
                 }
                 "split-with" => {
                     let id = &request["id"];
+                    let panes = crate::render::split_panes(&self.snapshot["session"]["split"]);
                     if *id != self.active()["id"]
+                        && !panes.contains(&id.as_str().unwrap_or(""))
+                        && panes.len() < crate::render::MAX_SPLIT_PANES
                         && self
                             .tabs()
                             .iter()
@@ -587,6 +590,12 @@ impl Shell {
                     {
                         commands.push(json!({"op":"splitWith","id":id}));
                         self.menu.clear();
+                    }
+                }
+                "split-remove" => {
+                    let panes = crate::render::split_panes(&self.snapshot["session"]["split"]);
+                    if let Some(id) = request["id"].as_str().filter(|id| panes.contains(id)) {
+                        commands.push(json!({"op":"splitRemove","id":id}));
                     }
                 }
                 "selectTab" | "closeTab" | "duplicateTab" | "pinTab" | "toggleBranch" => {
@@ -1253,7 +1262,7 @@ impl Shell {
             .contains(&v.as_str().unwrap_or("")),
             "toolbarItems" => v.as_array().is_some_and(|items| items.len() <= 14 && items.iter().all(|i| crate::render::TOOLBAR_ITEMS.iter().any(|t| Some(t.0) == i.as_str()))),
             "hiddenButtons" => v.as_array().is_some_and(|items| items.iter().all(|i| crate::render::REMOVABLE_BUTTONS.iter().any(|b| Some(b.0) == i.as_str()))),
-            "split" => ["sideBySide", "stacked"].contains(&v.as_str().unwrap_or("")),
+            "split" => ["sideBySide", "stacked", "grid"].contains(&v.as_str().unwrap_or("")),
             "cornerRadius" => v.as_f64().is_some_and(|n| (0.0..=24.0).contains(&n)),
             "fontScale" => v.as_f64().is_some_and(|n| (0.85..=1.4).contains(&n)),
             "spacingScale" => v.as_f64().is_some_and(|n| (0.75..=1.5).contains(&n)),

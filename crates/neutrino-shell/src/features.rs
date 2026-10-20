@@ -1131,7 +1131,7 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             _ => {}
         },
         "split-axis" => {
-            if ["sideBySide", "stacked"].contains(&value) {
+            if ["sideBySide", "stacked", "grid"].contains(&value) {
                 commands.push(json!({"op":"splitAxis","value":value}));
                 s.menu.clear();
             }

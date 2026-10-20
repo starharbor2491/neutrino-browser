@@ -665,7 +665,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             })
         }
         guard !app.finalQuitDataFrozen, !showingOverlay, let model, !model.isClosed, body["overlay"] as? Bool == false,
-              let pages = body["pages"] as? [[String: Any]], pages.count <= 3 else { container.hidePages(); return }
+              let pages = body["pages"] as? [[String: Any]], pages.count <= TabSplit.maximumPanes + 1 else { container.hidePages(); return }
         // A sidebar the interface draws over the pages, which leave that part uncovered.
         var uncovered = NSRect.zero
         if let r = body["uncovered"] as? [String: Double], let x = r["x"], let y = r["y"], let width = r["width"], let height = r["height"],
@@ -673,7 +673,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             uncovered = NSRect(x: x, y: y, width: width, height: height).intersection(container.bounds)
         }
         var visible = Set<UUID>()
-        let allowed = model.session.split.map { Set([$0.first, $0.second]) } ?? Set([model.session.selectedTabID])
+        let allowed = Set(model.session.split?.panes ?? [model.session.selectedTabID])
         let webPanels = (app.library.preferences.webPanels ?? []).filter { $0.profileID == model.session.profileID }
         for page in pages {
             guard let raw = page["id"] as? String, let id = UUID(uuidString: raw) else { continue }
@@ -773,11 +773,21 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         case "splitWith":
             if let model, let id, id != model.session.selectedTabID,
                model.session.tabs.contains(where:{$0.id==id && $0.url != nil}) {
-                model.session.split=TabSplit(first:model.session.selectedTabID,second:id)
-                model.session.splitSuppressed=nil
-                var c=model.configuration;c.layout.split = .sideBySide
-                app.applyConfiguration(c,to:model.session.spaceID)
+                // A page chosen while pages are already split joins them as another tile.
+                if let split = model.session.split {
+                    if let tiled = split.adding(id) { model.session.split = tiled }
+                } else {
+                    model.session.split=TabSplit(first:model.session.selectedTabID,second:id)
+                    model.session.splitSuppressed=nil
+                    var c=model.configuration;c.layout.split = c.layout.split ?? .sideBySide
+                    app.applyConfiguration(c,to:model.session.spaceID)
+                }
             }
+        case "splitRemove":
+            guard let model, let id, let split = model.session.split, split.contains(id) else { return }
+            model.session.split = split.removing(id)
+            if model.session.split == nil { model.session.splitSuppressed = true }
+            if model.session.selectedTabID == id, let next = model.session.split?.first { model.selectTab(next) }
         case "unsplit": model?.endSplit()
         case "switchSpace": if let id, let model, app.library.spaces?.contains(where: { $0.id==id && $0.profileID==model.session.profileID })==true { model.switchSpace(id) }
         case "switchProfile": if let id { model?.switchProfile(id) }

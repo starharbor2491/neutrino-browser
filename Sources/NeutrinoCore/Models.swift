@@ -67,8 +67,23 @@ public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
 public struct TabSplit: Codable, Equatable, Sendable {
     public var first: UUID
     public var second: UUID
-    public init(first: UUID, second: UUID) { self.first = first; self.second = second }
-    public func contains(_ id: UUID) -> Bool { first == id || second == id }
+    /// Further tiled pages: Arc's split view and Vivaldi's tiling hold up to four.
+    public var more: [UUID]?
+    public static let maximumPanes = 4
+    public init(first: UUID, second: UUID, more: [UUID]? = nil) { self.first = first; self.second = second; self.more = more }
+    public var panes: [UUID] { [first, second] + (more ?? []) }
+    public func contains(_ id: UUID) -> Bool { panes.contains(id) }
+    /// The panes left after one closes; nil when fewer than two remain.
+    public func removing(_ id: UUID) -> TabSplit? {
+        let rest = panes.filter { $0 != id }
+        guard rest.count >= 2 else { return nil }
+        return TabSplit(first: rest[0], second: rest[1], more: rest.count > 2 ? Array(rest.dropFirst(2)) : nil)
+    }
+    /// The split with one more pane, while there is room for it.
+    public func adding(_ id: UUID) -> TabSplit? {
+        guard !contains(id), panes.count < Self.maximumPanes else { return nil }
+        return TabSplit(first: first, second: second, more: (more ?? []) + [id])
+    }
 }
 public struct WindowSession: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
@@ -159,7 +174,7 @@ public enum Density: String, Codable, CaseIterable, Sendable { case comfortable,
 public enum TabPlacement: String, Codable, CaseIterable, Sendable { case top, bottom, leading, trailing }
 public enum BarPlacement: String, Codable, CaseIterable, Sendable { case top, bottom }
 public enum SidebarPlacement: String, Codable, CaseIterable, Sendable { case leading, trailing, hidden }
-public enum SplitAxis: String, Codable, CaseIterable, Sendable { case sideBySide, stacked }
+public enum SplitAxis: String, Codable, CaseIterable, Sendable { case sideBySide, stacked, grid }
 public enum InterfaceTypeface: String, Codable, CaseIterable, Sendable { case system, rounded, serif, monospaced }
 public struct ComponentAppearance: Codable, Equatable, Sendable {
     public var density: Density?

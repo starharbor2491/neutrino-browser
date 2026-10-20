@@ -228,6 +228,42 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn split_view_tiles_up_to_four_pages() {
+    let tabs = json!([{"id":"a","url":"https://a.example/"},{"id":"b","url":"https://b.example/"},{"id":"c","url":"https://c.example/"},{"id":"d","url":"https://d.example/"},{"id":"e","url":"https://e.example/"}]);
+    let session = |split: Value| json!({"profileID":"p1","selectedTabID":"c","tabs":tabs,"split":split});
+    // A closed or repeated tile drops out; the rest stay tiled.
+    let s = neutrino_shell::core_request(json!({"op":"normalizeSession","value":session(json!({"first":"a","second":"b","more":["c","gone","a"]}))})).unwrap();
+    assert_eq!(s["split"], json!({"first":"a","second":"b","more":["c"]}));
+    // Selecting another tab shows it in the selected tile only.
+    let s = neutrino_shell::core_request(json!({"op":"selectSessionTab","id":"e","value":s})).unwrap();
+    assert_eq!(s["split"], json!({"first":"a","second":"b","more":["e"]}));
+    // Two panes left end the extra list; one ends the split.
+    let s = neutrino_shell::core_request(json!({"op":"normalizeSession","value":session(json!({"first":"c","second":"gone","more":["b"]}))})).unwrap();
+    assert_eq!(s["split"], json!({"first":"c","second":"b"}));
+
+    let mut shell = shell();
+    shell.snapshot["session"]["tabs"] = tabs.clone();
+    shell.snapshot["session"]["selectedTabID"] = json!("a");
+    shell.snapshot["session"]["split"] = json!({"first":"a","second":"b"});
+    shell.dispatch(json!({"op":"sync","snapshot":shell.snapshot.clone()}));
+    let menu = shell.dispatch(json!({"op":"menu","value":"split-choose"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("Add a tile") && menu.contains("data-id=\"c\"") && !menu.contains("data-op=\"split-with\" data-id=\"b\""));
+    assert_eq!(commands(&shell.dispatch(json!({"op":"split-with","id":"c"})))[0], json!({"op":"splitWith","id":"c"}));
+    assert!(commands(&shell.dispatch(json!({"op":"split-with","id":"b"}))).is_empty());
+    shell.snapshot["session"]["split"] = json!({"first":"a","second":"b","more":["c"]});
+    let html = shell.dispatch(json!({"op":"sync","snapshot":shell.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("split-canvas tiled") && html.contains("data-panes=\"3\"") && !html.contains("split-divider"));
+    assert_eq!(html.matches("data-op=\"split-remove\"").count(), 3);
+    assert_eq!(commands(&shell.dispatch(json!({"op":"split-remove","id":"b"})))[0], json!({"op":"splitRemove","id":"b"}));
+    assert!(commands(&shell.dispatch(json!({"op":"split-remove","id":"e"}))).is_empty());
+    assert_eq!(commands(&shell.dispatch(json!({"op":"split-axis","value":"grid"})))[0], json!({"op":"splitAxis","value":"grid"}));
+    shell.snapshot["session"]["split"] = json!({"first":"a","second":"b","more":["c","d"]});
+    shell.dispatch(json!({"op":"sync","snapshot":shell.snapshot.clone()}));
+    assert!(commands(&shell.dispatch(json!({"op":"split-with","id":"e"}))).is_empty());
+    let menu = shell.dispatch(json!({"op":"menu","value":"split-choose"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("Four pages are tiled"));
+}
+#[test]
 fn brave_shields_subscribe_easylist_like_brave() {
     let finish = |preset: &str, level: &str| {
         let mut s = Shell::default();

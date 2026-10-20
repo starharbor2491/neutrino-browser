@@ -7,7 +7,7 @@ import NeutrinoCore
 @MainActor
 final class BrowserModel: ObservableObject {
     var visibleEngineTabs: [(id: UUID, page: BrowserEngineTab)] {
-        let ids = session.split.map { [$0.first, $0.second] } ?? [session.selectedTabID]
+        let ids = session.split?.panes ?? [session.selectedTabID]
         return ids.map { ($0, webTab($0)) }
     }
     var shellAction: (([String: Any]) -> Void)?
@@ -447,8 +447,11 @@ final class BrowserModel: ObservableObject {
         app.tabOwnership.release(id, from: session.id)
         defer { forgetSiteIfClosed(closing.url) }
         for i in session.tabs.indices where session.tabs[i].parentID == id { session.tabs[i].parentID = closing.parentID }
-        let otherPane = session.split.map { $0.first == id ? $0.second : $0.first }
-        if session.split?.contains(id) == true { session.split = nil; session.splitSuppressed = true }
+        let otherPane = session.split?.panes.first { $0 != id }
+        if let split = session.split, split.contains(id) {
+            session.split = split.removing(id)
+            if session.split == nil { session.splitSuppressed = true }
+        }
         session.tabs.remove(at: index)
         if session.tabs.isEmpty { session.tabs = [BrowserTab(engineID: profile.engineID ?? .chromium)] }
         if session.selectedTabID == id { selectTab(otherPane ?? session.tabs[min(index, session.tabs.count - 1)].id) }
@@ -514,12 +517,12 @@ final class BrowserModel: ObservableObject {
         session.split = nil; session.splitSuppressed = true
     }
     func selectOtherPane() {
-        guard let pair = session.split else { return }
-        selectTab(pair.first == session.selectedTabID ? pair.second : pair.first)
+        guard let panes = session.split?.panes, let index = panes.firstIndex(of: session.selectedTabID) else { return }
+        selectTab(panes[(index + 1) % panes.count])
     }
     func updateFocusedTab(_ responder: NSResponder?) {
-        guard let pair = session.split, let view = responder as? NSView else { return }
-        for id in [pair.first, pair.second] where id != session.selectedTabID {
+        guard let split = session.split, let view = responder as? NSView else { return }
+        for id in split.panes where id != session.selectedTabID {
             if let tab = webTabs[id], view === tab.nativeView || view.isDescendant(of: tab.nativeView) {
                 selectTab(id); return
             }

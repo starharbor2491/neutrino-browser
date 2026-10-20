@@ -1429,7 +1429,8 @@
   // drag reaches the page, or leaves the interface right beside it.
   function canSplitDrop() {
     const zone = root.querySelector(".split-drop");
-    return !!(drag && drag.kind === "tab" && zone && zone.dataset.current !== drag.id);
+    return !!(drag && drag.kind === "tab" && zone && zone.dataset.current !== drag.id &&
+      !(zone.dataset.panes || "").split(" ").includes(drag.id));
   }
   function armSplit(on) {
     if (splitArmed === on) return;

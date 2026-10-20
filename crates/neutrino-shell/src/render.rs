@@ -836,11 +836,16 @@ fn browser(s: &Shell, preview: bool) -> Markup {
         @if !preview {(crate::views::find_bar(s))}
         div class="page-workspace"{@if strip {(panel_strip(s))}div class=(if (s.snapshot["passwordPrompt"].is_object() || crate::views::card_offered(s)) && !preview {"page-frame with-prompt"} else {"page-frame"}){@if !preview {(crate::views::password_prompt(s))(crate::views::card_offer(s))}
             @if !preview && !["browse","editor"].contains(&s.screen.as_str()) {(utility_page(s))}
-            @else if !s.snapshot["session"]["split"].is_null(){div class="split-canvas" data-axis=(text(&s.config()["layout"],"split")) style=(format!("--split:{}",s.config()["layout"]["splitRatio"].as_f64().unwrap_or(0.5).clamp(0.2,0.8))){
-                @for (pane, id) in [&s.snapshot["session"]["split"]["first"],&s.snapshot["session"]["split"]["second"]].into_iter().enumerate() {
-                    @if pane == 1 && !preview {div class="split-divider" role="separator" aria-label="Resize split view" aria-orientation=(if text(&s.config()["layout"],"split")=="stacked"{"horizontal"}else{"vertical"}){}}
-                    @let identifier=id.as_str().unwrap_or("");
-                    section class="split-pane" {div class="split-label"{button data-op="selectTab" data-id=(identifier){(s.tabs().iter().find(|t|t["id"]==*id).map(|t|text(t,"title")).unwrap_or("New tab"))}(button("Exit split view","unsplit","close"))}
+            @else if !s.snapshot["session"]["split"].is_null(){
+                @let panes=split_panes(&s.snapshot["session"]["split"]);
+                @let axis=text(&s.config()["layout"],"split");
+                div class=(if panes.len()>2{"split-canvas tiled"}else{"split-canvas"}) data-axis=(if panes.len()==2 && axis=="grid"{"sideBySide"}else{axis}) data-panes=(panes.len()) style=(format!("--split:{}",s.config()["layout"]["splitRatio"].as_f64().unwrap_or(0.5).clamp(0.2,0.8))){
+                @for (pane, identifier) in panes.iter().copied().enumerate() {
+                    @if pane == 1 && panes.len() == 2 && !preview {div class="split-divider" role="separator" aria-label="Resize split view" aria-orientation=(if axis=="stacked"{"horizontal"}else{"vertical"}){}}
+                    @let title=s.tabs().iter().find(|t|t["id"]==identifier).map(|t|text(t,"title")).unwrap_or("New tab");
+                    section class=(if identifier==text(s.active(),"id"){"split-pane active"}else{"split-pane"}) {div class="split-label"{button data-op="selectTab" data-id=(identifier) aria-current=[(identifier==text(s.active(),"id")).then_some("page")]{(title)}
+                        @if panes.len()>2 {button class="icon-button" data-op="split-remove" data-id=(identifier) title=(format!("Remove {title} from the tiles")) aria-label=(format!("Remove {title} from the tiles")){(icon("close"))}}
+                        @else {(button("Exit split view","unsplit","close"))}}
                         @if let Some(error)=s.snapshot["pageErrors"][identifier].as_str(){(page_error(error,identifier))}
                         @else {div class="native-page" data-page=(identifier){(page_backdrop(s,identifier))@if preview {div class="preview-webpage"{p{"Your page"}}}}}
                     }
@@ -858,14 +863,24 @@ fn browser(s: &Shell, preview: bool) -> Markup {
     }}
 }
 
+/// Arc's split view and Vivaldi's tiling hold up to four pages.
+pub const MAX_SPLIT_PANES: usize = 4;
+/// Every pane of a split in order: `first`, `second`, then any further tiles in `more`.
+pub fn split_panes(split: &Value) -> Vec<&str> {
+    let mut out = vec![text(split, "first"), text(split, "second")];
+    out.extend(array(&split["more"]).iter().filter_map(Value::as_str));
+    out.retain(|id| !id.is_empty());
+    out
+}
 /// Arc and Vivaldi: a tab dragged onto the page opens beside it. Shown only during the drag.
 fn split_drop(s: &Shell) -> Markup {
+    let panes = split_panes(&s.snapshot["session"]["split"]);
     let ready = s.screen == "browse"
-        && s.snapshot["session"]["split"].is_null()
+        && panes.len() < MAX_SPLIT_PANES
         && !text(s.active(), "url").is_empty()
-        && s.tabs().iter().filter(|t| !text(t, "url").is_empty()).count() > 1;
-    html! {@if ready {div class="split-drop" data-current=(text(s.active(),"id")) aria-hidden="true"{
-        div class="split-drop-zone" data-split-side="trailing"{(icon("split"))span{"Open in split view"}}
+        && s.tabs().iter().filter(|t| !text(t, "url").is_empty() && !panes.contains(&text(t, "id"))).count() > usize::from(panes.is_empty());
+    html! {@if ready {div class="split-drop" data-current=(text(s.active(),"id")) data-panes=(panes.join(" ")) aria-hidden="true"{
+        div class="split-drop-zone" data-split-side="trailing"{(icon("split"))span{@if panes.is_empty(){"Open in split view"}@else{"Add as a tile"}}}
     }}}
 }
 fn page_backdrop(s: &Shell, id: &str) -> Markup {
@@ -1085,7 +1100,7 @@ fn editor_extra(s: &Shell) -> Markup {
                 button class="toggle-row" data-op="editor-value" data-key="hiddenButtons" data-json=(serde_json::to_string(&next).unwrap_or_default()) role="switch" aria-checked=(shown.to_string()){span{(label)}span class=(if shown {"switch on"} else {"switch"}){span{}}}
             }
             @for (key, label) in [("panelBar","Panel bar"),("statusBar","Status bar"),("compactRail","Icon-only sidebar"),("tabThumbnails","Tab thumbnails")] {button class="toggle-row" data-op="editor-value" data-key=(key) data-value=((!flag(layout,key)).to_string()) data-type="bool" role="switch" aria-checked=(flag(layout,key).to_string()){span{(label)}span class=(if flag(layout,key){"switch on"}else{"switch"}){span{}}}}
-            label class="control-label"{"Split view"}(segments("editor-value","split",if text(layout,"split").is_empty(){"sideBySide"}else{text(layout,"split")},&[("sideBySide","Side by side"),("stacked","Stacked")]))
+            label class="control-label"{"Split view"}(segments("editor-value","split",if text(layout,"split").is_empty(){"sideBySide"}else{text(layout,"split")},&[("sideBySide","Side by side"),("stacked","Stacked"),("grid","Grid")]))
         }
     }
 }
@@ -1461,7 +1476,21 @@ fn menu(s: &Shell) -> Markup {
             "new-dial-group"=>{label class="field"{span{"Group name"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="Work" maxlength="40" autocomplete="off";}button class="button primary" data-op="dial-group" data-value="new" disabled[s.name.trim().is_empty()]{"Create"}p class="field-help"{"Add a site to the group to keep it."}}
             m if m.starts_with("add-site")=>{label class="field"{span{"Site address"}input id="name-input" data-name="true" value=(s.name.as_str()) placeholder="example.com" maxlength="2000" autocomplete="off" spellcheck="false";}button class="button primary" data-op="addSite" disabled[s.name.is_empty()]{"Add"}p class="field-help"{(if m=="add-site:dial" {format!("Sites you add are saved in the {} bookmarks folder.", crate::views::dial_folder(s))} else {"Sites you add are saved as bookmarks.".to_string()})}}
             "notes-scope"=>{@for (value,label) in [("space","This Space"),("all","All notes")]{button class="menu-item" data-op="native" data-action="notesScope" data-value=(value){(icon(if text(&s.snapshot,"notesScope")==value{"check"}else{"folder"}))span{(label)}}}}
-            "split-choose"=>{div class="menu-label"{"Open beside this page"}@for t in s.tabs().iter().filter(|t|t["id"]!=s.active()["id"] && !text(t,"url").is_empty()){button class="menu-item" data-op="split-with" data-id=(text(t,"id")){(site(t))span{(text(t,"title"))}}}@if s.tabs().iter().filter(|t|!text(t,"url").is_empty()).count()<2{p class="field-help"{"Open a second page, then choose it here."}}}
+            "split-choose"=>{
+                @let panes=split_panes(&s.snapshot["session"]["split"]);
+                @let choices: Vec<&Value>=s.tabs().iter().filter(|t|t["id"]!=s.active()["id"] && !text(t,"url").is_empty() && !panes.contains(&text(t,"id"))).collect();
+                @if panes.len()>=MAX_SPLIT_PANES {p class="field-help"{"Four pages are tiled, the most at once. Remove one to add another."}}
+                @else {
+                    div class="menu-label"{@if panes.is_empty(){"Open beside this page"}@else{"Add a tile"}}
+                    @for t in &choices {button class="menu-item" data-op="split-with" data-id=(text(t,"id")){(site(t))span{(text(t,"title"))}}}
+                    @if choices.is_empty(){p class="field-help"{"Open another page, then choose it here."}}
+                }
+                @if panes.len()>2 {
+                    div class="menu-label"{"Arrange tiles"}
+                    (segments("split-axis","",match text(&s.config()["layout"],"split"){""=>"sideBySide",v=>v},&[("sideBySide","Side by side"),("stacked","Stacked"),("grid","Grid")]))
+                }
+                @if !panes.is_empty(){button class="menu-item" data-op="unsplit"{(icon("close"))span{"Exit split view"}}}
+            }
             "space"=>{div class="menu-group"{(menu_item("New folder","menu","new-folder","folder"))@if crate::features::on(s, "sessions") {(menu_item("Save tabs as session…","menu","save-session","download"))}button class="menu-item" data-op="screen" data-value="library" data-section="archive"{(icon("history"))span{"Archived tabs"}}}
                 @if crate::features::on(s, "tidy-tabs") {div class="menu-separator"{}
                 button class="menu-item menu-item-detail" data-op="tidy-tabs" disabled[s.private()]{(icon("spark"))span{"Tidy tabs into folders"small{"Sends tab titles and sites to your AI provider"}}}}
