@@ -510,6 +510,28 @@ struct DownloadsTests {
         #expect(metadata[.quarantinePropertiesKey] != nil)
     }
 
+    @Test func chromiumDownloadsPauseResumeAndCancelWhilePaused() throws {
+        let (center, item, directory) = try fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var requests: [Bool] = []
+        var cancellations = 0
+        item.pauseChromium = { requests.append($0) }
+        item.cancelChromium = { cancellations += 1 }
+        #expect(item.canPause)
+        center.setPaused(item, true)
+        center.setPaused(item, true)
+        #expect(requests == [true] && item.paused && item.summary["paused"] as? Bool == true)
+        center.setPaused(item, false)
+        #expect(requests == [true, false] && !item.paused)
+        center.setPaused(item, true)
+        center.cancel(item)
+        #expect(cancellations == 1 && !item.canPause)
+        center.updateChromium(id: "download", fraction: 0.5, complete: false, cancelled: true, interrupted: false)
+        #expect(item.status == "Cancelled" && !item.paused && item.pauseChromium == nil)
+        center.setPaused(item, false)
+        #expect(requests == [true, false, true])
+    }
+
     private func fixture(admission: DownloadAdmission = DownloadAdmission()) throws -> (DownloadCenter, DownloadItem, URL) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

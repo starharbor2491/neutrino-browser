@@ -14,7 +14,11 @@ typedef int (*neutrino_cef_popup_callback)(void *context, void *child, const cha
 enum { NEUTRINO_CEF_STATE = 1, NEUTRINO_CEF_FINISHED, NEUTRINO_CEF_ERROR,
        NEUTRINO_CEF_CLOSED, NEUTRINO_CEF_RESULT, NEUTRINO_CEF_NOTICE,
        NEUTRINO_CEF_READER_CONTEXT, NEUTRINO_CEF_DOWNLOAD_BEGIN, NEUTRINO_CEF_DOWNLOAD_UPDATE,
-       NEUTRINO_CEF_ACTIVATE, NEUTRINO_CEF_BROWSER_COMMAND };
+       NEUTRINO_CEF_ACTIVATE, NEUTRINO_CEF_BROWSER_COMMAND,
+       /* A sign-in reported by Neutrino's isolated password world. */
+       NEUTRINO_CEF_CREDENTIAL,
+       /* A mouse gesture's strokes reported by Neutrino's isolated gesture world. */
+       NEUTRINO_CEF_GESTURE };
 enum { NEUTRINO_CEF_LOAD = 1, NEUTRINO_CEF_RELOAD, NEUTRINO_CEF_STOP,
        NEUTRINO_CEF_BACK, NEUTRINO_CEF_FORWARD, NEUTRINO_CEF_ZOOM,
        NEUTRINO_CEF_FIND, NEUTRINO_CEF_POPUPS, NEUTRINO_CEF_FOCUS,
@@ -25,7 +29,22 @@ enum { NEUTRINO_CEF_LOAD = 1, NEUTRINO_CEF_RELOAD, NEUTRINO_CEF_STOP,
        NEUTRINO_CEF_REOPEN_TAB, NEUTRINO_CEF_PREVIOUS_TAB, NEUTRINO_CEF_NEXT_TAB,
        NEUTRINO_CEF_SET_BLOCKING, NEUTRINO_CEF_REQUEST_CLOSE,
        NEUTRINO_CEF_SUSPEND_INPUT, NEUTRINO_CEF_SELECT_INNER_PAGE,
-       NEUTRINO_CEF_CLOSE_INNER_PAGE };
+       NEUTRINO_CEF_CLOSE_INNER_PAGE,
+       /* Value 1 mutes the active page, 0 unmutes it. */
+       NEUTRINO_CEF_MUTE,
+       /* Text names an allowed Chrome command such as IDC_PRINT. */
+       NEUTRINO_CEF_CHROME_COMMAND,
+       /* Text names an allowed profile preference; value is its number or 0/1. */
+       NEUTRINO_CEF_PREFERENCE,
+       /* Value is a download ID; text "1" pauses it and "0" resumes it. */
+       NEUTRINO_CEF_DOWNLOAD_PAUSE,
+       /* Value 1 removes tracking parameters from top-level addresses, 0 keeps them. */
+       NEUTRINO_CEF_STRIP_TRACKING,
+       /* Value is a number of seconds; deletes the Profile's cookies created within it. */
+       NEUTRINO_CEF_CLEAR_COOKIES_SINCE,
+       /* Text is "camera" or "microphone", a newline and an http(s) site address;
+          value 1 allows, 2 blocks and 0 returns the site to the default. */
+       NEUTRINO_CEF_SITE_PERMISSION };
 
 /// Versioned ABI loaded only from an explicitly installed engine package.
 typedef struct neutrino_cef_api {

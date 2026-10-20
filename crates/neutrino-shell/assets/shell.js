@@ -8,6 +8,8 @@
     currentEditing = false,
     generation = 0,
     drag = null,
+    splitArmed = false,
+    lastDragPoint = null,
     resize = null,
     adjustment = null,
     adjustmentSequence = 0,
@@ -23,7 +25,10 @@
     patching = false,
     feedbackTimer = null,
     feedbackMessage = "",
-    wheelGesture = { sum: 0, last: 0, locked: false };
+    wheelGesture = { sum: 0, last: 0, locked: false },
+    shortcutMap = new Map(),
+    activeTab = null,
+    inputTimers = {};
   const native = () => window.webkit?.messageHandlers?.neutrino;
   const textInputSelector =
     "textarea,input:not([type=range]):not([type=checkbox]):not([type=radio])";
@@ -219,6 +224,8 @@
       announce(result.error);
       return;
     }
+    if (Array.isArray(result.shortcuts))
+      shortcutMap = new Map(result.shortcuts.map(([binding, action]) => [binding, action]));
     if (!result.html) return;
     patching = true;
     const previousMenu = root.querySelector(".popover-menu")?.dataset.menu;
@@ -232,6 +239,12 @@
       ]),
     );
     const hadPanel = !!root.querySelector(".workspace-panel");
+    const overlays = [...root.querySelectorAll(".palette-scrim, .menu-scrim")];
+    const spaceOrder = [...root.querySelectorAll(".spaces [data-space]")].map(
+      (el) => el.dataset.space,
+    );
+    const previousSpace = root.querySelector(".space-button.selected")?.dataset.space;
+    const previousSection = root.querySelector(".library-tabs .selected")?.dataset.value;
     const sameContext =
       currentContext === null || currentContext === result.context;
     if (result.context) currentContext = result.context;
@@ -247,12 +260,16 @@
         : null;
     const scrolls = [
       ...root.querySelectorAll(
-        ".tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list,.start-surface,.horizontal-tabs,.modules-content,.module-details",
+        ".tabs-scroll,.setup-content,.setup-form,.settings-content,.editor-inspector,.library-content,.note-list,.start-surface,.horizontal-tab-scroll,.modules-content,.module-details",
       ),
     ].map((e) => [e.className, e.scrollTop, e.scrollLeft]);
-    const openDetails = [...root.querySelectorAll("details[open]")].map(
-      (e) => e.className,
-    );
+    // Disclosures that share a class are told apart by their summary, without its count.
+    const detailKey = (e) => {
+      const summary = e.querySelector(":scope > summary");
+      const label = summary?.querySelector("strong")?.textContent ?? summary?.textContent ?? "";
+      return e.className + "\n" + label.trim().replace(/\s*\([^)]*\)$/, "");
+    };
+    const openDetails = new Set([...root.querySelectorAll("details[open]")].map(detailKey));
     const hadDialog = !!topDialog();
     const template = document.createElement("template");
     template.innerHTML = result.html;
@@ -263,6 +280,7 @@
       "";
     if (sameContext) reconcile(root, template.content, true);
     else root.replaceChildren(template.content.cloneNode(true));
+    for (const overlay of overlays) if (!overlay.isConnected) leave(overlay);
     currentOverlay = !!result.overlay;
     currentEditing = !!result.editing;
     if (result.commandRevision !== commandRevision) {
@@ -276,10 +294,8 @@
     ))
       el.inert = !!dialog && !el.contains(dialog) && el !== dialog;
     if (dialog && !hadDialog) returnFocus = key;
-    for (const cls of openDetails) {
-      const el = root.getElementsByClassName(cls)[0];
-      if (el) el.open = true;
-    }
+    if (openDetails.size)
+      for (const el of root.querySelectorAll("details")) if (openDetails.has(detailKey(el))) el.open = true;
     for (const [cls, top, left] of scrolls) {
       const el = root.getElementsByClassName(cls)[0];
       if (el) {
@@ -310,9 +326,7 @@
           next.setSelectionRange(...selection);
         } catch {}
     } else if (dialog)
-      dialog
-        .querySelector("input,button:not(:disabled),select")
-        ?.focus({ preventScroll: true });
+      firstControl(dialog)?.focus({ preventScroll: true });
     else if (hadDialog && returnFocus) {
       root.querySelector(returnFocus)?.focus({ preventScroll: true });
       returnFocus = null;
@@ -342,10 +356,8 @@
     positionMenu();
     positionDialog();
     const menu = root.querySelector(".anchored-menu .popover-menu");
-    if (menu && previousMenu !== menu.dataset.menu)
-      menu
-        .querySelector("input,button:not(:disabled),select")
-        ?.focus({ preventScroll: true });
+    if (menu && previousMenu !== menu.dataset.menu && menu.dataset.menu !== "suggest")
+      firstControl(menu)?.focus({ preventScroll: true });
     const step = root.querySelector(".onboarding");
     if (step && previousStep !== step.className) {
       step.classList.add("setup-enter");
@@ -382,6 +394,42 @@
           );
       }
     }
+    const space = root.querySelector(".space-button.selected")?.dataset.space;
+    const tabs = root.querySelector(".tabs-scroll");
+    if (previousSpace && space && space !== previousSpace && tabs) {
+      const forward = spaceOrder.indexOf(space) > spaceOrder.indexOf(previousSpace);
+      animate(
+        tabs,
+        [
+          { opacity: 0, transform: `translateX(${forward ? 18 : -18}px)` },
+          { opacity: 1, transform: "translateX(0)" },
+        ],
+        240,
+      );
+    } else if (sameContext && motionAllowed()) {
+      for (const tab of root.querySelectorAll(".tab-row")) {
+        if (tabPositions.size && !tabPositions.has(tab.dataset.tab))
+          animate(
+            tab,
+            [
+              { opacity: 0, transform: "translateX(-6px)" },
+              { opacity: 1, transform: "translateX(0)" },
+            ],
+            200,
+          );
+      }
+    }
+    const section = root.querySelector(".library-tabs .selected")?.dataset.value;
+    if (previousSection && section && section !== previousSection)
+      for (const el of root.querySelectorAll(".library-content > :not(.library-tabs)"))
+        animate(
+          el,
+          [
+            { opacity: 0, transform: "translateY(4px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          180,
+        );
     const panel = root.querySelector(".workspace-panel");
     if (panel && !hadPanel)
       animate(
@@ -394,14 +442,342 @@
       );
     announce(result.announce);
     patching = false;
+    revealActiveTab();
+    updateBookmarkOverflow();
+    updateMarkup();
+    updateClocks();
+    applySchedule();
+    updateSounds();
     scalePreview();
     scheduleGeometry();
   }
+  // Markup editor: strokes stay here and are redrawn after every render, so re-rendering never loses them.
+  const markup = { image: null, source: "", strokes: [], tool: "pen", color: "#ff3b30", drawing: null };
+  function updateMarkup() {
+    const canvas = root.querySelector(".markup-canvas");
+    if (!canvas) { markup.strokes = []; markup.source = ""; markup.image = null; return; }
+    const source = canvas.dataset.markupImage;
+    for (const b of root.querySelectorAll("[data-markup-tool]")) b.setAttribute("aria-pressed", String(b.dataset.markupTool === markup.tool));
+    for (const b of root.querySelectorAll("[data-markup-color]")) b.setAttribute("aria-pressed", String(b.dataset.markupColor === markup.color));
+    if (source !== markup.source) {
+      markup.source = source; markup.strokes = []; markup.image = new Image();
+      markup.image.onload = () => drawMarkup();
+      markup.image.src = source;
+    } else drawMarkup();
+  }
+  function drawMarkup() {
+    const canvas = root.querySelector(".markup-canvas"), image = markup.image;
+    if (!canvas || !image || !image.complete || !image.naturalWidth) return;
+    if (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight) { canvas.width = image.naturalWidth; canvas.height = image.naturalHeight; }
+    const g = canvas.getContext("2d");
+    g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+    g.drawImage(image, 0, 0);
+    for (const stroke of markup.strokes.concat(markup.drawing ? [markup.drawing] : [])) {
+      const scale = canvas.width / 1000;
+      g.strokeStyle = stroke.color; g.lineCap = "round"; g.lineJoin = "round";
+      g.globalAlpha = stroke.tool === "highlight" ? 0.35 : 1;
+      g.lineWidth = (stroke.tool === "highlight" ? 18 : 4) * Math.max(1, scale);
+      g.beginPath();
+      if (stroke.tool === "box" && stroke.points.length > 1) {
+        const [a, b] = [stroke.points[0], stroke.points[stroke.points.length - 1]];
+        g.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+      } else {
+        stroke.points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+        g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+  }
+  function markupPoint(e) {
+    const canvas = e.target.closest(".markup-canvas"), r = canvas.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * canvas.width, ((e.clientY - r.top) / r.height) * canvas.height];
+  }
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest?.(".markup-canvas") || e.button !== 0) return;
+    e.target.setPointerCapture(e.pointerId);
+    markup.drawing = { tool: markup.tool, color: markup.color, points: [markupPoint(e)] };
+    drawMarkup();
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!markup.drawing || !e.target.closest?.(".markup-canvas")) return;
+    markup.drawing.points.push(markupPoint(e));
+    if (markup.drawing.points.length > 5000) markup.drawing.points.shift();
+    drawMarkup();
+  });
+  document.addEventListener("pointerup", () => {
+    if (!markup.drawing) return;
+    if (markup.drawing.points.length > 1) markup.strokes.push(markup.drawing);
+    markup.drawing = null; drawMarkup();
+  });
+  document.addEventListener("click", (e) => {
+    const tool = e.target.closest?.("[data-markup-tool]"), color = e.target.closest?.("[data-markup-color]");
+    const undo = e.target.closest?.("[data-markup-undo]"), out = e.target.closest?.("[data-markup-export]");
+    if (tool) markup.tool = tool.dataset.markupTool;
+    else if (color) markup.color = color.dataset.markupColor;
+    else if (undo) markup.strokes.pop();
+    else if (out) {
+      drawMarkup();
+      const canvas = root.querySelector(".markup-canvas");
+      if (canvas) send({ op: "markup", value: out.dataset.markupExport, data: canvas.toDataURL("image/png") });
+      return;
+    } else return;
+    updateMarkup();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!root.querySelector(".markup-editor")) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); send({ op: "markup", value: "cancel" }); }
+    else if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); markup.strokes.pop(); drawMarkup(); }
+  }, true);
+  // A menu or dialog's text field takes focus before its header's Close button.
+  function firstControl(container) {
+    return (
+      container.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not(:disabled),textarea') ||
+      container.querySelector("input,button:not(:disabled),select")
+    );
+  }
+  // The bookmarks bar shows what fits; » opens a menu with the rest, as in Chrome and Vivaldi.
+  function updateBookmarkOverflow() {
+    for (const bar of root.querySelectorAll(".bookmarks-bar")) {
+      const list = bar.querySelector(".bar-items"), more = bar.querySelector(".bar-overflow");
+      if (!list || !more) continue;
+      const items = [...list.children];
+      const overflow = () => items.findIndex((e) => e.offsetLeft + e.offsetWidth > list.clientWidth + 1);
+      more.hidden = true;
+      let first = overflow();
+      // Showing » narrows the list, so measure again with it in place.
+      if (first >= 0) { more.hidden = false; first = overflow(); }
+      items.forEach((e, i) => { e.style.visibility = first >= 0 && i >= first ? "hidden" : ""; });
+      more.dataset.value = "bm-overflow:" + Math.max(0, first);
+    }
+  }
+  // Keep the selected tab visible after it changes, in the sidebar and in tab strips.
+  let revealUntil = 0, revealTimer = 0;
+  // Brings the active tab fully into view at once if it isn't.
+  function settleActiveTab() {
+    const tab = root.querySelector(".browser-shell:not(.editing-preview) .tab-row.active[data-tab]");
+    const scroller = tab?.closest(".tabs-scroll, .horizontal-tab-scroll");
+    if (!scroller || performance.now() > revealUntil) return;
+    const r = tab.getBoundingClientRect(), box = scroller.getBoundingClientRect();
+    if (r.left < box.left - 1 || r.right > box.right + 1 || r.top < box.top - 1 || r.bottom > box.bottom + 1)
+      tab.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+  }
+  function revealActiveTab() {
+    const tab = root.querySelector(".browser-shell:not(.editing-preview) .tab-row.active[data-tab]");
+    const id = tab?.dataset.tab || null;
+    if (!tab || id === activeTab) {
+      activeTab = id;
+      // A re-render soon after restores the old scroll position, which stops the smooth
+      // scroll short, and tab widths keep settling for a moment: finish the reveal then.
+      settleActiveTab();
+      return;
+    }
+    activeTab = id;
+    revealUntil = performance.now() + 1500;
+    tab.scrollIntoView({ block: "nearest", inline: "nearest", behavior: motionAllowed() ? "smooth" : "auto" });
+    clearTimeout(revealTimer);
+    revealTimer = setTimeout(settleActiveTab, 600);
+  }
+  function updateClocks() {
+    const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    for (const el of root.querySelectorAll("[data-clock]")) if (el.textContent !== now) el.textContent = now;
+  }
+  setInterval(updateClocks, 15000);
+  // Light and dark by time of day, when the person set a schedule.
+  function applySchedule() {
+    const shell = root.querySelector(".app-shell");
+    const schedule = shell?.dataset.schedule;
+    if (!schedule) return;
+    const [light, dark] = schedule.split("-");
+    const now = new Date(),
+      minutes = now.getHours() * 60 + now.getMinutes(),
+      at = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    const day = at(light) <= at(dark)
+      ? minutes >= at(light) && minutes < at(dark)
+      : minutes >= at(light) || minutes < at(dark);
+    shell.dataset.mode = day ? "light" : "dark";
+  }
+  setInterval(applySchedule, 60000);
+  // Interface sounds, key clicks and background music are generated, not sampled.
+  let audio = null,
+    music = null;
+  function context() {
+    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume().catch(() => {});
+    return audio;
+  }
+  function sounds() {
+    return (root.querySelector(".app-shell")?.dataset.sounds || "").split(" ");
+  }
+  function tone(kind) {
+    if (!sounds().includes(kind === "key" ? "keys" : "ui")) return;
+    const ctx = context(),
+      t = ctx.currentTime,
+      osc = ctx.createOscillator(),
+      gain = ctx.createGain();
+    const [freq, length, level] =
+      kind === "key" ? [1900, 0.025, 0.035] : kind === "close" ? [420, 0.09, 0.05] : kind === "open" ? [880, 0.08, 0.05] : [660, 0.05, 0.035];
+    osc.type = kind === "key" ? "square" : "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    if (kind !== "key") osc.frequency.exponentialRampToValueAtTime(freq * (kind === "close" ? 0.7 : 1.25), t + length);
+    gain.gain.setValueAtTime(level, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + length);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + length + 0.02);
+  }
+  window.neutrinoSound = tone;
+  function musicSettings() {
+    const shell = root.querySelector(".app-shell");
+    const volume = Number(shell?.dataset.musicVolume ?? 0.5);
+    return {
+      track: shell?.dataset.musicTrack || "drift",
+      level: 0.06 * (Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.5),
+    };
+  }
+  // Opera GX's background music, generated rather than sampled: Drift (slow pads),
+  // Pulse (an arpeggio over a bass note) or Rain (soft brown noise and chimes).
+  function playTrack(track, ctx, master) {
+    const sources = [],
+      timers = [];
+    const note = (freq, at, length, peak, type, out) => {
+      const osc = ctx.createOscillator(),
+        g = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak, at + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + length);
+      osc.connect(g).connect(out);
+      osc.start(at);
+      osc.stop(at + length + 0.05);
+    };
+    if (track === "pulse") {
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 1400;
+      filter.connect(master);
+      const notes = [220, 261.63, 329.63, 392, 329.63, 261.63, 196, 246.94];
+      let step = 0,
+        next = ctx.currentTime + 0.1;
+      const schedule = () => {
+        while (next < ctx.currentTime + 0.6) {
+          note(notes[step % 8] * (step % 32 < 16 ? 1 : 0.89), next, 0.4, 0.5, "triangle", filter);
+          next += 0.3;
+          step++;
+        }
+      };
+      schedule();
+      timers.push(setInterval(schedule, 200));
+      const bass = ctx.createOscillator(),
+        level = ctx.createGain();
+      bass.frequency.value = 55;
+      level.gain.value = 0.45;
+      bass.connect(level).connect(master);
+      bass.start();
+      sources.push(bass);
+    } else if (track === "rain") {
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate),
+        data = buffer.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < data.length; i++) {
+        last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+        data[i] = last * 3.5;
+      }
+      const rain = ctx.createBufferSource(),
+        filter = ctx.createBiquadFilter();
+      rain.buffer = buffer;
+      rain.loop = true;
+      filter.type = "lowpass";
+      filter.frequency.value = 900;
+      rain.connect(filter).connect(master);
+      rain.start();
+      sources.push(rain);
+      const chimes = [523.25, 659.25, 783.99, 987.77];
+      timers.push(
+        setInterval(() => {
+          if (Math.random() < 0.5) note(chimes[Math.floor(Math.random() * 4)], ctx.currentTime, 2.5, 0.25, "sine", master);
+        }, 2400),
+      );
+    } else {
+      [110, 164.81, 220, 277.18].forEach((f, i) => {
+        const osc = ctx.createOscillator(),
+          lfo = ctx.createOscillator(),
+          depth = ctx.createGain(),
+          g = ctx.createGain();
+        osc.type = i % 2 ? "triangle" : "sine";
+        osc.frequency.value = f;
+        lfo.frequency.value = 0.05 + i * 0.03;
+        depth.gain.value = 0.4;
+        lfo.connect(depth).connect(g.gain);
+        g.gain.value = 0.5;
+        osc.connect(g).connect(master);
+        osc.start();
+        lfo.start();
+        sources.push(osc, lfo);
+      });
+    }
+    return () => {
+      timers.forEach(clearInterval);
+      sources.forEach((source) => source.stop());
+    };
+  }
+  function stopMusic() {
+    const { master, stop } = music;
+    music = null;
+    master.gain.cancelScheduledValues(audio.currentTime);
+    master.gain.setValueAtTime(master.gain.value, audio.currentTime);
+    master.gain.linearRampToValueAtTime(0.0001, audio.currentTime + 0.6);
+    setTimeout(stop, 700);
+  }
+  function updateSounds() {
+    const want = sounds().includes("music") && !document.hidden;
+    const { track, level } = musicSettings();
+    if (music && (!want || music.track !== track)) stopMusic();
+    if (want && !music) {
+      const ctx = context(),
+        master = ctx.createGain();
+      master.gain.value = 0.0001;
+      master.gain.linearRampToValueAtTime(level, ctx.currentTime + 3);
+      master.connect(ctx.destination);
+      music = { master, track, level, stop: playTrack(track, ctx, master) };
+    } else if (want && music.level !== level) {
+      music.level = level;
+      music.master.gain.linearRampToValueAtTime(level, audio.currentTime + 0.3);
+    }
+  }
+  document.addEventListener("visibilitychange", updateSounds);
   function topDialog() {
     return (
       root.querySelector(".modal-menu .popover-menu") ||
       root.querySelector(".command-palette")
     );
+  }
+  // Removed overlays fade out from an inert copy outside the reconciled tree,
+  // so the next render can never reuse a leaving node.
+  function leave(overlay) {
+    const shell = root.querySelector(".app-shell");
+    if (!motionAllowed() || !shell) return;
+    const layer = document.createElement("div");
+    for (const { name, value } of shell.attributes) layer.setAttribute(name, value);
+    layer.classList.add("ghost-layer");
+    layer.inert = true;
+    overlay.classList.add("leaving");
+    layer.append(overlay);
+    document.body.append(layer);
+    const panel = overlay.querySelector(".palette-frame, .popover-menu");
+    const fade = overlay.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: 140,
+      easing: "ease-out",
+      fill: "forwards",
+    });
+    panel?.animate(
+      [
+        { transform: "none" },
+        { transform: "translateY(-3px) scale(0.98)" },
+      ],
+      { duration: 140, easing: "ease-out", fill: "forwards" },
+    );
+    fade.finished.finally(() => layer.remove());
   }
   function motionAllowed() {
     return (
@@ -421,23 +797,29 @@
     const scope = menu.dataset.menu === "notes-scope"
       ? document.getElementById("notes-scope-trigger")?.getBoundingClientRect()
       : null;
-    const width = scope ? 220 : r?.width ? Math.max(180, r.width - 20) : 260;
+    const field = ["suggest", "site"].includes(menu.dataset.menu)
+      ? root.querySelector(".browser-shell:not(.editing-preview) #address-input")?.closest(".location")?.getBoundingClientRect()
+      : null;
+    const wide = ["clear-data", "boost", "add-panel", "space-style"].includes(menu.dataset.menu) || menu.dataset.menu?.startsWith("edit-bookmark:");
+    const width = menu.dataset.menu === "suggest" && field ? Math.max(field.width, 320) : scope ? 220 : wide ? 320 : menu.dataset.menu === "site" ? 300 : 240;
     menu.style.width = Math.min(width, innerWidth - 24) + "px";
-    const anchor = scope ? { x: scope.left, y: scope.bottom + 4 } : menuAnchor || { x: r?.left || 10, y: 44 };
+    const anchor = field
+      ? { x: field.left, y: field.bottom + 4 }
+      : scope
+      ? { x: scope.left, y: scope.bottom + 4 }
+      : menuAnchor || { x: (r?.left || 0) + 10, y: 44 };
     menu.style.left =
-      Math.max(
-        12,
-        Math.min(
-          !scope && r?.width ? r.left + 10 : anchor.x,
-          innerWidth - menu.offsetWidth - 12,
-        ),
-      ) + "px";
+      Math.max(8, Math.min(anchor.x, innerWidth - menu.offsetWidth - 8)) + "px";
+    const below = anchor.y + menu.offsetHeight + 8 <= innerHeight;
+    menu.style.transformOrigin = below ? "top left" : "bottom left";
     menu.style.top =
-      Math.max(12, Math.min(anchor.y, innerHeight - menu.offsetHeight - 12)) +
-      "px";
+      Math.max(
+        8,
+        below ? anchor.y : Math.min(anchor.y, innerHeight) - menu.offsetHeight - 4,
+      ) + "px";
   }
   function positionDialog() {
-    const dialog = root.querySelector(".command-palette");
+    const dialog = root.querySelector(".palette-frame");
     if (!dialog || !dialogPosition) return;
     dialogPosition.x = Math.max(
       12,
@@ -456,6 +838,8 @@
     if (value) document.getElementById("announcer").textContent = value;
   }
   function send(request) {
+    if (["newTab", "selectTab", "tab-step", "select-index"].includes(request.op)) tone(request.op === "newTab" ? "open" : "select");
+    else if (["closeTab", "closeCurrent"].includes(request.op)) tone("close");
     chain = chain
       .then(() => transport({ kind: "action", request }))
       .then(patch)
@@ -535,12 +919,20 @@
             menu.top < p.y + p.height &&
             menu.bottom > p.y,
         );
+      // A sidebar drawn over the page (the icon-only sidebar expanded, or the hidden
+      // sidebar peeking in): the page leaves that part uncovered and stays visible.
+      const floating = root.querySelector(
+        ".compact-rail:not(.editing-preview) > .workspace-rail:is(:hover, :has(:focus-visible)), .browser-shell.rail-peek:not(.editing-preview) > .workspace-rail",
+      )?.getBoundingClientRect();
       native()
         .postMessage({
           kind: "geometry",
           generation,
           overlay:
-            currentOverlay || drag?.kind === "component" || !!overlapsMenu,
+            currentOverlay || drag?.kind === "component" || splitArmed || !!overlapsMenu,
+          uncovered: floating && floating.width > 0
+            ? { x: floating.x, y: floating.y, width: floating.width, height: floating.height }
+            : null,
           editing: currentEditing,
           pages,
           menuRect: menu
@@ -557,7 +949,29 @@
     });
   }
   new ResizeObserver(scheduleGeometry).observe(root);
+  for (const type of ["mouseover", "mouseout", "focusin", "focusout"])
+    document.addEventListener(type, (e) => {
+      if (e.target.closest?.(".compact-rail > .workspace-rail")) scheduleGeometry();
+    });
+  // A sidebar sliding or expanding over the page: measure again where it comes to rest,
+  // so the part of the page left uncovered matches the sidebar's final place.
+  for (const type of ["animationend", "transitionend"])
+    root.addEventListener(type, (e) => {
+      if (e.target.matches?.(".workspace-rail")) scheduleGeometry();
+    });
+  let tracking = 0;
+  root.addEventListener("transitionrun", (e) => {
+    if (!e.target.matches?.(".browser-shell") || e.propertyName !== "grid-template-columns") return;
+    cancelAnimationFrame(tracking);
+    const until = performance.now() + 420;
+    const step = () => {
+      scheduleGeometry();
+      if (performance.now() < until) tracking = requestAnimationFrame(step);
+    };
+    tracking = requestAnimationFrame(step);
+  });
   window.addEventListener("resize", scheduleGeometry);
+  window.addEventListener("resize", updateBookmarkOverflow);
   function dataRequest(el) {
     const r = { op: el.dataset.op };
     for (const [key, value] of Object.entries(el.dataset)) {
@@ -567,12 +981,33 @@
     }
     if (r.op === "editor-scope" || el.dataset.type === "bool")
       r.value = r.value === "true";
+    else if (el.dataset.type === "number") r.value = Number(r.value);
+    if (el.dataset.json !== undefined) {
+      try {
+        r.value = JSON.parse(el.dataset.json);
+      } catch {}
+      delete r.json;
+    }
+    if (r.offset !== undefined) r.offset = Number(r.offset);
     if (r.index !== undefined) r.index = Number(r.index);
     if (r.page !== undefined) r.page = Number(r.page);
     return r;
   }
   document.addEventListener("click", (e) => {
     if (e.target.closest(".editing-preview")) return;
+    const generate = e.target.closest("[data-generate]");
+    if (generate) {
+      e.preventDefault();
+      const input = generate.closest(".password-field")?.querySelector("input");
+      const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789-_!?";
+      const bytes = crypto.getRandomValues(new Uint8Array(20));
+      if (input) {
+        input.value = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+        input.type = "text";
+        input.select();
+      }
+      return;
+    }
     const button = e.target.closest("[data-op]");
     if (button && !button.disabled) {
       e.preventDefault();
@@ -627,13 +1062,33 @@
     else if (el.dataset.moduleSearch)
       send({ op: "module-query", value: el.value });
     else if (el.id === "command-input") send({ op: "query", value: el.value });
+    else if (el.id === "address-input") debounce("address", 70, () => send({ op: "address-input", value: el.value }));
+    else if (el.dataset.find) debounce("find", 140, () => send({ op: "find-query", value: el.value }));
+    else if (el.dataset.libraryQuery)
+      debounce("library", 160, () => send({ op: "native", action: el.dataset.libraryQuery === "history" ? "historyQuery" : "bookmarkQuery", value: el.value }));
     else if (el.dataset.setup)
       send({ op: "setup-field", key: el.dataset.setup, value: el.value });
     else if (el.dataset.name !== undefined)
       send({ op: "name", value: el.value });
   });
+  function debounce(key, delay, run) {
+    clearTimeout(inputTimers[key]);
+    inputTimers[key] = setTimeout(run, delay);
+  }
   document.addEventListener("change", (e) => {
     const el = e.target;
+    if (el.dataset.zoomSlider) {
+      send({ op: "zoom-set", value: Number(el.value) });
+      return;
+    }
+    if (el.dataset.editorColor) {
+      send({ op: "editor-value", key: el.dataset.editorColor, value: el.value.replace("#", "") });
+      return;
+    }
+    if (el.dataset.gesture) {
+      send({ op: "gesture-action", key: el.dataset.gesture, value: el.value });
+      return;
+    }
     if (el.dataset.setupName) {send({op:"editor-rename-named",id:el.dataset.setupName,value:el.value});}
     else if (el.dataset.moduleSetting) {
       const value = el.type === "number" ? Number(el.value) : el.value;
@@ -665,10 +1120,42 @@
   document.addEventListener("submit", (e) => {
     e.preventDefault();
     const form = e.target;
+    const f = new FormData(form);
     if (form.dataset.form === "address") {
-      const value = new FormData(form).get("address");
-      if (value?.trim()) send({ op: "navigate", value });
-    } else if (form.dataset.form === "credential") {
+      const value = f.get("address");
+      clearTimeout(inputTimers.address);
+      if (form.querySelector("#address-input") && root.querySelector('.popover-menu[data-menu="suggest"]')) send({ op: "suggest-accept" });
+      else if (value?.trim()) send({ op: "navigate", value });
+    } else if (form.dataset.form === "boost")
+      send({ op: "boost", css: f.get("css"), hide: f.get("hide"), js: f.get("js"), hue: Number(f.get("hue") || 0) });
+    else if (form.dataset.form === "clear-data")
+      send({ op: "clear-data", range: f.get("range"), items: f.getAll("items") });
+    else if (form.dataset.form === "edit-bookmark")
+      send({ op: "edit-bookmark", id: form.dataset.id, title: f.get("title"), url: f.get("url"), folder: f.get("folder") });
+    else if (form.dataset.form === "space-style")
+      send({ op: "space-appearance", emoji: f.get("emoji"), gradient: [f.get("from"), f.get("to")] });
+    else if (form.dataset.form === "search-engine")
+      send({ op: "search-engine", value: "save", name: f.get("name"), keyword: f.get("keyword"), url: f.get("url") });
+    else if (form.dataset.form === "address-book")
+      send({ op: "address-book", value: "save", fields: Object.fromEntries(f) });
+    else if (form.dataset.form === "chain")
+      send({ op: "chain", value: "save", steps: f.getAll("steps").filter(Boolean) });
+    else if (form.dataset.form === "interface-css")
+      send({ op: "setting", key: "interfaceCSS", value: f.get("css") });
+    else if (form.dataset.form === "schedule")
+      send({ op: "setting", key: "themeSchedule", value: { enabled: f.get("enabled") === "on", light: f.get("light"), dark: f.get("dark") } });
+    else if (form.dataset.form === "startup-pages")
+      send({ op: "startup-pages", value: f.get("pages") });
+    else if (form.dataset.form === "feed")
+      send({ op: "feed", value: "add", url: f.get("url") });
+    else if (form.dataset.form === "card")
+      send({ op: "card", value: "save", name: f.get("name"), number: f.get("number"), expiry: f.get("expiry") });
+    else if (form.dataset.form === "filter-list")
+      send({ op: "filter-list", value: "add", url: f.get("url") });
+    else if (form.dataset.form === "link-route")
+      send({ op: "link-route", value: "add", host: f.get("host"), space: f.get("space") });
+    else if (form.dataset.form === "custom-rules")
+      send({ op: "custom-rules", value: "save", rules: f.get("rules") }); else if (form.dataset.form === "credential") {
       const f = new FormData(form);
       const request = {
         op: "saveCredential",
@@ -679,8 +1166,8 @@
       form.elements.password.value = "";
       send(request);
     } else if (form.dataset.form === "find") {
-      send({ op: "find", value: new FormData(form).get("find") });
-      send({ op: "escape" });
+      clearTimeout(inputTimers.find);
+      send({ op: "find-query", value: f.get("find") });
     } else if (form.dataset.form === "ai") {
       const f = new FormData(form);
       const request = {
@@ -693,8 +1180,10 @@
       };
       form.elements.key.value = "";
       send(request);
-    } else if (form.dataset.form === "assistant")
+    } else if (form.dataset.form === "assistant") {
       send({ op: "assistant", value: new FormData(form).get("prompt") });
+      form.reset();
+    }
   });
   document.addEventListener("keydown", (e) => {
     const typing =
@@ -702,6 +1191,51 @@
         (e.target.matches("select") && !currentEditing),
       command = e.metaKey || e.ctrlKey;
     if (e.isComposing) return;
+    const recording = root.querySelector("[data-recording]");
+    if (recording) {
+      e.preventDefault();
+      if (e.key === "Escape") send({ op: "record-shortcut", value: "" });
+      else if (!["Shift", "Control", "Alt", "Meta"].includes(e.key))
+        send({ op: "shortcut", action: recording.dataset.recording, value: binding(e) });
+      return;
+    }
+    if (e.target.id === "address-input" && root.querySelector('.popover-menu[data-menu="suggest"]')) {
+      if (["ArrowDown", "ArrowUp"].includes(e.key)) {
+        e.preventDefault();
+        send({ op: "suggest-move", value: e.key === "ArrowDown" ? 1 : -1 });
+        return;
+      }
+    }
+    if (e.target.dataset?.find) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(inputTimers.find);
+        send({ op: "find-step", value: e.shiftKey ? -1 : 1 });
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        send({ op: "find-close" });
+        return;
+      }
+    }
+    if (!command && !e.altKey && sounds().includes("keys") && e.key.length === 1) tone("key");
+    if (command && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+      e.preventDefault();
+      send({ op: "select-index", value: Number(e.key) });
+      return;
+    }
+    if (command && e.key.toLowerCase() === "g" && root.querySelector(".find-bar")) {
+      e.preventDefault();
+      send({ op: "find-step", value: e.shiftKey ? -1 : 1 });
+      return;
+    }
+    const action = shortcutMap.get(binding(e));
+    if (action && !["new-tab", "palette", "bookmark", "sidebar", "settings"].includes(action) && (command || e.altKey || e.ctrlKey || /^f\d+$/.test(binding(e)))) {
+      e.preventDefault();
+      send({ op: "run-action", value: action });
+      return;
+    }
     if (command && ["l", "k", "t"].includes(e.key.toLowerCase())) {
       e.preventDefault();
       const key = e.key.toLowerCase();
@@ -717,11 +1251,24 @@
       });
       return;
     }
+    // Up and Down move through a menu's items, starting from its filter field.
+    const listMenu = e.target.closest?.(".popover-menu");
+    if (listMenu && !e.altKey && !command && ["ArrowDown", "ArrowUp"].includes(e.key) && e.target.matches("input[data-name], button.menu-item")) {
+      const items = [...listMenu.querySelectorAll("button.menu-item:not(:disabled)")].filter((x) => x.getClientRects().length);
+      if (items.length) {
+        e.preventDefault();
+        const at = items.indexOf(e.target), field = listMenu.querySelector("input[data-name]");
+        const next = e.key === "ArrowDown" ? items[at + 1] || items[0] : at > 0 ? items[at - 1] : field || items[items.length - 1];
+        next.focus();
+      }
+      return;
+    }
     if (e.key === "Enter" && e.target.matches("input[data-name]")) {
+      // Tab search opens the first match, as Chrome's does.
       const action = e.target
         .closest(".popover-menu")
-        ?.querySelector("button.primary[data-op]");
-      if (action && e.target.value.trim()) {
+        ?.querySelector('button.primary[data-op], [data-menu="tab-search"] button[data-op="selectTab"]');
+      if (action && (e.target.value.trim() || action.dataset.op === "selectTab")) {
         e.preventDefault();
         send({ ...action.dataset });
       }
@@ -733,7 +1280,7 @@
       ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
     ) {
       e.preventDefault();
-      const r = moving.closest(".command-palette").getBoundingClientRect();
+      const r = moving.closest(".palette-frame").getBoundingClientRect();
       dialogPosition = {
         x: dialogPosition?.x ?? r.x,
         y: dialogPosition?.y ?? r.y,
@@ -888,7 +1435,38 @@
       }
     }
   });
+  // A shortcut as "ctrl+alt+shift+cmd+key", named from the physical key.
+  function binding(e) {
+    const code = e.code || "";
+    let key = code.startsWith("Key") ? code.slice(3).toLowerCase()
+      : code.startsWith("Digit") ? code.slice(5)
+      : /^F\d+$/.test(code) ? code.toLowerCase()
+      : ({ Tab: "tab", Escape: "esc", Backspace: "delete", Delete: "delete", Enter: "enter", Space: "space", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", Backquote: "`", Backslash: "\\", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" })[code] || e.key.toLowerCase();
+    return [e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", e.metaKey && "cmd", key].filter(Boolean).join("+");
+  }
+  let pressTimer = 0;
+  document.addEventListener("pointerdown", (e) => {
+    const nav = e.target.closest('[data-op="back"],[data-op="forward"]');
+    if (!nav || nav.disabled) return;
+    pressTimer = setTimeout(() => {
+      const r = nav.getBoundingClientRect();
+      menuAnchor = { x: r.left, y: r.bottom + 5 };
+      send({ op: "nav-history", value: nav.dataset.op });
+    }, 480);
+  });
+  document.addEventListener("pointerup", () => clearTimeout(pressTimer));
   document.addEventListener("contextmenu", (e) => {
+    const nav = e.target.closest('[data-op="back"],[data-op="forward"]');
+    const panel = e.target.closest("[data-panel-id]");
+    const favorite = e.target.closest("[data-favorite]");
+    const dial = e.target.closest("[data-dial]");
+    const target = nav ? ["nav-history", nav.dataset.op] : panel ? ["menu", "web-panel:" + panel.dataset.panelId] : favorite ? ["menu", "favorite:" + favorite.dataset.favorite] : dial ? ["menu", "edit-bookmark:" + dial.dataset.dial] : null;
+    if (target) {
+      e.preventDefault();
+      menuAnchor = { x: e.clientX, y: e.clientY };
+      send({ op: target[0], value: target[1] });
+      return;
+    }
     const tab = e.target.closest("[data-tab]");
     if (tab) {
       e.preventDefault();
@@ -898,8 +1476,8 @@
   });
   function clearTargets() {
     root
-      .querySelectorAll(".drop-hover,.drop-before")
-      .forEach((x) => x.classList.remove("drop-hover", "drop-before"));
+      .querySelectorAll(".drop-hover,.drop-before,.drop-stack")
+      .forEach((x) => x.classList.remove("drop-hover", "drop-before", "drop-stack"));
   }
   document.addEventListener("dragstart", (e) => {
     if (e.target.closest(".editing-preview")) return;
@@ -910,6 +1488,11 @@
     if (tab) {
       drag = { kind: "tab", id: tab.dataset.tab };
       tab.classList.add("drag-source");
+      // Another Neutrino window can take the tab: the id travels with the drag.
+      if (e.dataTransfer) {
+        e.dataTransfer.setData(FOREIGN_TAB, tab.dataset.tab);
+        e.dataTransfer.effectAllowed = "move";
+      }
     } else if (component) {
       drag = { kind: "component", component: component.dataset.component };
       root.querySelectorAll("[data-dock]").forEach((el) => {
@@ -943,12 +1526,50 @@
         ? e.target.closest("[data-space]")
         : drag.kind === "folder"
           ? e.target.closest("[data-folder-source]")
-          : e.target.closest("[data-tab],[data-space],[data-drop-group]");
+          : e.target.closest("[data-split-side],[data-tab],[data-space],[data-drop-group]");
   }
+  // Arc and Vivaldi: a tab dragged onto the page opens beside it. Native pages sit
+  // above the interface, so the drop zone appears (and the pages step aside) once the
+  // drag reaches the page, or leaves the interface right beside it.
+  function canSplitDrop() {
+    const zone = root.querySelector(".split-drop");
+    return !!(drag && drag.kind === "tab" && zone && zone.dataset.current !== drag.id &&
+      !(zone.dataset.panes || "").split(" ").includes(drag.id));
+  }
+  function armSplit(on) {
+    if (splitArmed === on) return;
+    splitArmed = on;
+    document.body.classList.toggle("split-armed", on);
+    scheduleGeometry();
+  }
+  // Moving between elements fires dragenter on the new one just before dragleave on
+  // the old one; a dragleave with no fresh dragenter means the drag left the interface.
+  let dragEnteredAt = 0;
+  document.addEventListener("dragenter", () => { dragEnteredAt = performance.now(); });
+  document.addEventListener("dragleave", (e) => {
+    if (e.relatedTarget || performance.now() - dragEnteredAt < 8 || !canSplitDrop() || !lastDragPoint) return;
+    const frame = root.querySelector(".page-frame")?.getBoundingClientRect();
+    if (frame && lastDragPoint.x > frame.left - 48 && lastDragPoint.x < frame.right && lastDragPoint.y > frame.top - 48 && lastDragPoint.y < frame.bottom)
+      armSplit(true);
+  });
+  // A tab dragged here from another window: the whole window accepts it.
+  const FOREIGN_TAB = "application/x-neutrino-tab";
+  const foreignTab = (e) => !drag && [...(e.dataTransfer?.types || [])].includes(FOREIGN_TAB);
+  const markIncoming = (on) => root.querySelector(".browser-shell")?.classList.toggle("tab-drop-incoming", on);
   document.addEventListener("dragover", (e) => {
+    if (foreignTab(e)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      markIncoming(true);
+      return;
+    }
     if (!drag) return;
+    lastDragPoint = { x: e.clientX, y: e.clientY };
+    if (canSplitDrop() && e.target.closest?.(".page-frame")) armSplit(true);
     clearTargets();
     const target = dropTarget(e);
+    // Leaving the tab's middle for anywhere else starts the stack dwell over.
+    if (!target || target !== stackDwell.target) resetDwell();
     if (!target) return;
     if (
       (drag.kind === "tab" && target.dataset.tab === drag.id) ||
@@ -959,7 +1580,8 @@
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     target.classList.add(
-      target.dataset.tab || drag.kind === "folder" || drag.kind === "space"
+      stacking(e, target) || nesting(e, target) ? "drop-stack"
+        : target.dataset.tab || drag.kind === "folder" || drag.kind === "space"
         ? "drop-before"
         : "drop-hover",
     );
@@ -970,11 +1592,74 @@
       else if (e.clientY > r.bottom - 30) scroller.scrollTop += 9;
     }
   });
+  // Vivaldi: a tab dropped on the middle of another loose tab stacks the two.
+  // Stacking is deliberate: the pointer rests on the middle of a loose tab, along the
+  // list's own axis, for a moment. A quicker drop reorders, as in every other layout.
+  let stackDwell = { target: null, since: 0 },
+    stackTimer = 0;
+  function resetDwell() {
+    clearTimeout(stackTimer);
+    stackDwell = { target: null, since: 0 };
+  }
+  function stacking(e, target) {
+    if (!drag || drag.kind !== "tab" || !target.dataset.tab || target.dataset.tab === drag.id) return false;
+    if (!root.querySelector(".browser-shell[data-stacks]")) return false;
+    // Loose tab rows carry an empty data-folder; pinned tabs and tabs in a stack or folder can't stack.
+    const loose = (row) => row && !(row.dataset.folder || "") && row.dataset.group !== "pinned";
+    if (!loose(target) || !loose(root.querySelector(`[data-tab="${CSS.escape(drag.id)}"]`))) return false;
+    const r = target.getBoundingClientRect();
+    const across = target.closest(".horizontal-tabs") ? [e.clientX, r.left, r.width] : [e.clientY, r.top, r.height];
+    if (!(across[0] > across[1] + across[2] * 0.25 && across[0] < across[1] + across[2] * 0.75)) {
+      resetDwell();
+      return false;
+    }
+    if (stackDwell.target !== target) {
+      resetDwell();
+      stackDwell = { target, since: performance.now() };
+      // A still pointer may send no further dragover; the ring still turns when the drop would stack.
+      stackTimer = setTimeout(() => {
+        if (drag && stackDwell.target === target && target.isConnected) {
+          target.classList.remove("drop-before");
+          target.classList.add("drop-stack");
+        }
+      }, 610);
+      return false;
+    }
+    return performance.now() - stackDwell.since >= 600;
+  }
+  // Arc: a folder dropped on the middle of another folder's heading goes inside it.
+  function nesting(e, target) {
+    if (!drag || drag.kind !== "folder" || !target.dataset.folderSource || target.dataset.folderSource === drag.id) return false;
+    const r = target.getBoundingClientRect();
+    return e.clientY > r.top + r.height * 0.25 && e.clientY < r.bottom - r.height * 0.25;
+  }
   document.addEventListener("drop", (e) => {
+    if (foreignTab(e)) {
+      e.preventDefault();
+      markIncoming(false);
+      const id = e.dataTransfer.getData(FOREIGN_TAB);
+      if (/^[0-9A-Fa-f-]{36}$/.test(id)) send({ op: "adopt-tab", id });
+      return;
+    }
     if (!drag) return;
     const target = dropTarget(e);
     if (!target) return;
     e.preventDefault();
+    if (target.dataset.splitSide) {
+      send({ op: "split-with", id: drag.id });
+      cleanupDrag();
+      return;
+    }
+    if (nesting(e, target)) {
+      send({ op: "nest-folder", id: drag.id, parent: target.dataset.folderSource });
+      cleanupDrag();
+      return;
+    }
+    if (stacking(e, target)) {
+      send({ op: "stack-tabs", id: drag.id, onto: target.dataset.tab });
+      cleanupDrag();
+      return;
+    }
     if (drag.kind === "component")
       send({
         op: "dock",
@@ -1003,6 +1688,9 @@
   });
   function cleanupDrag() {
     drag = null;
+    resetDwell();
+    lastDragPoint = null;
+    armSplit(false);
     document.body.classList.remove(
       "dragging-tab",
       "dragging-component",
@@ -1010,12 +1698,72 @@
       "dragging-folder",
     );
     root
-      .querySelectorAll(".drag-source,.valid")
-      .forEach((x) => x.classList.remove("drag-source", "valid"));
+      .querySelectorAll(".drag-source,.valid,.drop-stack")
+      .forEach((x) => x.classList.remove("drag-source", "valid", "drop-stack"));
     clearTargets();
     scheduleGeometry();
   }
-  document.addEventListener("dragend", cleanupDrag);
+  // Tab previews: after a short hover, the host shows a picture of the tab's page beside it.
+  let previewTimer = 0, previewing = "";
+  const hidePreview = () => {
+    clearTimeout(previewTimer);
+    if (previewing) send({ op: "tab-preview", value: "hide" });
+    previewing = "";
+  };
+  document.addEventListener("mouseover", (e) => {
+    const row = e.target.closest && e.target.closest("[data-tab]");
+    const id = row && row.dataset.tab;
+    if (!id || id === previewing || row.classList.contains("active") || drag) return;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      const r = row.getBoundingClientRect();
+      previewing = id;
+      send({ op: "tab-preview", id, rect: { x: r.left, y: r.top, w: r.width, h: r.height } });
+    }, previewing ? 120 : 600);
+  });
+  document.addEventListener("mouseout", (e) => {
+    const row = e.target.closest && e.target.closest("[data-tab]");
+    if (row && !(e.relatedTarget && row.contains(e.relatedTarget))) hidePreview();
+  });
+  ["mousedown", "wheel", "keydown"].forEach((type) => document.addEventListener(type, hidePreview, true));
+  // Bookmarks: drop a row on another to reorder, or on a folder chip to move it there.
+  let bookmarkDrag = null;
+  document.addEventListener("dragstart", (e) => {
+    const row = e.target.closest && e.target.closest("[data-bookmark]");
+    if (!row) return;
+    bookmarkDrag = row.dataset.bookmark;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", "");
+  });
+  document.addEventListener("dragover", (e) => {
+    if (bookmarkDrag && e.target.closest && e.target.closest("[data-bookmark],[data-bookmark-folder]")) e.preventDefault();
+  });
+  document.addEventListener("drop", (e) => {
+    if (!bookmarkDrag) return;
+    const row = e.target.closest("[data-bookmark]"), chip = e.target.closest("[data-bookmark-folder]");
+    if (row && row.dataset.bookmark !== bookmarkDrag) {
+      e.preventDefault();
+      send({ op: "move-bookmark", id: bookmarkDrag, before: row.dataset.bookmark });
+    } else if (chip) {
+      e.preventDefault();
+      send({ op: "move-bookmark", id: bookmarkDrag, folder: chip.dataset.bookmarkFolder });
+    }
+    bookmarkDrag = null;
+  });
+  document.addEventListener("dragend", () => { bookmarkDrag = null; });
+  // A tab dropped outside the window opens in a new window, as in Chrome and Arc.
+  document.addEventListener("dragleave", (e) => {
+    if (e.relatedTarget) return;
+    markIncoming(false);
+    // Leaving the window, for the page or elsewhere, starts the stack dwell over.
+    resetDwell();
+  });
+  document.addEventListener("dragend", (e) => {
+    const outside = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth || e.clientY >= innerHeight;
+    if (drag && drag.kind === "tab" && e.dataTransfer && e.dataTransfer.dropEffect === "none" && outside)
+      send({ op: "tab-action", id: drag.id, value: "new-window" });
+    cleanupDrag();
+  });
   document.addEventListener("pointerdown", (e) => {
     const popup = root.querySelector(".anchored-menu .popover-menu");
     if (
@@ -1026,7 +1774,7 @@
       send({ op: "escape" });
     const grip = e.target.closest("[data-drag-dialog]");
     if (grip) {
-      const r = grip.closest(".command-palette").getBoundingClientRect();
+      const r = grip.closest(".palette-frame").getBoundingClientRect();
       dialogDrag = {
         grip,
         x: e.clientX,
@@ -1145,7 +1893,7 @@
       if (!frame || drag) return;
       const candidates = [
         ...frame.querySelectorAll(
-          ".tabs-scroll,.library-content,.note-list,.horizontal-tabs,.start-surface",
+          ".tabs-scroll,.library-content,.note-list,.horizontal-tab-scroll,.start-surface",
         ),
       ].filter((el) => {
         const r = el.getBoundingClientRect();
@@ -1176,6 +1924,87 @@
     },
     { passive: false },
   );
+  // Area capture: drag a rectangle over the frozen page image.
+  let capture = null;
+  document.addEventListener("pointerdown", (e) => {
+    const overlay = e.target.closest(".capture-overlay");
+    if (!overlay || e.button !== 0) return;
+    const r = overlay.getBoundingClientRect();
+    capture = { overlay, x: e.clientX - r.left, y: e.clientY - r.top, box: overlay.querySelector(".capture-box") };
+    capture.box.hidden = false;
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!capture) return;
+    const r = capture.overlay.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - r.left, r.width)),
+      y = Math.max(0, Math.min(e.clientY - r.top, r.height));
+    Object.assign(capture, { w: x - capture.x, h: y - capture.y });
+    Object.assign(capture.box.style, {
+      left: Math.min(x, capture.x) + "px",
+      top: Math.min(y, capture.y) + "px",
+      width: Math.abs(capture.w) + "px",
+      height: Math.abs(capture.h) + "px",
+    });
+  });
+  document.addEventListener("pointerup", (e) => {
+    if (!capture) return;
+    const { x, y, w = 0, h = 0 } = capture;
+    capture = null;
+    send({ op: "capture-area", x: Math.min(x, x + w), y: Math.min(y, y + h), width: Math.abs(w), height: Math.abs(h), copy: e.altKey });
+  });
+  // Boards: drag cards to arrange them.
+  let card = null;
+  document.addEventListener("pointerdown", (e) => {
+    const el = e.target.closest(".board-card");
+    if (!el || e.target.closest("button")) return;
+    const canvas = el.closest(".board-canvas");
+    card = { el, canvas, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop, moved: false };
+    el.setPointerCapture?.(e.pointerId);
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!card) return;
+    card.moved = true;
+    card.el.style.left = Math.max(0, e.clientX - card.dx) + "px";
+    card.el.style.top = Math.max(0, e.clientY - card.dy) + "px";
+  });
+  document.addEventListener("pointerup", () => {
+    if (!card) return;
+    const { el, canvas, moved } = card;
+    card = null;
+    if (moved)
+      send({ op: "board", value: "move", board: canvas.dataset.board, item: el.dataset.item, x: el.offsetLeft, y: el.offsetTop });
+  });
+  // Split view: drag the divider to resize the panes.
+  let split = null;
+  document.addEventListener("pointerdown", (e) => {
+    const divider = e.target.closest(".split-divider");
+    if (!divider) return;
+    const canvas = divider.closest(".split-canvas");
+    split = { canvas, stacked: canvas.dataset.axis === "stacked", ratio: null };
+    divider.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!split) return;
+    const r = split.canvas.getBoundingClientRect();
+    const ratio = split.stacked ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    split.ratio = Math.max(0.2, Math.min(0.8, ratio));
+    split.canvas.style.setProperty("--split", split.ratio);
+    scheduleGeometry();
+  });
+  document.addEventListener("pointerup", () => {
+    if (!split) return;
+    const { ratio } = split;
+    split = null;
+    if (ratio !== null) send({ op: "split-ratio", value: Math.round(ratio * 100) / 100 });
+  });
+  // Hidden sidebar: point at the window's edge to reveal it over the page.
+  document.addEventListener("pointerover", (e) => {
+    if (e.target.closest("[data-rail-edge]")) send({ op: "rail-peek", value: true });
+    else if (root.querySelector(".rail-peek") && !e.target.closest(".workspace-rail,.popover-menu,.menu-scrim"))
+      send({ op: "rail-peek", value: false });
+  });
   transport({ kind: "ready" })
     .then(patch)
     .catch((e) => announce(e.message));

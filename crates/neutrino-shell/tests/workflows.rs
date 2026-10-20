@@ -198,12 +198,627 @@ fn setup_validates_names_and_submits_only_once_until_host_responds() {
     s.dispatch(json!({"op":"setup-next"}));
     assert_eq!(s.step, 1);
     s.dispatch(json!({"op":"setup-field","key":"space","value":"Home"}));
-    for _ in 0..5 {
+    for _ in 0..6 {
         s.dispatch(json!({"op":"setup-next"}));
     }
-    assert_eq!(s.step, 6);
+    assert_eq!(s.step, 7);
     assert_eq!(commands(&s.dispatch(json!({"op":"setup-finish"}))).len(), 1);
     assert!(commands(&s.dispatch(json!({"op":"setup-finish"}))).is_empty());
+}
+#[test]
+fn setup_sends_module_choices_that_follow_the_chosen_browser() {
+    let mut s = Shell::default();
+    let module = |key: &str| json!({"id":format!("org.neutrino.{key}"),"name":key,"capability":"feature","bundled":true,"installed":true,"enabled":true});
+    s.snapshot["modules"] = json!([module("peek"), module("limiter"), {"id":"org.neutrino.notes","name":"Notes","capability":"notes","bundled":true,"installed":true,"enabled":true}, {"id":"org.neutrino.theme-native","name":"macOS Theme","capability":"theme","bundled":true,"installed":false,"enabled":false}]);
+    s.dispatch(json!({"op":"setup-field","key":"profile","value":"Personal"}));
+    s.dispatch(json!({"op":"setup-field","key":"space","value":"Home"}));
+    s.setup["preset"] = json!("arc");
+    let flow = ["layout", "arc-welcome", "arc-theme", "arc-import", "arc-favorites", "arc-modules"];
+    s.step = flow.len() - 1;
+    let html = s.dispatch(json!({"op":"setup-module","value":"org.neutrino.notes"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("module-picker") && html.contains("data-value=\"org.neutrino.peek\""));
+    s.dispatch(json!({"op":"setup-provider","key":"theme","value":"org.neutrino.theme-native"}));
+    s.dispatch(json!({"op":"setup-provider","key":"tabSystem","value":""}));
+    s.step = 7;
+    let finish = commands(&s.dispatch(json!({"op":"setup-finish"})))[0].clone();
+    let choices = &finish["setup"]["modules"];
+    assert_eq!(choices["org.neutrino.peek"], true);
+    assert_eq!(choices["org.neutrino.limiter"], false);
+    assert_eq!(choices["org.neutrino.notes"], false);
+    assert_eq!(choices["org.neutrino.theme-native"], true);
+}
+#[test]
+fn a_tab_dropped_from_another_window_is_adopted() {
+    let mut s = shell();
+    let id = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+    assert_eq!(commands(&s.dispatch(json!({"op":"adopt-tab","id":id})))[0], json!({"op":"adoptTab","id":id}));
+    assert!(commands(&s.dispatch(json!({"op":"adopt-tab","id":"not-a-tab"}))).is_empty());
+    s.snapshot["private"] = json!(true);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(commands(&s.dispatch(json!({"op":"adopt-tab","id":id}))).is_empty());
+}
+#[test]
+fn safari_tab_overview_lists_tabs_and_opens_one() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("safari");
+    s.snapshot["configuration"]["layout"]["tabs"] = json!("top");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("aria-label=\"Show all tabs\""));
+    let html = s.dispatch(json!({"op":"screen","value":"overview"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("All tabs") && html.contains("data-op=\"overview-open\" data-id=\"c\"") && html.contains("overview-card active"));
+    let r = s.dispatch(json!({"op":"overview-open","id":"c"}));
+    assert_eq!(commands(&r)[0], json!({"op":"selectTab","id":"c"}));
+    assert_eq!(s.screen, "browse");
+    assert!(commands(&s.dispatch(json!({"op":"overview-open","id":"missing"}))).is_empty());
+    assert_eq!(commands(&s.dispatch(json!({"op":"run-action","value":"tab-overview"}))).len(), 0);
+    assert_eq!(s.screen, "overview");
+}
+#[test]
+fn a_named_accent_replaces_a_custom_accent_colour() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["accentHex"] = json!("ef3939");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    // The stored name is already "rose"; choosing it again still drops the custom colour.
+    s.dispatch(json!({"op":"editor-value","key":"accent","value":"rose"}));
+    assert!(s.draft.as_ref().unwrap()["theme"]["accentHex"].is_null());
+    s.dispatch(json!({"op":"editor-value","key":"accent","value":"teal"}));
+    assert_eq!(s.draft.as_ref().unwrap()["theme"]["accent"], "teal");
+}
+#[test]
+fn choosing_a_mode_drops_a_themes_window_colours() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["surfaceHex"] = json!("1c1420");
+    s.snapshot["configuration"]["theme"]["textHex"] = json!("f3edf2");
+    s.snapshot["configuration"]["theme"]["themePack"] = json!("GX Classic");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-value","key":"colorMode","value":"dark"}));
+    let theme = &s.draft.as_ref().unwrap()["theme"];
+    assert!(theme["surfaceHex"].is_null() && theme["textHex"].is_null() && theme["themePack"].is_null());
+    assert_eq!(theme["colorMode"], "dark");
+}
+#[test]
+fn sleeping_the_current_tab_moves_to_a_neighbour_first() {
+    let mut s = shell();
+    s.snapshot["session"]["tabs"][2]["url"] = json!("https://example.com/c");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let r = s.dispatch(json!({"op":"run-action","value":"sleep-tab"}));
+    assert_eq!(commands(&r), &[json!({"op":"selectTab","id":"b"}), json!({"op":"sleepTab","id":"a"})][..]);
+    s.snapshot["session"]["tabs"] = json!([{"id":"a","title":"Alpha","url":"https://example.com/a"}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(commands(&s.dispatch(json!({"op":"run-action","value":"sleep-tab"}))).is_empty());
+    assert!(s.notice.contains("Open another tab first"));
+}
+#[test]
+fn blank_tabs_take_each_browsers_name() {
+    let mut s = shell();
+    s.snapshot["session"]["tabs"].as_array_mut().unwrap().push(json!({"id":"n","title":"New tab","pinned":false}));
+    for (preset, name) in [("chrome", "New Tab"), ("brave", "New Tab"), ("gx", "Speed Dial"), ("safari", "Start Page"), ("vivaldi", "Start Page")] {
+        s.snapshot["configuration"]["theme"]["preset"] = json!(preset);
+        let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+        assert!(html.contains(&format!("aria-label=\"{name}\"")), "{preset}");
+        assert!(!html.contains("Extension pages"), "{preset}");
+    }
+}
+#[test]
+fn background_music_offers_tracks_and_volume() {
+    let mut s = shell();
+    s.snapshot["preferences"]["backgroundMusic"] = json!(true);
+    s.snapshot["preferences"]["musicTrack"] = json!("rain");
+    s.snapshot["preferences"]["musicVolume"] = json!(0.25);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"appearance"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-music-track=\"rain\"") && html.contains("data-music-volume=\"0.25\"") && html.contains("data-sounds=\"music\""));
+    assert!(html.contains("data-key=\"musicTrack\" data-value=\"pulse\"") && html.contains("aria-pressed=\"true\">Quiet<"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"setting","key":"musicTrack","value":"pulse"})))[0], json!({"op":"preference","key":"musicTrack","value":"pulse"}));
+    assert!(commands(&s.dispatch(json!({"op":"setting","key":"musicTrack","value":"techno"}))).is_empty());
+}
+#[test]
+fn mouse_gestures_run_the_action_chosen_for_each_shape() {
+    let mut s = shell();
+    assert_eq!(commands(&s.dispatch(json!({"op":"gesture","value":"L"})))[0], json!({"op":"back"}));
+    assert!(!commands(&s.dispatch(json!({"op":"gesture","value":"DR"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"DL"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"LX"}))).is_empty());
+    let r = s.dispatch(json!({"op":"gesture-action","key":"DL","value":"reopen-tab"}));
+    assert_eq!(commands(&r)[0], json!({"op":"preference","key":"gestureActions","value":{"DL":"reopen-tab"}}));
+    assert!(commands(&s.dispatch(json!({"op":"gesture-action","key":"DL","value":"format-disk"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"gesture-action","key":"LLLLL","value":"back"}))).is_empty());
+    s.snapshot["preferences"]["gestureActions"] = json!({"DL":"reopen-tab","L":"none"});
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert_eq!(commands(&s.dispatch(json!({"op":"gesture","value":"DL"})))[0], json!({"op":"reopenTab"}));
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"L"}))).is_empty());
+    // Choosing the default again drops the custom entry.
+    let r = s.dispatch(json!({"op":"gesture-action","key":"L","value":"back"}));
+    assert_eq!(commands(&r)[0]["value"], json!({"DL":"reopen-tab"}));
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"general"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-gesture=\"DR\"") && html.contains("aria-label=\"Gesture down then right\""));
+    assert!(html.contains("<option value=\"reopen-tab\" selected>"));
+    // Off as a module, gestures do nothing.
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.mouse-gestures","name":"Mouse gestures","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"DL"}))).is_empty());
+}
+#[test]
+fn assistant_keeps_a_thread_and_streams_the_answer() {
+    let mut s = shell();
+    s.snapshot["preferences"]["ai"] = json!({"provider":"local","endpoint":"http://localhost:11434/v1","model":"llama"});
+    s.snapshot["assistantTurns"] = json!([{"question":"What is this?","answer":"A test page."}]);
+    s.snapshot["assistantQuestion"] = json!("And who wrote it?");
+    s.snapshot["assistantResponse"] = json!("The page names");
+    s.snapshot["assistantBusy"] = json!(true);
+    s.snapshot["assistantSource"] = json!("selection");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = s.dispatch(json!({"op":"screen","value":"assistant"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("A test page.") && html.contains("And who wrote it?") && html.contains("The page names"));
+    assert!(html.contains("assistant-response live") && html.contains("data-op=\"cancelAI\"") && html.contains("Answered from the text you selected."));
+    assert!(commands(&s.dispatch(json!({"op":"assistant-clear"}))).is_empty());
+    s.snapshot["assistantBusy"] = json!(false);
+    s.snapshot["assistantQuestion"] = json!("");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("New conversation") && html.contains("Ask a follow-up") && !html.contains("The page names"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"assistant-clear"})))[0], json!({"op":"assistantClear"}));
+}
+#[test]
+fn split_view_tiles_up_to_four_pages() {
+    let tabs = json!([{"id":"a","url":"https://a.example/"},{"id":"b","url":"https://b.example/"},{"id":"c","url":"https://c.example/"},{"id":"d","url":"https://d.example/"},{"id":"e","url":"https://e.example/"}]);
+    let session = |split: Value| json!({"profileID":"p1","selectedTabID":"c","tabs":tabs,"split":split});
+    // A closed or repeated tile drops out; the rest stay tiled.
+    let s = neutrino_shell::core_request(json!({"op":"normalizeSession","value":session(json!({"first":"a","second":"b","more":["c","gone","a"]}))})).unwrap();
+    assert_eq!(s["split"], json!({"first":"a","second":"b","more":["c"]}));
+    // Selecting another tab shows it in the selected tile only.
+    let s = neutrino_shell::core_request(json!({"op":"selectSessionTab","id":"e","value":s})).unwrap();
+    assert_eq!(s["split"], json!({"first":"a","second":"b","more":["e"]}));
+    // Two panes left end the extra list; one ends the split.
+    let s = neutrino_shell::core_request(json!({"op":"normalizeSession","value":session(json!({"first":"c","second":"gone","more":["b"]}))})).unwrap();
+    assert_eq!(s["split"], json!({"first":"c","second":"b"}));
+
+    let mut shell = shell();
+    shell.snapshot["session"]["tabs"] = tabs.clone();
+    shell.snapshot["session"]["selectedTabID"] = json!("a");
+    shell.snapshot["session"]["split"] = json!({"first":"a","second":"b"});
+    shell.dispatch(json!({"op":"sync","snapshot":shell.snapshot.clone()}));
+    let menu = shell.dispatch(json!({"op":"menu","value":"split-choose"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("Add a tile") && menu.contains("data-id=\"c\"") && !menu.contains("data-op=\"split-with\" data-id=\"b\""));
+    assert_eq!(commands(&shell.dispatch(json!({"op":"split-with","id":"c"})))[0], json!({"op":"splitWith","id":"c"}));
+    assert!(commands(&shell.dispatch(json!({"op":"split-with","id":"b"}))).is_empty());
+    shell.snapshot["session"]["split"] = json!({"first":"a","second":"b","more":["c"]});
+    let html = shell.dispatch(json!({"op":"sync","snapshot":shell.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("split-canvas tiled") && html.contains("data-panes=\"3\"") && !html.contains("split-divider"));
+    assert_eq!(html.matches("data-op=\"split-remove\"").count(), 3);
+    assert_eq!(commands(&shell.dispatch(json!({"op":"split-remove","id":"b"})))[0], json!({"op":"splitRemove","id":"b"}));
+    assert!(commands(&shell.dispatch(json!({"op":"split-remove","id":"e"}))).is_empty());
+    assert_eq!(commands(&shell.dispatch(json!({"op":"split-axis","value":"grid"})))[0], json!({"op":"splitAxis","value":"grid"}));
+    shell.snapshot["session"]["split"] = json!({"first":"a","second":"b","more":["c","d"]});
+    shell.dispatch(json!({"op":"sync","snapshot":shell.snapshot.clone()}));
+    assert!(commands(&shell.dispatch(json!({"op":"split-with","id":"e"}))).is_empty());
+    let menu = shell.dispatch(json!({"op":"menu","value":"split-choose"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("Four pages are tiled"));
+}
+#[test]
+fn brave_shields_subscribe_easylist_like_brave() {
+    let finish = |preset: &str, level: &str| {
+        let mut s = Shell::default();
+        s.setup["preset"] = json!(preset);
+        s.dispatch(json!({"op":"setup-blocking","value":level}));
+        s.dispatch(json!({"op":"setup-step","value":99}));
+        let r = s.dispatch(json!({"op":"setup-finish"}));
+        let ids: Vec<String> = commands(&r)[0]["setup"]["filterLists"].as_array().unwrap().iter().map(|l| l["id"].as_str().unwrap().to_string()).collect();
+        ids
+    };
+    assert_eq!(finish("brave", "ads"), ["easylist", "easyprivacy"]);
+    assert_eq!(finish("vivaldi", "trackers"), ["easyprivacy"]);
+    assert!(finish("gx", "none").is_empty());
+    assert!(finish("neutrino", "ads").is_empty());
+}
+#[test]
+fn feeds_subscribe_from_the_page_and_open_entries() {
+    let mut s = shell();
+    s.snapshot["pageFeed"] = json!("https://example.com/feed.xml");
+    s.dispatch(json!({"op":"menu","value":"page"}));
+    let r = s.dispatch(json!({"op":"feed","value":"subscribe-page"}));
+    assert_eq!(commands(&r)[0], json!({"op":"feedAdd","url":"https://example.com/feed.xml"}));
+    let r = s.dispatch(json!({"op":"feed","value":"add","url":"javascript:alert(1)"}));
+    assert!(commands(&r).is_empty());
+    s.snapshot["preferences"]["feeds"] = json!([{"id":"f1","profileID":"p1","title":"Example news","url":"https://example.com/feed.xml","entries":[
+        {"id":"e1","title":"Older","url":"https://example.com/1","time":1.0,"date":"","read":true},
+        {"id":"e2","title":"Newer","url":"https://example.com/2","time":2.0,"date":"Oct 19","read":false}]},
+        {"id":"f2","profileID":"p2","title":"Someone else","url":"https://other.example/feed","entries":[]}]);
+    let html = s.dispatch(json!({"op":"panel","value":"feeds"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("1 unread") && !html.contains("Someone else"));
+    assert!(html.find("Newer").unwrap() < html.find("Older").unwrap());
+    let r = s.dispatch(json!({"op":"feed","value":"open","id":"e2"}));
+    assert_eq!(commands(&r)[0], json!({"op":"feedOpen","id":"e2","url":"https://example.com/2"}));
+    let r = s.dispatch(json!({"op":"feed","value":"remove","id":"missing"}));
+    assert!(commands(&r).is_empty());
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.feeds","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    assert!(commands(&s.dispatch(json!({"op":"feed","value":"refresh"}))).is_empty());
+}
+#[test]
+fn clearing_on_quit_is_chosen_per_kind_of_data() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"setting","key":"clearCookiesOnQuit","value":true}));
+    assert_eq!(commands(&r)[0], json!({"op":"preference","key":"clearCookiesOnQuit","value":true}));
+    assert!(commands(&s.dispatch(json!({"op":"setting","key":"clearCookiesOnQuit","value":"yes"}))).is_empty());
+    s.snapshot["preferences"]["clearCookiesOnQuit"] = json!(true);
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"privacy"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Clear when Neutrino quits (1 on)"));
+}
+#[test]
+fn downloads_show_progress_and_pause_or_resume() {
+    let mut s = shell();
+    s.snapshot["downloads"] = json!([
+        {"id":"d1","name":"movie.mp4","status":"Downloading","complete":false,"fraction":0.4,"paused":false,"canPause":true},
+        {"id":"d2","name":"notes.zip","status":"Paused","complete":false,"fraction":0.7,"paused":true,"canPause":true}]);
+    s.dispatch(json!({"op":"screen","value":"library"}));
+    let html = s.dispatch(json!({"op":"section","value":"downloads"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-action=\"downloadPause\" data-id=\"d1\"") && html.contains("data-action=\"downloadResume\" data-id=\"d2\""));
+    assert!(html.contains("<progress class=\"download-progress\" max=\"1\" value=\"0.4\""));
+    let r = s.dispatch(json!({"op":"native","action":"downloadPause","id":"d1"}));
+    assert_eq!(commands(&r)[0]["op"], "downloadPause");
+    s.snapshot["downloads"] = json!([{"id":"d3","name":"setup.dmg","status":"Cancelled","complete":false,"ended":true}]);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("downloadOpen") && !html.contains("downloadCancel") && html.contains("downloadRemove"));
+}
+#[test]
+fn folders_nest_inside_folders_within_the_depth_limit() {
+    let mut s = shell();
+    s.snapshot["folders"] = json!([{"id":"f1","name":"Work"},{"id":"f2","name":"Projects","parentID":"f1"},{"id":"f3","name":"Alpha","parentID":"f2"},{"id":"f4","name":"Inbox"}]);
+    s.snapshot["session"]["tabs"][1]["folderID"] = json!("f3");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    let at = |name: &str| html.find(&format!("<span>{name}</span>")).unwrap();
+    assert!(at("Work") < at("Projects") && at("Projects") < at("Alpha") && html.contains("data-depth=\"2\""));
+    // Projects (two levels) can't go into Alpha, which is inside it, and can move to the top.
+    let menu = s.dispatch(json!({"op":"menu","value":"folder:f2"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("data-parent=\"\"") && menu.contains("data-parent=\"f4\"") && !menu.contains("data-parent=\"f3\""));
+    assert!(commands(&s.dispatch(json!({"op":"nest-folder","id":"f1","parent":"f3"}))).is_empty());
+    assert!(s.notice.contains("can’t go inside one of its own folders"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"nest-folder","id":"f4","parent":"f3"})))[0], json!({"op":"nestFolder","id":"f4","parent":"f3"}));
+    // Inbox inside Alpha would be a fourth level, so Alpha offers no new folder inside after it.
+    s.snapshot["folders"][3]["parentID"] = json!("f3");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let menu = s.dispatch(json!({"op":"menu","value":"folder:f4"}))["html"].as_str().unwrap().to_string();
+    assert!(!menu.contains("new-folder:f4"));
+    let normalized = neutrino_shell::core_request(json!({"op":"normalizeSpace","value":{"id":"s","name":"S","profileID":"p","tabs":[],"folders":[{"id":"a","name":"A","parentID":"b"},{"id":"b","name":"B","parentID":"a"},{"id":"c","name":"C","parentID":"gone"}]}})).unwrap();
+    assert!(array_all_null(&normalized["folders"], "parentID"));
+}
+fn array_all_null(v: &Value, key: &str) -> bool {
+    v.as_array().unwrap().iter().all(|f| f[key].is_null())
+}
+#[test]
+fn passwords_import_from_chromium_family_browsers_and_firefox() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"passwords"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-op=\"browser-passwords\" data-value=\"arc\"") && !html.contains("data-op=\"browser-passwords\" data-value=\"safari\""));
+    let r = s.dispatch(json!({"op":"browser-passwords","value":"brave"}));
+    assert_eq!(commands(&r)[0], json!({"op":"importBrowserPasswords","value":"brave"}));
+    assert_eq!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"firefox"})))[0], json!({"op":"importBrowserPasswords","value":"firefox"}));
+    assert!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"safari"}))).is_empty());
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.password-manager","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    assert!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"brave"}))).is_empty());
+}
+#[test]
+fn a_shortcut_in_use_moves_only_after_confirmation() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"shortcut","action":"new-window","value":"cmd+t"}));
+    assert!(commands(&r).is_empty());
+    let html = r["html"].as_str().unwrap();
+    assert!(html.contains("is already the shortcut for New tab") && html.contains("data-confirm=\"true\""));
+    let r = s.dispatch(json!({"op":"shortcut","action":"new-window","value":"cmd+t","confirm":"true"}));
+    assert_eq!(commands(&r), &[json!({"op":"setShortcut","action":"new-tab","value":"none"}), json!({"op":"setShortcut","action":"new-window","value":"cmd+t"})]);
+    assert!(s.menu.is_empty());
+    let r = s.dispatch(json!({"op":"shortcut","action":"new-window","value":"ctrl+alt+k"}));
+    assert_eq!(commands(&r), &[json!({"op":"setShortcut","action":"new-window","value":"ctrl+alt+k"})]);
+}
+#[test]
+fn fake_my_history_sends_one_kind_of_visit() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"fake-history","value":"learning"}));
+    let entries = commands(&r)[0]["entries"].as_array().unwrap().clone();
+    assert_eq!(commands(&r)[0]["op"], "fakeHistory");
+    assert!(entries.len() >= 6 && entries.iter().all(|e| e["url"].as_str().unwrap().starts_with("https://")));
+    assert!(commands(&s.dispatch(json!({"op":"fake-history","value":"anything"}))).is_empty());
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.fake-history","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    assert!(commands(&s.dispatch(json!({"op":"fake-history","value":"learning"}))).is_empty());
+}
+#[test]
+fn tab_search_lists_and_filters_open_tabs() {
+    let mut s = shell();
+    let html = s.dispatch(json!({"op":"menu","value":"tab-search"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Search open tabs") && html.contains("data-op=\"selectTab\" data-id=\"a\"") && html.contains("data-op=\"selectTab\" data-id=\"c\""));
+    let html = s.dispatch(json!({"op":"name","value":"example.com"}))["html"].as_str().unwrap().to_string();
+    let menu = &html[html.find("popover-menu").unwrap()..];
+    assert!(menu.contains("data-id=\"a\"") && !menu.contains("data-id=\"c\""));
+    s.dispatch(json!({"op":"selectTab","id":"a"}));
+    assert!(s.menu.is_empty());
+}
+#[test]
+fn listed_sites_can_be_edited_from_privacy_settings() {
+    let mut s = shell();
+    s.snapshot["preferences"]["siteSettings"] = json!({"news.example":{"blockScripts":true,"camera":"block"}});
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"privacy"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("site-settings-row site-news-example") && html.contains("aria-label=\"Camera for news.example\""));
+    let r = s.dispatch(json!({"op":"site-setting","host":"news.example","key":"camera","value":"allow"}));
+    assert_eq!(commands(&r)[0], json!({"op":"siteSetting","host":"news.example","key":"camera","value":"allow"}));
+    // A site not in the list can't be edited from here.
+    assert!(commands(&s.dispatch(json!({"op":"site-setting","host":"other.example","key":"camera","value":"allow"}))).is_empty());
+}
+#[test]
+fn reader_places_images_after_their_paragraph_and_reads_aloud() {
+    let mut s = shell();
+    s.snapshot["assistantResponse"] = json!("A title\n\nFirst   paragraph of the story, with more words.\n\nSecond paragraph follows here.");
+    s.snapshot["readerImages"] = json!([
+        {"src":"data:image/jpeg;base64,AAAA","alt":"A harbor","anchor":"First paragraph of the story"},
+        {"src":"data:image/jpeg;base64,BBBB","alt":"","anchor":""},
+        {"src":"https://tracker.example/x.png","alt":"remote","anchor":""}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = s.dispatch(json!({"op":"screen","value":"reader"}))["html"].as_str().unwrap().to_string();
+    let first = html.find("First").unwrap();
+    let harbor = html.find("base64,AAAA").unwrap();
+    assert!(first < harbor && harbor < html.find("Second paragraph").unwrap());
+    assert!(html.find("base64,BBBB").unwrap() < first && !html.contains("tracker.example"));
+    let r = s.dispatch(json!({"op":"reader-speak","value":"start"}));
+    assert_eq!(commands(&r)[0], json!({"op":"readerSpeak","value":"start"}));
+}
+#[test]
+fn boards_hold_page_captures() {
+    let mut s = shell();
+    s.snapshot["preferences"]["boards"] = json!([{"id":"b1","profileID":"p1","name":"Ideas","items":[
+        {"id":"i1","kind":"image","title":"Alpha","url":"https://example.com/a","text":"","x":24,"y":24}]}]);
+    s.snapshot["boardImages"] = json!({"i1":"data:image/jpeg;base64,QUJD"});
+    s.dispatch(json!({"op":"screen","value":"library"}));
+    let html = s.dispatch(json!({"op":"section","value":"boards"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("board-card image") && html.contains("src=\"data:image/jpeg;base64,QUJD\""));
+    let r = s.dispatch(json!({"op":"board","value":"add-capture","board":"b1"}));
+    assert_eq!(commands(&r)[0], json!({"op":"boardCapture","board":"b1"}));
+    assert!(commands(&s.dispatch(json!({"op":"board","value":"add-capture","board":"missing"}))).is_empty());
+}
+#[test]
+fn modules_added_by_updates_follow_the_layout_defaults() {
+    let default = |id: &str, preset: &str| neutrino_shell::core_request(json!({"op":"moduleDefault","id":id,"preset":preset})).unwrap();
+    assert_eq!(default("org.neutrino.fingerprinting", "brave"), json!(true));
+    assert_eq!(default("org.neutrino.fingerprinting", "neutrino"), json!(false));
+    assert_eq!(default("org.neutrino.fake-history", "gx"), json!(true));
+    assert_eq!(default("org.neutrino.tab-sleep", "arc"), json!(true));
+}
+#[test]
+fn captures_can_be_marked_up_before_saving() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"capture-mode","value":"area-markup"}));
+    assert!(s.capture_select && s.capture_markup);
+    let r = s.dispatch(json!({"op":"capture-area","x":10,"y":10,"width":100,"height":80}));
+    assert_eq!(commands(&r)[0]["markup"], json!(true));
+    s.snapshot["markupImage"] = json!("data:image/png;base64,iVBORw0KGgo=");
+    let r = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(r["html"].as_str().unwrap().contains("markup-canvas") && r["overlay"] == json!(true));
+    let r = s.dispatch(json!({"op":"markup","value":"copy","data":"data:image/png;base64,QUJD"}));
+    assert_eq!(commands(&r)[0], json!({"op":"markupSave","data":"data:image/png;base64,QUJD","copy":true}));
+    assert!(commands(&s.dispatch(json!({"op":"markup","value":"save","data":"javascript:alert(1)"}))).is_empty());
+}
+#[test]
+fn new_tab_follows_the_chosen_browser() {
+    let mut s = shell();
+    // Neutrino and Arc ask in the command bar.
+    s.dispatch(json!({"op":"newTab"}));
+    assert!(s.palette);
+    s.dispatch(json!({"op":"escape"}));
+    for preset in ["chrome", "safari", "brave", "gx", "vivaldi"] {
+        s.snapshot["configuration"]["theme"]["preset"] = json!(preset);
+        let r = s.dispatch(json!({"op":"newTab"}));
+        assert!(!s.palette, "{preset}");
+        assert_eq!(commands(&r), &[json!({"op":"newTab","parentID":null})]);
+        assert_eq!(r["focus"], "address-input");
+    }
+    // The empty tab is listed, and its start page's search box is the address field.
+    s.snapshot["session"]["tabs"].as_array_mut().unwrap().push(json!({"id":"n","title":"New tab","pinned":false}));
+    s.snapshot["session"]["selectedTabID"] = json!("n");
+    s.snapshot["configuration"]["theme"]["preset"] = json!("chrome");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-tab="n""#) && html.contains(r#"class="start-search" data-op="focus-address""#));
+    s.snapshot["configuration"]["theme"]["preset"] = json!("arc");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains(r#"data-tab="n""#));
+}
+#[test]
+fn a_tab_dragged_onto_the_page_can_open_in_split_view() {
+    let mut s = shell();
+    // With no other page open there is nothing to show beside this one.
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("split-drop"));
+    s.snapshot["session"]["tabs"][2]["url"] = json!("https://example.com/c");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"class="split-drop" data-current="a""#));
+    // Only a tab with a page can join, and never the current one.
+    assert!(commands(&s.dispatch(json!({"op":"split-with","id":"a"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"split-with","id":"b"}))).is_empty());
+    assert_eq!(commands(&s.dispatch(json!({"op":"split-with","id":"c"})))[0], json!({"op":"splitWith","id":"c"}));
+    s.snapshot["session"]["split"] = json!({"first":"a","second":"c"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("split-drop"));
+}
+#[test]
+fn brave_start_page_counts_every_block_and_the_time_saved() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("brave");
+    s.snapshot["session"]["selectedTabID"] = json!("b");
+    s.snapshot["preferences"]["startPage"] = json!({"stats": true});
+    s.snapshot["shieldsStats"] = json!({"blocked": 12, "lifetime": 90_000});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("<strong>90,000</strong><small>Trackers &amp; ads blocked</small>"), "{html}");
+    assert!(html.contains("<strong>2.3 GB</strong><small>Estimated bandwidth saved</small>"));
+    assert!(html.contains("<strong>1 hour</strong><small>Estimated time saved</small>"));
+    // A fresh install shows the figures at zero.
+    s.snapshot["shieldsStats"] = Value::Null;
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("<strong>0</strong><small>Trackers &amp; ads blocked</small>"));
+}
+#[test]
+fn named_themes_bring_their_window_colors() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-value","key":"themePack","value":"Hackerman"}));
+    let theme = &s.draft.as_ref().unwrap()["theme"];
+    assert_eq!((theme["accentHex"].as_str(), theme["colorMode"].as_str(), theme["surfaceHex"].as_str()), (Some("1ed760"), Some("dark"), Some("0d1910")));
+    // Vivaldi's own theme keeps the light window.
+    s.dispatch(json!({"op":"editor-value","key":"themePack","value":"Vivaldi"}));
+    assert!(s.draft.as_ref().unwrap()["theme"]["surfaceHex"].is_null());
+    s.dispatch(json!({"op":"editor-value","key":"themePack","value":"Not a theme"}));
+    assert_eq!(s.draft.as_ref().unwrap()["theme"]["themePack"], "Vivaldi");
+}
+#[test]
+fn permission_defaults_can_refuse_every_request() {
+    let mut s = shell();
+    let r = s.dispatch(json!({"op":"setting","key":"blockLocation","value":true}));
+    assert_eq!(commands(&r)[0], json!({"op":"preference","key":"blockLocation","value":true}));
+    assert!(commands(&s.dispatch(json!({"op":"setting","key":"blockLocation","value":"yes"}))).is_empty());
+    s.snapshot["preferences"]["blockCamera"] = json!(true);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let html = s.dispatch(json!({"op":"screen","value":"settings","section":"privacy"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Permission defaults (1 blocked)") && html.contains("Block notification requests"));
+}
+#[test]
+fn a_payment_form_offers_saved_cards() {
+    let mut s = shell();
+    s.snapshot["cards"] = json!([{"id":"k1","name":"Ada","last4":"1111","expiry":"12/30"}]);
+    s.snapshot["cardOffer"] = json!(true);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Fill a saved card on this page?") && html.contains("page-frame with-prompt") && html.contains("Ada ····1111"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"card","value":"fill","id":"k1"})))[0], json!({"op":"fillCard","id":"k1"}));
+    assert_eq!(commands(&s.dispatch(json!({"op":"card","value":"dismiss-offer"})))[0], json!({"op":"cardOfferDismiss"}));
+    // No saved card, no offer; a save-password question takes the bar first.
+    s.snapshot["passwordPrompt"] = json!({"origin":"https://example.com","username":"a"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("Fill a saved card"));
+}
+#[test]
+fn customize_reorders_toolbar_buttons_and_removes_built_ins() {
+    let mut s = shell();
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    s.dispatch(json!({"op":"editor-value","key":"toolbarItems","value":["home","reader","capture"]}));
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Move Reader view earlier") && html.contains(r#"data-json="[&quot;reader&quot;,&quot;home&quot;,&quot;capture&quot;]""#));
+    s.dispatch(json!({"op":"editor-value","key":"hiddenButtons","value":["reload","forward"]}));
+    assert!(commands(&s.dispatch(json!({"op":"editor-value","key":"hiddenButtons","value":["back"]}))).is_empty());
+    assert_eq!(s.draft.as_ref().unwrap()["layout"]["hiddenButtons"], json!(["reload","forward"]));
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    let preview = &html[html.find("rail-navigation").unwrap()..];
+    let nav = &preview[..preview.find("</div>").unwrap()];
+    assert!(nav.contains(r#"data-op="back""#) && !nav.contains(r#"data-op="reload""#) && !nav.contains(r#"data-op="forward""#));
+}
+#[test]
+fn speed_dial_groups_are_folders_inside_speed_dial() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("vivaldi");
+    s.snapshot["session"]["selectedTabID"] = json!("b");
+    s.snapshot["features"] = json!({"speed-dial": true});
+    s.snapshot["bookmarkIndex"] = json!([
+        {"id":"d1","title":"Mail","url":"https://mail.example/","folder":"Speed Dial"},
+        {"id":"d2","title":"Tracker","url":"https://tracker.example/","folder":"Speed Dial/Work"}]);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-op="dial-group" data-value="Work""#) && html.contains("Mail") && !html.contains("Tracker"));
+    let html = s.dispatch(json!({"op":"dial-group","value":"Work"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Tracker") && !html.contains(">Mail<"));
+    // A new group starts empty, without top sites, and new tiles go into its folder.
+    s.dispatch(json!({"op":"menu","value":"new-dial-group"}));
+    s.dispatch(json!({"op":"name","value":"Reading"}));
+    s.dispatch(json!({"op":"dial-group","value":"new"}));
+    assert_eq!(s.dial_group, "Reading");
+    s.dispatch(json!({"op":"menu","value":"add-site:dial"}));
+    s.dispatch(json!({"op":"name","value":"news.example"}));
+    let r = s.dispatch(json!({"op":"addSite"}));
+    assert_eq!(commands(&r)[0]["folder"], "Speed Dial/Reading");
+    assert!(s.dispatch(json!({"op":"dial-group","value":"Nope"})).is_object() && s.dial_group == "Reading");
+}
+#[test]
+fn chrome_toolbar_has_extensions_and_a_side_panel() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("chrome");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-value="extensions-menu""#) && html.contains("Show side panel"));
+    let menu = s.dispatch(json!({"op":"menu","value":"extensions-menu"}))["html"].as_str().unwrap().to_string();
+    assert!(menu.contains("Manage extensions") && menu.contains("Visit Chrome Web Store"));
+    // Arc keeps neither.
+    s.dispatch(json!({"op":"escape"}));
+    s.snapshot["configuration"]["theme"]["preset"] = json!("arc");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("extensions-menu") && !html.contains("Show side panel"));
+}
+#[test]
+fn playlist_plays_unread_items_in_turn() {
+    let mut s = shell();
+    s.snapshot["features"] = json!({"reading-list": true});
+    s.snapshot["preferences"]["readingList"] = json!([{"id":"r1","profileID":"p1","title":"Talk","url":"https://video.example/1","media":true,"read":false}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"library","section":"reading"}));
+    let html = s.dispatch(json!({"op":"library-filter","value":"playlist"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Play all"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"reading","value":"play-all"})))[0], json!({"op":"playlist","value":"start"}));
+    // Next and Stop only while a queue plays.
+    assert!(commands(&s.dispatch(json!({"op":"reading","value":"play-next"}))).is_empty());
+    s.snapshot["playlist"] = json!({"position":1,"count":2,"title":"Talk"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("Playing 1 of 2"));
+    assert_eq!(commands(&s.dispatch(json!({"op":"reading","value":"play-next"})))[0], json!({"op":"playlist","value":"next"}));
+}
+#[test]
+fn subscribed_address_rules_reach_webkit_and_not_the_domain_list() {
+    let parsed = neutrino_shell::core_request(json!({"op":"parseFilterList","value":"[Adblock Plus 2.0]\n||ads.example^\n||news.example/ads/*\n"})).unwrap();
+    assert_eq!(parsed["patterns"], json!(["||news.example/ads/*"]));
+    let mut subscribed: Vec<Value> = parsed["domains"].as_array().unwrap().clone();
+    subscribed.extend(parsed["patterns"].as_array().unwrap().iter().cloned());
+    let rules = neutrino_shell::core_request(json!({"op":"webKitRules","subscribed":subscribed,"exceptions":["shields.example"]})).unwrap();
+    let list = rules.as_array().unwrap();
+    assert!(list.iter().any(|r| r["trigger"]["url-filter"] == r"^[a-z]+://([^/]+\.)?news\.example/ads/.*"));
+    // Exceptions stay last, and the domain list keeps only domains.
+    assert_eq!(list.last().unwrap()["action"]["type"], "ignore-previous-rules");
+    let domains = neutrino_shell::core_request(json!({"op":"blockingDomains","subscribed":subscribed})).unwrap();
+    assert!(domains.as_array().unwrap().iter().all(|d| !d.as_str().unwrap().contains('|')));
+}
+#[test]
+fn tab_thumbnails_show_page_pictures_when_turned_on() {
+    let mut s = shell();
+    s.snapshot["tabThumbnails"] = json!({"a":"data:image/jpeg;base64,/9j/AA==","c":"javascript:alert(1)"});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(!html.contains("tab-thumb"));
+    s.snapshot["configuration"]["layout"]["tabThumbnails"] = json!(true);
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert_eq!(html.matches(r#"class="tab-thumb""#).count(), 1);
+    assert!(!html.contains("javascript:alert"));
+}
+#[test]
+fn a_vivaldi_stack_can_be_undone() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("vivaldi");
+    s.snapshot["features"] = json!({"tab-stacks": true});
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains(r#"data-stacks="true""#));
+    let r = s.dispatch(json!({"op":"stack-tabs","id":"c","onto":"a"}));
+    assert_eq!(commands(&r)[0]["op"], "stackTabs");
+    assert!(s.notice.contains("Undo"));
+    // The native side made folder f2 for the stack.
+    s.snapshot["folders"] = json!([{"id":"f1","name":"Work"},{"id":"f2","name":"example.com"}]);
+    s.snapshot["session"]["tabs"][0]["folderID"] = json!("f2");
+    s.snapshot["session"]["tabs"][2]["folderID"] = json!("f2");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    let r = s.dispatch(json!({"op":"undo-tabs"}));
+    assert_eq!(commands(&r)[0]["op"], "replaceTabs");
+    assert_eq!(commands(&r)[1], json!({"op":"deleteFolder","id":"f2"}));
+    assert_eq!(commands(&r).len(), 2);
+}
+#[test]
+fn expired_payment_cards_are_refused() {
+    let mut s = shell();
+    s.snapshot["now"] = json!(813_000_000.0); // 6 October 2026
+    let r = s.dispatch(json!({"op":"card","value":"save","name":"Ada","number":"4111 1111 1111 1111","expiry":"09/26"}));
+    assert!(commands(&r).is_empty() && s.notice.contains("expired"));
+    let r = s.dispatch(json!({"op":"card","value":"save","name":"Ada","number":"4111 1111 1111 1111","expiry":"10/26"}));
+    assert_eq!(commands(&r)[0]["op"], "saveCard");
 }
 #[test]
 fn closing_palette_restores_page_identity() {
@@ -497,7 +1112,7 @@ fn utility_pages_preserve_browser_tools_and_routine_menus_are_nonmodal() {
     let mut s = shell();
     let r = s.dispatch(json!({"op":"screen","value":"modules"}));
     let html = r["html"].as_str().unwrap();
-    assert!(html.contains("rail-destinations"));
+    assert!(html.contains("rail-dock"));
     assert!(html.contains("data-screen=\"modules\""));
     assert!(!html.contains("screen-scrim"));
     s.dispatch(json!({"op":"screen","value":"browse"}));

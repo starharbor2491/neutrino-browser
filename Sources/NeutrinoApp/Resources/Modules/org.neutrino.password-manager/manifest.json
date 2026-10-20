@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.password-manager",
+  "name": "Password Manager",
+  "version": 1,
+  "summary": "Offer to save passwords when you sign in, and fill them in when you return.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.reading-list",
+  "name": "Reading List",
+  "version": 1,
+  "summary": "Save pages to read later, with a playlist filter for media.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

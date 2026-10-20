@@ -53,6 +53,13 @@ public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
     public var chromiumPages: [ChromiumSessionPage]?
     public var folderID: UUID?
     public var lastUsedAt: Date?
+    /// A name the person gave the tab; shown instead of the page title.
+    public var customTitle: String?
+    public var muted: Bool?
+    /// The address a pinned tab returns to.
+    public var pinnedURL: URL?
+    /// Set when the tab was opened from one of the Profile's Favorites.
+    public var favoriteID: UUID?
     public init(id: UUID = UUID(), title: String = "New tab", url: URL? = nil, pinned: Bool = false, parentID: UUID? = nil, engineID: BrowserEngineID? = nil, chromiumPages: [ChromiumSessionPage]? = nil) {
         self.id = id; self.title = title; self.url = url; self.pinned = pinned; self.parentID = parentID; self.engineID = engineID; self.chromiumPages = chromiumPages
     }
@@ -60,8 +67,23 @@ public struct BrowserTab: Identifiable, Codable, Equatable, Sendable {
 public struct TabSplit: Codable, Equatable, Sendable {
     public var first: UUID
     public var second: UUID
-    public init(first: UUID, second: UUID) { self.first = first; self.second = second }
-    public func contains(_ id: UUID) -> Bool { first == id || second == id }
+    /// Further tiled pages: Arc's split view and Vivaldi's tiling hold up to four.
+    public var more: [UUID]?
+    public static let maximumPanes = 4
+    public init(first: UUID, second: UUID, more: [UUID]? = nil) { self.first = first; self.second = second; self.more = more }
+    public var panes: [UUID] { [first, second] + (more ?? []) }
+    public func contains(_ id: UUID) -> Bool { panes.contains(id) }
+    /// The panes left after one closes; nil when fewer than two remain.
+    public func removing(_ id: UUID) -> TabSplit? {
+        let rest = panes.filter { $0 != id }
+        guard rest.count >= 2 else { return nil }
+        return TabSplit(first: rest[0], second: rest[1], more: rest.count > 2 ? Array(rest.dropFirst(2)) : nil)
+    }
+    /// The split with one more pane, while there is room for it.
+    public func adding(_ id: UUID) -> TabSplit? {
+        guard !contains(id), panes.count < Self.maximumPanes else { return nil }
+        return TabSplit(first: first, second: second, more: (more ?? []) + [id])
+    }
 }
 public struct WindowSession: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
@@ -107,8 +129,10 @@ public struct Bookmark: Identifiable, Codable, Equatable, Sendable {
     public var title: String
     public var url: URL
     public var createdAt: Date
-    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, createdAt: Date = Date()) {
-        self.id = id; self.profileID = profileID; self.title = title; self.url = url; self.createdAt = createdAt
+    /// A folder path, nested with "/"; "Speed Dial" and "Bookmarks bar" are shown specially.
+    public var folder: String?
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, createdAt: Date = Date(), folder: String? = nil) {
+        self.id = id; self.profileID = profileID; self.title = title; self.url = url; self.createdAt = createdAt; self.folder = folder
     }
 }
 public struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
@@ -150,7 +174,7 @@ public enum Density: String, Codable, CaseIterable, Sendable { case comfortable,
 public enum TabPlacement: String, Codable, CaseIterable, Sendable { case top, bottom, leading, trailing }
 public enum BarPlacement: String, Codable, CaseIterable, Sendable { case top, bottom }
 public enum SidebarPlacement: String, Codable, CaseIterable, Sendable { case leading, trailing, hidden }
-public enum SplitAxis: String, Codable, CaseIterable, Sendable { case sideBySide, stacked }
+public enum SplitAxis: String, Codable, CaseIterable, Sendable { case sideBySide, stacked, grid }
 public enum InterfaceTypeface: String, Codable, CaseIterable, Sendable { case system, rounded, serif, monospaced }
 public struct ComponentAppearance: Codable, Equatable, Sendable {
     public var density: Density?
@@ -194,6 +218,8 @@ public struct Theme: Codable, Equatable, Sendable {
     public var accentHex: String?
     public var surfaceHex: String?
     public var textHex: String?
+    /// The named GX or Vivaldi theme these colors came from, if any.
+    public var themePack: String?
     public var borderWidth: Double?
     public var shadowStrength: Double?
     public var iconPack: String?
@@ -202,6 +228,8 @@ public struct Theme: Codable, Equatable, Sendable {
     public var tabsAppearance: ComponentAppearance?
     public var navigationAppearance: ComponentAppearance?
     public var sidebarAppearance: ComponentAppearance?
+    /// Short interface sounds for clicks and tab changes.
+    public var sounds: Bool?
     public init() {}
     public mutating func normalize() {
         if let normalized = try? RustCore.transform(self, operation: "normalizeTheme") { self = normalized }
@@ -222,6 +250,22 @@ public struct BrowserLayout: Codable, Equatable, Sendable {
     public var hideTabStrip: Bool?
     public var sidebarAutoHide: Bool?
     public var secondaryPanel: String?
+    /// A strip of panel buttons beside the window, as in Opera GX and Vivaldi.
+    public var panelBar: Bool?
+    /// Which panels the strip shows, in order.
+    public var panelItems: [String]?
+    /// "menu" keeps page tools in the page menu; "toolbar" shows them as buttons.
+    public var pageTools: String?
+    /// Extra toolbar buttons chosen in Customize.
+    public var toolbarItems: [String]?
+    /// Built-in toolbar buttons the person removed: "forward", "reload", "bookmark".
+    public var hiddenButtons: [String]?
+    /// The first split pane's share of the window, from 0.2 to 0.8.
+    public var splitRatio: Double?
+    /// The tab sidebar shows site icons only.
+    public var compactRail: Bool?
+    /// Tabs show a picture of their page, as Vivaldi's tab bar thumbnails do.
+    public var tabThumbnails: Bool?
     public init() {}
     public mutating func normalize() {
         if let normalized = try? RustCore.transform(self, operation: "normalizeLayout") { self = normalized }
@@ -252,7 +296,236 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var blockTrackers: Bool?
     public var autoArchiveDays: Int?
     public var ai: AIConfiguration?
+    public var startGuideHidden: Bool?
+    /// Ads are blocked with trackers unless this is false.
+    public var blockAds: Bool?
+    /// Sites (hosts without "www.") where blocking is turned off.
+    public var shieldsDown: [String]?
+    public var searchEngines: [SearchEngine]?
+    /// A custom engine used instead of `search` when set.
+    public var defaultSearchID: String?
+    public var siteZoom: [String: Double]?
+    public var siteSettings: [String: SiteSettings]?
+    public var readingList: [ReadingItem]?
+    public var savedSessions: [SavedSession]?
+    public var boards: [Board]?
+    public var webPanels: [WebPanel]?
+    public var favorites: [FavoriteSite]?
+    public var sleepAfterMinutes: Int?
+    public var memoryLimitMB: Int?
+    public var cpuLimit: Int?
+    public var networkLimitKBps: Int?
+    /// Trackers and ads blocked since install, for Brave's start page.
+    public var blockedLifetime: Int?
+    public var batterySaver: Bool?
+    public var hideCookieBanners: Bool?
+    public var blockThirdPartyCookies: Bool?
+    public var httpsUpgrade: Bool?
+    public var stripTracking: Bool?
+    public var customBlockList: [String]?
+    /// An animated start-page background: "aurora", "waves" or "embers".
+    public var liveWallpaper: String?
+    /// Keep the local network address out of WebRTC (Chromium's IP handling policy).
+    public var hideLocalIP: Bool?
+    /// What goes when Neutrino quits, as Brave's and Vivaldi's "clear on exit" choices.
+    public var clearHistoryOnQuit: Bool?
+    public var clearCookiesOnQuit: Bool?
+    public var clearCacheOnQuit: Bool?
+    /// Refuse every request for a permission unless the site was allowed in its own settings.
+    public var blockCamera: Bool?
+    public var blockMicrophone: Bool?
+    public var blockLocation: Bool?
+    public var blockNotifications: Bool?
+    public var filterLists: [FilterList]?
+    /// RSS and Atom feeds in the Feeds panel.
+    public var feeds: [FeedSubscription]?
+    /// Sites where Neutrino never offers to save a password.
+    public var neverSavePasswords: [String]?
+    /// Element-hiding rules such as "example.com##.banner" or "##.banner".
+    public var customCosmetic: [String]?
+    public var startupPages: [String]?
+    /// Extra keyboard shortcuts: action identifier to "ctrl+alt+shift+cmd+key".
+    public var shortcuts: [String: String]?
+    public var commandChains: [CommandChain]?
+    public var interfaceCSS: String?
+    public var startPage: [String: Bool]?
+    public var themeSchedule: ThemeSchedule?
+    public var readerStyle: ReaderStyle?
+    public var addresses: [AutofillAddress]?
+    public var downloadFolder: String?
+    public var interfaceSounds: Bool?
+    public var keyboardSounds: Bool?
+    public var backgroundMusic: Bool?
+    public var musicVolume: Double?
+    /// The generated background track: drift, pulse or rain.
+    public var musicTrack: String?
+    public var littleArc: Bool?
+    /// Built-in feature modules already offered to this library, so removed ones stay removed.
+    public var seededFeatures: [String]?
+    /// Air Traffic Control: links from other apps to these sites open in a Space.
+    public var linkRoutes: [LinkRoute]?
+    public var peek: Bool?
+    public var tabIslands: Bool?
+    /// Option-drag gestures on pages; on by default in the Vivaldi and Opera GX styles.
+    public var mouseGestures: Bool?
+    /// What each gesture shape (strokes L, R, U, D) does when it differs from the default.
+    public var gestureActions: [String: String]?
     public init() {}
+}
+public struct SearchEngine: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var keyword: String
+    /// An HTTPS address with %s where the search terms go.
+    public var url: String
+    public init(id: String = UUID().uuidString, name: String, keyword: String, url: String) { self.id = id; self.name = name; self.keyword = keyword; self.url = url }
+}
+/// Per-site choices from the site information menu and page tools.
+public struct SiteSettings: Codable, Equatable, Sendable {
+    public var blockScripts: Bool?
+    public var allowPopups: Bool?
+    public var muted: Bool?
+    /// "allow", "block" or nil to ask.
+    public var camera: String?
+    public var microphone: String?
+    /// "dark", "grayscale", "sepia", "invert", "contrast" or "noimages".
+    public var filter: String?
+    public var css: String?
+    /// A Boost's own script, run in an isolated world after load, and its hue shift in degrees.
+    public var js: String?
+    public var hue: Int?
+    public var hide: [String]?
+    /// Clear the site's data when its last tab closes.
+    public var forget: Bool?
+    public init() {}
+}
+/// A filter list the person subscribed to, downloaded and refreshed on this Mac.
+public struct FilterList: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var url: URL
+    public var enabled: Bool
+    public var updatedAt: Date?
+    public var domains: Int?
+    public var cosmetic: Int?
+    /// Address rules anchored to a host, such as ||example.com/ads/.
+    public var patterns: Int?
+    public var error: String?
+    public init(id: String, title: String, url: URL, enabled: Bool = true) { self.id = id; self.title = title; self.url = url; self.enabled = enabled }
+}
+/// A site's RSS or Atom feed, fetched from its publisher and refreshed every 30 minutes.
+public struct FeedSubscription: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public var updatedAt: Date?
+    public var error: String?
+    public var entries: [FeedEntry]
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL) {
+        self.id = id; self.profileID = profileID; self.title = title; self.url = url; entries = []
+    }
+}
+public struct FeedEntry: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var url: URL
+    /// When the publisher dated the entry, used for ordering.
+    public var time: Date?
+    /// The entry's date as shown in the panel.
+    public var date: String
+    public var read: Bool
+    public init(id: UUID = UUID(), title: String, url: URL, time: Date?, date: String, read: Bool = false) {
+        self.id = id; self.title = title; self.url = url; self.time = time; self.date = date; self.read = read
+    }
+}
+public struct LinkRoute: Codable, Equatable, Sendable {
+    public var host: String
+    public var spaceID: UUID
+    public init(host: String, spaceID: UUID) { self.host = host; self.spaceID = spaceID }
+}
+public struct ReadingItem: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public var addedAt: Date
+    public var read: Bool
+    /// Saved to the Playlist: a page with video or music.
+    public var media: Bool?
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL, media: Bool = false) {
+        self.id = id; self.profileID = profileID; self.title = title; self.url = url; addedAt = Date(); read = false; self.media = media
+    }
+}
+public struct SavedPage: Codable, Equatable, Sendable {
+    public var title: String
+    public var url: URL
+    public init(title: String, url: URL) { self.title = title; self.url = url }
+}
+public struct SavedSession: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var name: String
+    public var tabs: [SavedPage]
+    public var savedAt: Date
+    public init(id: UUID = UUID(), profileID: UUID, name: String, tabs: [SavedPage]) { self.id = id; self.profileID = profileID; self.name = name; self.tabs = tabs; savedAt = Date() }
+}
+public struct BoardItem: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    /// "link", "note" or "image" (a picture of a page, saved beside the library).
+    public var kind: String
+    public var title: String
+    public var url: URL?
+    public var text: String
+    public var x: Double
+    public var y: Double
+    public init(id: UUID = UUID(), kind: String, title: String, url: URL?, text: String, x: Double, y: Double) {
+        self.id = id; self.kind = kind; self.title = title; self.url = url; self.text = text; self.x = x; self.y = y
+    }
+}
+public struct Board: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var name: String
+    public var items: [BoardItem]
+    public init(id: UUID = UUID(), profileID: UUID, name: String) { self.id = id; self.profileID = profileID; self.name = name; items = [] }
+}
+/// A website kept open beside the page in the panel strip.
+public struct WebPanel: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL) { self.id = id; self.profileID = profileID; self.title = title; self.url = url }
+}
+/// A site shown above every Space of a Profile, as Arc's Favorites are.
+public struct FavoriteSite: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var profileID: UUID
+    public var title: String
+    public var url: URL
+    public init(id: UUID = UUID(), profileID: UUID, title: String, url: URL) { self.id = id; self.profileID = profileID; self.title = title; self.url = url }
+}
+public struct CommandChain: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var steps: [String]
+    public init(id: UUID = UUID(), name: String, steps: [String]) { self.id = id; self.name = name; self.steps = steps }
+}
+public struct AutofillAddress: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name = "", organization = "", street = "", city = "", region = "", postalCode = "", country = "", email = "", phone = ""
+    public init(id: UUID = UUID()) { self.id = id }
+}
+public struct ThemeSchedule: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var light: String
+    public var dark: String
+}
+public struct ReaderStyle: Codable, Equatable, Sendable {
+    public var size: Int
+    public var theme: String
+    public var font: String
 }
 public struct LibraryState: Codable, Equatable, Sendable {
     public var profiles: [Profile] = [Profile(name: "Personal")]

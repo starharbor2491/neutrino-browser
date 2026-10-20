@@ -4,26 +4,166 @@ use crate::state::{array, flag, resolve_address, text, validate_ai};
 use serde_json::{json, Value};
 use url::Url;
 
-pub const BLOCKED_DOMAINS: &[&str] = &[
-    "doubleclick.net",
-    "googlesyndication.com",
-    "googleadservices.com",
+/// Analytics and cross-site tracking hosts, blocked at every blocking level.
+pub const TRACKER_DOMAINS: &[&str] = &[
     "google-analytics.com",
     "googletagmanager.com",
-    "adnxs.com",
-    "adsrvr.org",
-    "criteo.com",
-    "criteo.net",
     "scorecardresearch.com",
     "quantserve.com",
-    "taboola.com",
-    "outbrain.com",
     "hotjar.com",
     "hotjar.io",
     "clarity.ms",
     "facebook.net",
     "segment.io",
+    "mixpanel.com",
+    "fullstory.com",
+    "newrelic.com",
+    "chartbeat.com",
+    "analytics.google.com",
+    "analytics.twitter.com",
+    "analytics.tiktok.com",
+    "ct.pinterest.com",
+    "bat.bing.com",
+    "snap.licdn.com",
+    "sc-static.net",
+    "tr.snapchat.com",
+    "amplitude.com",
+    "heapanalytics.com",
+    "mouseflow.com",
+    "crazyegg.com",
+    "luckyorange.com",
+    "luckyorange.net",
+    "inspectlet.com",
+    "kissmetrics.com",
+    "adjust.com",
+    "appsflyer.com",
+    "kochava.com",
+    "omtrdc.net",
+    "2o7.net",
+    "demdex.net",
+    "everesttech.net",
+    "krxd.net",
+    "bluekai.com",
+    "exelator.com",
+    "rlcdn.com",
+    "agkn.com",
+    "tapad.com",
+    "crwdcntrl.net",
+    "addthis.com",
+    "sharethis.com",
+    "cloudflareinsights.com",
+    "statcounter.com",
+    "mc.yandex.ru",
+    "parsely.com",
+    "parse.ly",
+    "smartlook.com",
+    "nr-data.net",
+    "imrworldwide.com",
+    "quantcount.com",
+    "mxpnl.com",
+    "pixel.wp.com",
 ];
+/// Advertising hosts, blocked when ads are blocked as well.
+pub const AD_DOMAINS: &[&str] = &[
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "adnxs.com",
+    "adsrvr.org",
+    "criteo.com",
+    "criteo.net",
+    "taboola.com",
+    "outbrain.com",
+    "amazon-adsystem.com",
+    "pubmatic.com",
+    "rubiconproject.com",
+    "googletagservices.com",
+    "adservice.google.com",
+    "static.ads-twitter.com",
+    "ads.linkedin.com",
+    "advertising.com",
+    "yieldmo.com",
+    "openx.net",
+    "casalemedia.com",
+    "indexww.com",
+    "smartadserver.com",
+    "teads.tv",
+    "33across.com",
+    "sharethrough.com",
+    "triplelift.com",
+    "3lift.com",
+    "media.net",
+    "bidswitch.net",
+    "contextweb.com",
+    "lijit.com",
+    "sovrn.com",
+    "spotxchange.com",
+    "spotx.tv",
+    "adform.net",
+    "adition.com",
+    "mgid.com",
+    "revcontent.com",
+    "zemanta.com",
+    "adroll.com",
+    "serving-sys.com",
+    "flashtalking.com",
+    "moatads.com",
+    "adsafeprotected.com",
+    "doubleverify.com",
+    "zedo.com",
+    "popads.net",
+    "propellerads.com",
+    "exoclick.com",
+    "adcolony.com",
+    "applovin.com",
+    "inmobi.com",
+    "smaato.net",
+    "chartboost.com",
+    "vungle.com",
+    "carbonads.net",
+    "buysellads.com",
+    "yieldlab.net",
+    "adsymptotic.com",
+    "lkqd.net",
+];
+/// Hosts blocked at a level: trackers always, ads unless the request turns them off,
+/// and the person's own rules.
+/// Built-in domains, then the person's rules, then subscribed filter lists.
+fn blocked_domains(r: &Value) -> Vec<String> {
+    let ads = r["ads"].as_bool().unwrap_or(true);
+    let mut out: Vec<String> = TRACKER_DOMAINS.iter().chain(if ads { AD_DOMAINS } else { &[] }).map(|d| d.to_string()).collect();
+    let mut seen: std::collections::HashSet<String> = out.iter().cloned().collect();
+    let custom = array(&r["custom"]).iter().filter_map(Value::as_str).take(5000);
+    let subscribed = array(&r["subscribed"]).iter().filter_map(Value::as_str).take(120_000);
+    for d in custom.chain(subscribed) {
+        let d = d.to_ascii_lowercase();
+        if d.contains('.') && d.len() <= 253 && d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') && seen.insert(d.clone()) {
+            out.push(d);
+        }
+    }
+    out
+}
+/// WebKit content rules for a blocking level, with sites whose Shields are down exempt.
+fn webkit_rules(r: &Value) -> Value {
+    let mut rules: Vec<Value> = blocked_domains(r).iter().map(|d| json!({"trigger":{"url-filter":format!(r"^https?://([^/]+\.)?{}[/:]",d.replace('.',r"\.")),"resource-type":["image","style-sheet","script","font","raw","media","popup"]},"action":{"type":"block"}})).collect();
+    // Address rules from subscribed lists arrive among the domains, marked by their leading "||".
+    for rule in array(&r["subscribed"]).iter().filter_map(Value::as_str).filter(|v| v.starts_with("||")).take(20_000) {
+        if let Some((filter, third)) = crate::features::pattern_url_filter(rule) {
+            let mut trigger = json!({"url-filter":filter,"resource-type":["image","style-sheet","script","font","raw","media","popup"]});
+            if third {
+                trigger["load-type"] = json!(["third-party"]);
+            }
+            rules.push(json!({"trigger":trigger,"action":{"type":"block"}}));
+        }
+    }
+    let exempt: Vec<Value> = array(&r["exceptions"]).iter().filter_map(Value::as_str)
+        .filter(|h| !h.is_empty() && h.len() <= 253 && h.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.".contains(&b)))
+        .take(500).map(|h| json!(format!("*{}", h.to_ascii_lowercase()))).collect();
+    if !exempt.is_empty() {
+        rules.push(json!({"trigger":{"url-filter":".*","if-domain":exempt},"action":{"type":"ignore-previous-rules"}}));
+    }
+    json!(rules)
+}
 pub fn request(r: Value) -> Result<Value, &'static str> {
     Ok(match text(&r, "op") {
         "moduleNote" | "projectNotes" | "resolveNoteSource" | "prepareForChromiumRemoval" | "applyOrganization" | "liveTabOwnership" | "applySpaceConfiguration" | "manageNamedSetup" | "normalizeSession" | "sessionAncestors" | "visibleTreeTabs" | "setTabParent" | "selectSessionTab" | "enableSessionSplit" | "normalizeSpace" | "archiveIdleTabs" | "restoreArchivedTab" | "normalizeSpaces" | "normalizeLibrary" | "spaceConfiguration" | "removeProfile" | "restoreProfile" | "normalizeChromiumPages" => crate::workspace::request(&r)?,
@@ -76,6 +216,10 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         "validateSVGIcons" => {crate::modules::svg_icons(&r["icons"])?;json!(true)},
         "parseBookmarks" => crate::bookmarks::parse(text(&r,"html"))?,
         "exportBookmarks" => crate::bookmarks::export(&r["bookmarks"]),
+        "browserHistory" => crate::browser_import::history(text(&r, "source"), text(&r, "home"))?,
+        "browserBookmarks" => crate::browser_import::bookmarks(text(&r, "source"), text(&r, "home"))?,
+        "browserLogins" => crate::browser_import::logins(text(&r, "source"), text(&r, "home"))?,
+        "firefoxLogins" => crate::browser_import::firefox_logins(text(&r, "home"))?,
         "resolveAddress" => json!(resolve_address(text(&r,"input"), text(&r,"search"))),
         "isWebURL" => json!(Url::parse(text(&r,"url")).is_ok_and(|u| matches!(u.scheme(),"http"|"https") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none())),
         "pageTitle" => json!(text(&r,"title").chars().take(512).collect::<String>()),
@@ -85,9 +229,24 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
             }
             json!(Url::parse(text(&r,"endpoint")).map_err(|_| "Invalid endpoint")?.to_string())
         }
-        "blockingDomains" => json!(BLOCKED_DOMAINS),
-        "blocks" => json!(!flag(&r,"topLevel") && Url::parse(text(&r,"url")).ok().and_then(|u|u.host_str().map(str::to_owned)).is_some_and(|h| BLOCKED_DOMAINS.iter().any(|d| h == *d || h.ends_with(&format!(".{d}"))))),
-        "webKitRules" => json!(BLOCKED_DOMAINS.iter().map(|d|json!({"trigger":{"url-filter":format!(r"^https?://([^/]+\.)?{}[/:]",d.replace('.',r"\.")),"resource-type":["image","style-sheet","script","font","raw","media","popup"]},"action":{"type":"block"}})).collect::<Vec<_>>()),
+        "blockingDomains" => json!(blocked_domains(&r)),
+        "blocks" => json!(!flag(&r,"topLevel") && Url::parse(text(&r,"url")).ok().and_then(|u|u.host_str().map(str::to_owned)).is_some_and(|h| blocked_domains(&r).iter().any(|d| h == *d || h.ends_with(&format!(".{d}"))))),
+        "pageScript" => json!(crate::features::page_script(&r).ok_or("Unknown page script.")?),
+        "stripTracking" => json!(crate::features::strip_tracking(text(&r, "url"))),
+        "parseBlockRules" => json!(crate::features::parse_rules(text(&r, "value"))),
+        "parseCosmeticRules" => json!(crate::features::parse_cosmetic(text(&r, "value"))),
+        "parseFeed" => crate::feeds::parse(text(&r, "value"))?,
+        // Whether a built-in feature module starts on for a layout, as setup's Modules step offers it.
+        "moduleDefault" => json!(crate::features::module_default(text(&r, "id").trim_start_matches("org.neutrino."), text(&r, "preset"))),
+        // A subscribed list: domain rules and element rules, bounded.
+        "parseFilterList" => {
+            let source = text(&r, "value");
+            if source.len() > 20 * 1024 * 1024 {
+                return Err("That filter list is larger than 20 MB.");
+            }
+            json!({"domains":crate::features::parse_rules_up_to(source, 60_000),"cosmetic":crate::features::parse_cosmetic_up_to(source, 20_000),"patterns":crate::features::parse_patterns_up_to(source, 20_000)})
+        }
+        "webKitRules" => webkit_rules(&r),
         "reader" => json!(reader(text(&r,"html"))?),
         "validateOrganization" => {
             let proposal=&r["proposal"];

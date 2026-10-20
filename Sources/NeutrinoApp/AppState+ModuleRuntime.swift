@@ -159,7 +159,11 @@ extension AppState {
             _ = try validatedWorkerPackage(id: module.id, requireEnabled: requireEnabled)
         case .behaviorProgram: _ = try repository.behaviorProgram(for: module.id, requireEnabled: requireEnabled)
         case .declarative: _ = try repository.definition(for: module.id, requireEnabled: requireEnabled)
-        case nil: throw ValidationError("This legacy descriptor no longer provides a feature. Update or replace it in Modules.")
+        case nil:
+            // Built-in features are implemented by the host and carry no payload.
+            guard module.manifest.capability == .feature, bundledModuleIDs.contains(module.id) else {
+                throw ValidationError("This legacy descriptor no longer provides a feature. Update or replace it in Modules.")
+            }
         }
     }
     func moduleManifestCandidate(_ id: String) -> ModuleManifest? {
@@ -175,6 +179,8 @@ extension AppState {
         for manifest in result {
             if !repairingIDs.contains(manifest.id), let existing = installedModules.first(where: { $0.id == manifest.id && $0.manifest == manifest }) {
                 try validateModulePayload(existing, requireEnabled:false)
+            } else if manifest.capability == .feature, manifest.runtime == nil, bundledModuleIDs.contains(manifest.id) {
+                continue
             } else {
                 guard let payload = modulePayloads[manifest.id] else { throw ValidationError("The catalog is missing \(manifest.name)'s package payload.") }
                 if manifest.runtime == .behaviorProgram { try ModuleProgram.decode(payload).validate(capability:manifest.capability) }

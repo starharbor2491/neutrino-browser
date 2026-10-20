@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.feeds",
+  "name": "Feeds",
+  "version": 1,
+  "summary": "Follow RSS and Atom feeds in a panel, with unread counts.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

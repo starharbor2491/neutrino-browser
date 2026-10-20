@@ -97,3 +97,27 @@ struct LocalCredential: Codable, Identifiable {
     try SecureVault.put(JSONEncoder().encode(self), account: id, service: Self.service(profile))
   }
 }
+
+/// A payment card kept in Keychain, separate for each Profile. The security code is never stored.
+struct LocalCard: Codable, Identifiable {
+  var id: String
+  var name: String
+  var number: String
+  var month: Int
+  var year: Int
+  static func service(_ profile: UUID) -> String { "org.neutrino.browser.cards." + profile.uuidString }
+  static func list(profile: UUID) -> [LocalCard] {
+    ((try? SecureVault.accounts(service: service(profile))) ?? []).compactMap { account in
+      (try? SecureVault.get(account: account, service: service(profile))).flatMap { $0 }.flatMap { try? JSONDecoder().decode(Self.self, from: $0) }
+    }.sorted { $0.name < $1.name }
+  }
+  func save(profile: UUID) throws {
+    guard (12...19).contains(number.count), number.allSatisfy(\.isNumber), (1...12).contains(month), (2000...2100).contains(year), name.count <= 80
+    else { throw ValidationError("Check the card details.") }
+    try SecureVault.put(JSONEncoder().encode(self), account: id, service: Self.service(profile))
+  }
+  /// What the interface may show: never the full number.
+  var summary: [String: String] {
+    ["id": id, "name": name.isEmpty ? "Card" : name, "last4": String(number.suffix(4)), "expiry": String(format: "%02d/%02d", month, year % 100)]
+  }
+}

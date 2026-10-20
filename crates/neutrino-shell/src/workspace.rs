@@ -74,17 +74,26 @@ fn ancestors(tabs: &[Value], id: &str) -> Vec<String> {
     }
     out
 }
+fn split_value(panes: &[String]) -> Value {
+    let mut v = json!({"first":panes[0],"second":panes[1]});
+    if panes.len() > 2 {
+        v["more"] = json!(panes[2..]);
+    }
+    v
+}
 fn select(mut s: Value, id: &str) -> Value {
     if !array(&s["tabs"]).iter().any(|t| t["id"] == id) {
         return s;
     }
-    if s["split"].is_object() && s["split"]["first"] != id && s["split"]["second"] != id {
-        let key = if s["selectedTabID"] == s["split"]["second"] {
-            "second"
+    if s["split"].is_object() && !split_panes(&s["split"]).contains(&id) {
+        // The selected pane shows the newly selected tab; the other tiles stay.
+        let selected = text(&s, "selectedTabID").to_owned();
+        if let Some(i) = array(&s["split"]["more"]).iter().position(|p| *p == selected) {
+            s["split"]["more"][i] = json!(id);
         } else {
-            "first"
-        };
-        s["split"][key] = json!(id);
+            let key = if s["split"]["second"] == selected { "second" } else { "first" };
+            s["split"][key] = json!(id);
+        }
     }
     s["selectedTabID"] = json!(id);
     let parents = ancestors(array(&s["tabs"]), id);
@@ -150,14 +159,21 @@ fn session(mut s: Value) -> Value {
         }
     }
     if s["split"].is_object() {
-        let a = text(&s["split"], "first");
-        let b = text(&s["split"], "second");
-        if a == b || !ids.contains(a) || !ids.contains(b) {
+        // Closed or repeated tiles drop out; fewer than two panes end the split.
+        let mut panes: Vec<String> = vec![];
+        for id in split_panes(&s["split"]) {
+            if ids.contains(id) && !panes.iter().any(|p| p == id) && panes.len() < MAX_SPLIT_PANES {
+                panes.push(id.to_owned());
+            }
+        }
+        if panes.len() < 2 {
             s["split"] = Value::Null;
-        } else if s["split"]["first"] != s["selectedTabID"]
-            && s["split"]["second"] != s["selectedTabID"]
-        {
-            s["split"]["first"] = s["selectedTabID"].clone();
+        } else {
+            let selected = text(&s, "selectedTabID").to_owned();
+            if !panes.contains(&selected) {
+                panes[0] = selected;
+            }
+            s["split"] = split_value(&panes);
         }
     }
     if !s["split"].is_null() {
@@ -167,6 +183,7 @@ fn session(mut s: Value) -> Value {
     let selected = text(&s, "selectedTabID").to_owned();
     select(s, &selected)
 }
+use crate::render::{split_panes, MAX_FOLDER_DEPTH, MAX_SPLIT_PANES};
 fn space(mut s: Value) -> Value {
     let name = text(&s, "name").trim().chars().take(80).collect::<String>();
     s["name"] = json!(if name.is_empty() { "Space" } else { &name });
@@ -179,6 +196,26 @@ fn space(mut s: Value) -> Value {
         f["name"] = json!(text(f, "name").chars().take(80).collect::<String>());
     }
     let ids: HashSet<_> = folders.iter().map(|f| text(f, "id").to_owned()).collect();
+    // A nested folder's parent must exist, without loops, at most three levels up.
+    let parents: HashMap<String, String> = folders.iter().map(|f| (text(f, "id").to_owned(), text(f, "parentID").to_owned())).collect();
+    for f in &mut folders {
+        let id = text(f, "id").to_owned();
+        let mut current = text(f, "parentID").to_owned();
+        let mut depth = 0;
+        let valid = loop {
+            if current.is_empty() {
+                break true;
+            }
+            if current == id || depth >= MAX_FOLDER_DEPTH || !ids.contains(&current) {
+                break false;
+            }
+            current = parents.get(&current).cloned().unwrap_or_default();
+            depth += 1;
+        };
+        if !valid || f["parentID"].as_str() == Some("") {
+            f["parentID"] = Value::Null;
+        }
+    }
     s["folders"] = json!(folders);
     if let Some(tabs) = s["tabs"].as_array_mut() {
         for t in tabs {

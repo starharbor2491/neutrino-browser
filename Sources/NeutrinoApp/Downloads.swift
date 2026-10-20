@@ -81,10 +81,27 @@ final class DownloadItem: ObservableObject, Identifiable {
     var approvedReplacement = false
     @Published var active = true
     @Published var fraction = 0.0
-    let download: WKDownload?
+    /// A WebKit download is replaced by a new one when it resumes.
+    var download: WKDownload?
     let chromiumID: String?
     var sourceURL: URL?
     var cancelChromium: (@MainActor @Sendable () -> Void)?
+    /// Pauses (true) or resumes (false) a Chromium download.
+    var pauseChromium: (@MainActor @Sendable (Bool) -> Void)?
+    /// Paused by the person. A paused WebKit download keeps its partial file and resume data.
+    @Published var paused = false
+    /// The file was saved at its destination.
+    var succeeded = false
+    var resumeData: Data?
+    var resuming = false
+    /// Keeps the view that resumed a WebKit download until the transfer ends.
+    var resumeView: WKWebView?
+    var canPause: Bool { active && !cancellationRequested && destination != nil && (download != nil || pauseChromium != nil) }
+    /// What the interface's download list shows.
+    var summary: [String: Any] {
+        ["id": id.uuidString, "name": name, "status": status, "complete": succeeded, "ended": !active && !awaitsTerminalUpdate,
+         "fraction": fraction, "paused": paused, "canPause": canPause]
+    }
     var destinationPanel: NSSavePanel?
     var cancellationRequested = false
     var transferEnded = false
@@ -102,6 +119,10 @@ final class DownloadItem: ObservableObject, Identifiable {
 @MainActor
 final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
     @Published var items: [DownloadItem] = [] { didSet { admission.refresh(self) } }
+    /// Saves downloads here without asking, when the person chose a folder.
+    static var defaultFolder: URL?
+    /// Removes finished downloads from the list; their files stay on disk.
+    func removeFinished(_ id: UUID? = nil) { items.removeAll { !$0.active && !$0.awaitsTerminalUpdate && (id == nil || $0.id == id) } }
     private let admission: DownloadAdmission
     private var acceptanceDestination: URL?
     var acceptingDownloads: Bool { admission.acceptingDownloads }
@@ -127,12 +148,54 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
     func track(_ download: WKDownload, profileID: UUID) {
         let item = DownloadItem(download, profileID: profileID); items.insert(item, at: 0); download.delegate = self
         guard acceptsDownloads(for: profileID) else { cancel(item); return }
+        observeProgress(item, download)
+    }
+    private func observeProgress(_ item: DownloadItem, _ download: WKDownload) {
         item.progressObservation = download.progress.observe(\.fractionCompleted, options: [.new]) { [weak item] _, change in
             let fraction = change.newValue ?? 0
             Task { @MainActor [weak item] in
-                guard let item, item.active else { return }
+                guard let item, item.active, !item.paused else { return }
                 item.fraction = fraction
             }
+        }
+    }
+    /// Pauses or resumes a download, as the download lists of other browsers do.
+    func setPaused(_ item: DownloadItem, _ pause: Bool) {
+        guard item.canPause, item.paused != pause, !item.resuming, acceptsDownloads(for: item.profileID) || pause else { return }
+        if let pauseChromium = item.pauseChromium {
+            pauseChromium(pause)
+            item.paused = pause; item.status = pause ? "Paused" : "Downloading"
+            return
+        }
+        guard let download = item.download else { return }
+        if pause {
+            item.paused = true; item.status = "Pausing…"; item.progressObservation = nil
+            download.cancel { [weak self, item] data in
+                Task { @MainActor in
+                    guard let self, !item.transferEnded, item.download === download else { return }
+                    if item.cancellationRequested { self.finishCancellation(item); return }
+                    guard let data else { self.fail(item, message: "This site doesn’t allow resuming the download"); return }
+                    item.resumeData = data; item.status = "Paused"
+                }
+            }
+            return
+        }
+        // WebKit resumes from a view using the same website data store.
+        guard let data = item.resumeData, let state = AppDelegate.state else { return }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = state.webKitDataStore(profileID: item.profileID)
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        item.resuming = true; item.resumeView = view; item.status = "Resuming…"
+        view.resumeDownload(fromResumeData: data) { [weak self, item] resumed in
+            item.resuming = false
+            guard let self, !item.transferEnded else { resumed.cancel(); return }
+            item.download = resumed; item.resumeData = nil; resumed.delegate = self
+            if item.cancellationRequested {
+                resumed.cancel { [weak self, item] _ in Task { @MainActor in self?.finishCancellation(item) } }
+                return
+            }
+            item.paused = false; item.status = "Downloading"
+            self.observeProgress(item, resumed)
         }
     }
     private func item(_ download: WKDownload) -> DownloadItem? { items.first { $0.download === download } }
@@ -143,10 +206,11 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
     }
     /// IDs must be unique across the runtime, including downloads from different tabs.
     func beginChromium(id: String, profileID: UUID, suggestedName: String, sourceURL: URL?, cancel: @escaping @MainActor @Sendable () -> Void,
-                       completion: @escaping @MainActor @Sendable (URL?) -> Void) {
+                       pause: (@MainActor @Sendable (Bool) -> Void)? = nil, completion: @escaping @MainActor @Sendable (URL?) -> Void) {
         guard acceptsDownloads(for: profileID) else { cancel(); completion(nil); return }
         guard !items.contains(where: { $0.chromiumID == id }) else { completion(nil); return }
         let item = DownloadItem(chromiumID: id, profileID: profileID, sourceURL: sourceURL, cancel: cancel)
+        item.pauseChromium = pause
         items.insert(item, at: 0)
         chooseDestination(for: item, suggestedName: suggestedName, completion: completion)
     }
@@ -210,9 +274,11 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
             // Production downloads always present the save panel below.
             acceptanceDestination = nil
             selected = destination
+        } else if let folder = Self.defaultFolder, FileManager.default.fileExists(atPath: folder.path) {
+            selected = Self.available(item.name, in: folder)
         } else {
             let panel = NSSavePanel(); panel.nameFieldStringValue = item.name
-            panel.message = "Save this download. Files are never opened automatically."
+            panel.message = "Choose where to save this download."
             item.destinationPanel = panel
             let choice = panel.runModal()
             item.destinationPanel = nil
@@ -226,6 +292,17 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
         let staging = url.deletingLastPathComponent().appendingPathComponent(".neutrino-download-" + UUID().uuidString + ".part")
         item.approvedReplacement = FileManager.default.fileExists(atPath: url.path)
         item.destination = url; item.staging = staging; item.status = "Downloading"; completion(staging)
+    }
+    /// "name.ext", or "name 2.ext" and so on when that file exists.
+    private static func available(_ name: String, in folder: URL) -> URL {
+        let candidate = folder.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: candidate.path) else { return candidate }
+        let base = candidate.deletingPathExtension().lastPathComponent, ext = candidate.pathExtension
+        for n in 2..<1000 {
+            let next = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+            if !FileManager.default.fileExists(atPath: next.path) { return next }
+        }
+        return folder.appendingPathComponent(UUID().uuidString + (ext.isEmpty ? "" : "." + ext))
     }
     func downloadDidFinish(_ download: WKDownload) {
         guard let item = item(download) else { return }
@@ -262,11 +339,13 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
                 _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging,
                                                          backupItemName: nil, options: .usingNewMetadataOnly)
             } else { try FileManager.default.moveItem(at: staging, to: destination) }
-            item.staging = nil; item.fraction = 1; item.status = "Finished"
+            item.staging = nil; item.fraction = 1; item.status = "Finished"; item.succeeded = true
         } catch { item.status = "Failed to save: \(error.localizedDescription). Temporary file kept at \(staging.path)." }
     }
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         guard let item = item(download) else { return }
+        // Pausing stops the transfer on purpose; the partial file stays for resuming.
+        if item.paused && !item.cancellationRequested { if let resumeData { item.resumeData = resumeData }; return }
         if item.cancellationRequested { finishCancellation(item) }
         else { fail(item, message: error.localizedDescription) }
     }
@@ -290,7 +369,8 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
         }
     }
     private func endTransfer(_ item: DownloadItem) {
-        item.transferEnded = true; item.progressObservation = nil; item.cancelChromium = nil
+        item.transferEnded = true; item.progressObservation = nil; item.cancelChromium = nil; item.pauseChromium = nil
+        item.resumeView = nil; item.resumeData = nil; item.paused = false
         item.acknowledgementUnavailable = false
         admission.refresh(self)
     }
@@ -299,7 +379,11 @@ final class DownloadCenter: NSObject, ObservableObject, WKDownloadDelegate {
         item.cancellationRequested = true
         item.active = false; item.status = "Cancelling…"; item.progressObservation = nil
         item.destinationPanel?.cancel(nil)
-        if let download = item.download {
+        if item.paused && item.pauseChromium == nil {
+            // The paused WebKit transfer has already stopped, unless pausing or resuming is
+            // still in progress; that step's completion finishes the cancellation.
+            if item.resumeData != nil && !item.resuming { finishCancellation(item) }
+        } else if let download = item.download {
             download.cancel { [self, item] _ in
                 Task { @MainActor in
                     self.finishCancellation(item)

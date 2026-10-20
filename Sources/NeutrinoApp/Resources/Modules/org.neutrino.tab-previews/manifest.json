@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.tab-previews",
+  "name": "Tab Previews",
+  "version": 1,
+  "summary": "Hover over a tab to see a picture of its page.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

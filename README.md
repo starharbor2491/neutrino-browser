@@ -14,6 +14,15 @@ Neutrino keeps pages, reference tabs, and local notes together in a workspace. S
 
 **Development preview.** This is an actively developed browser, with incomplete compatibility and release gates. See the [release status](docs/RELEASE_STATUS.md) before replacing your everyday browser. Downloadable releases contain `Neutrino.app` as a ZIP and a complete offline DMG.
 
+With Homebrew, this repository is its own tap:
+
+```sh
+brew tap starharbor2491/neutrino https://github.com/starharbor2491/neutrino-browser
+brew install --cask neutrino
+```
+
+Previews are not notarized, so macOS blocks the first launch; choose Open Anyway in System Settings > Privacy & Security. Neutrino then updates itself.
+
 ![Neutrino research workspace](docs/images/neutrino-shell.png)
 
 *Native macOS/WebKit capture: two local sample articles beside source-linked Notes, using a dark vertical layout.*

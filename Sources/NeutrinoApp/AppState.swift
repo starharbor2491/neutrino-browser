@@ -23,6 +23,11 @@ final class AppState: ObservableObject {
     @Published var onboardingSaving = false
     @Published var startupError: String?
     @Published var notice: String?
+    /// Rules from subscribed filter lists, loaded from their saved copies.
+    var filterListDomains: [String] = []
+    var filterListGenericCosmetic: [String] = []
+    var filterListSiteCosmetic: [String: [String]] = [:]
+    var feedsRefreshing = false
     @Published var installedModules: [InstalledModule] = [] { didSet { modulePresentationCache = nil; resourceWorkerGeneration = UUID(); synchronizeModuleContributions(previous: oldValue) } }
     var modulePresentationCache: ModulePresentation?
     @Published private(set) var resourceWorkerGeneration = UUID()
@@ -116,11 +121,25 @@ final class AppState: ObservableObject {
                 repository = repo
                 let available = catalog.filter { $0.runtime == nil || modulePayloads[$0.id] != nil }
                 try repo.seedDefaults(available, payloads: modulePayloads)
+                // Feature modules added after this library was first seeded arrive on, once each;
+                // one the person later removes stays removed.
+                var seen = Set(library.preferences.seededFeatures ?? [])
+                let present = Set(try repo.installed().map(\.id))
+                let preset = library.preferences.configuration.theme.preset ?? "neutrino"
+                for manifest in catalog where manifest.capability == .feature && !seen.contains(manifest.id) {
+                    // A module added by an update starts as setup would offer it for this layout.
+                    let enabled = (try? RustCore.request(["op": "moduleDefault", "id": manifest.id, "preset": preset]) as? Bool) ?? true
+                    if !present.contains(manifest.id) { try repo.install(manifest, enabled: enabled) }
+                    seen.insert(manifest.id)
+                }
+                if seen != Set(library.preferences.seededFeatures ?? []) { library.preferences.seededFeatures = seen.sorted() }
                 installedModules = try repo.installed()
                 try refreshBundledNativePackages()
                 try loadCommunityCatalogs()
             } catch { notice = "Optional modules could not load: \(error.localizedDescription). Open Recovery to repair them." }
             await finishPendingProfileDeletions()
+            loadFilterLists()
+            Task { await refreshFilterLists(force: false) }
             DistributionManager.shared.configure(dataDirectory: dataDirectory)
             ready = true; startupError = nil
         } catch { startupError = error.localizedDescription }
@@ -161,6 +180,12 @@ final class AppState: ObservableObject {
                 modulePayloads[manifest.id] = try Data(contentsOf: executable)
             } catch { notice = "\(manifest.name) is unavailable because its bundled package could not load. Rebuild or reinstall Neutrino to use it. Browsing is still available." }
         }
+    }
+    /// Whether a built-in feature module (`org.neutrino.<key>`) is on. A feature
+    /// this build doesn't bundle as a module stays on.
+    func feature(_ key: String) -> Bool {
+        let id = "org.neutrino." + key
+        return installedModules.first { $0.id == id }?.enabled ?? !bundledModuleIDs.contains(id)
     }
     func enabled(_ capability: ModuleCapability) -> Bool {
         installedModules.contains {
@@ -373,6 +398,26 @@ final class AppState: ObservableObject {
             try setModuleEnabledApproved(module.id, enabled: !module.enabled)
         }
     }
+    /// Applies the module choices made during setup, where the person reviewed
+    /// each one. Bundled modules only; a role's chosen provider replaces the old one.
+    func applySetupModules(_ choices: [String: Bool]) {
+        guard let repository else { return }
+        let ordered = choices.sorted { !$0.value && $1.value } // turn modules off before replacing providers
+        for (id, on) in ordered where bundledModuleIDs.contains(id) {
+            do {
+                if let module = installedModules.first(where: { $0.id == id }) {
+                    guard module.enabled != on else { continue }
+                    if on, module.manifest.capability.isExclusive,
+                       installedModules.contains(where: { $0.enabled && $0.manifest.capability == module.manifest.capability && $0.id != id }) {
+                        if module.manifest.capability == .resourceMonitor { try replaceResourceProvider(with: id) }
+                        else { try repository.replaceProvider(role: module.manifest.capability, with: id); installedModules = try repository.installed() }
+                    } else if !on && module.manifest.capability == .tabSystem {
+                        continue
+                    } else { try setModuleEnabledApproved(id, enabled: on) }
+                } else if on { try installApprovedModule(id) }
+            } catch { notice = "\(catalog.first { $0.id == id }?.name ?? id) couldn’t be changed: \(error.localizedDescription)" }
+        }
+    }
     /// Mutation after the graphical permission preview, also used by native
     /// integration tests to avoid interacting with a modal approval dialog.
     func setModuleEnabledApproved(_ id: String, enabled: Bool) throws {
@@ -427,6 +472,8 @@ final class AppState: ObservableObject {
             }
         }
     }
+    /// A tab the next regular window opens on, set when a tab moves to a new window.
+    var pendingWindowTab: (spaceID: UUID, tabID: UUID)?
     func claimSession(privateBrowsing: Bool) -> WindowSession {
         library.normalizeSpaces()
         if !privateBrowsing, let saved = library.sessions.first(where: { !claimedSessions.contains($0.id) }) {
@@ -486,6 +533,65 @@ final class AppState: ObservableObject {
             notice = "Imported \(additions.count) bookmarks."
             return true
         } catch { notice = error.localizedDescription; return false }
+    }
+    /// Imports bookmarks another browser keeps on this Mac, skipping ones already saved.
+    @discardableResult
+    func importBrowserData(from source: String, profileID: UUID) -> Bool {
+        guard !finalQuitDataFrozen else { notice = "Wait for Neutrino to finish saving before importing bookmarks."; return false }
+        guard !deletingProfileIDs.contains(profileID), library.profiles.contains(where: { $0.id == profileID }) else { notice = "This profile is unavailable."; return false }
+        let names = ["chrome": "Chrome", "safari": "Safari", "firefox": "Firefox", "edge": "Edge", "brave": "Brave", "arc": "Arc", "vivaldi": "Vivaldi", "opera": "Opera", "operagx": "Opera GX"]
+        guard let name = names[source] else { return false }
+        var found: [(String, URL)] = []
+        do {
+            if source == "safari" {
+                found = try safariBookmarks()
+            } else {
+                let result = try RustCore.request(["op": "browserBookmarks", "source": source, "home": FileManager.default.homeDirectoryForCurrentUser.path])
+                found = ((result as? [[String: Any]]) ?? []).compactMap { item in
+                    guard let url = (item["url"] as? String).flatMap(URL.init(string:)), AddressResolver.isWebURL(url) else { return nil }
+                    let title = (item["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? url.host ?? "Website"
+                    return (title, url)
+                }
+            }
+        } catch { notice = error.localizedDescription; return false }
+        var urls = Set(library.bookmarks.filter { $0.profileID == profileID }.map(\.url))
+        let additions = found.filter { urls.insert($0.1).inserted }.map { Bookmark(profileID: profileID, title: String($0.0.prefix(512)), url: $0.1) }
+        library.bookmarks.append(contentsOf: additions)
+        // History is optional: a browser without readable history still imports its bookmarks.
+        let visits = ((try? RustCore.request(["op": "browserHistory", "source": source, "home": FileManager.default.homeDirectoryForCurrentUser.path])) as? [[String: Any]] ?? [])
+        let known = Set(library.history.filter { $0.profileID == profileID }.map { "\($0.url.absoluteString) \(Int($0.visitedAt.timeIntervalSinceReferenceDate))" })
+        let entries: [HistoryEntry] = visits.compactMap { item in
+            guard let url = (item["url"] as? String).flatMap(URL.init(string:)), AddressResolver.isWebURL(url),
+                  let seconds = item["visitedAt"] as? Double, seconds.isFinite, !known.contains("\(url.absoluteString) \(Int(seconds))") else { return nil }
+            let title = (item["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? url.host ?? "Website"
+            return HistoryEntry(profileID: profileID, title: boundedPageTitle(title), url: url, visitedAt: Date(timeIntervalSinceReferenceDate: seconds))
+        }
+        if !entries.isEmpty {
+            library.history = Array((library.history + entries).sorted { $0.visitedAt < $1.visitedAt }.suffix(10_000))
+        }
+        let parts = [additions.isEmpty ? nil : "\(additions.count) bookmarks", entries.isEmpty ? nil : "\(entries.count) history entries"].compactMap { $0 }
+        notice = parts.isEmpty ? "Nothing new found in \(name)." : "Imported \(parts.joined(separator: " and ")) from \(name)."
+        return true
+    }
+    private func safariBookmarks() throws -> [(String, URL)] {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Safari/Bookmarks.plist")
+        guard let data = try? Data(contentsOf: file) else {
+            throw ValidationError("macOS protects Safari’s bookmarks. Allow Neutrino in System Settings → Privacy & Security → Full Disk Access, then import again.")
+        }
+        guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw ValidationError("Safari’s bookmarks file couldn’t be read.")
+        }
+        var found: [(String, URL)] = []
+        func walk(_ node: [String: Any]) {
+            guard found.count < 20_000 else { return }
+            if node["WebBookmarkType"] as? String == "WebBookmarkTypeLeaf", let address = node["URLString"] as? String,
+               let url = URL(string: address), AddressResolver.isWebURL(url) {
+                found.append(((node["URIDictionary"] as? [String: Any])?["title"] as? String ?? url.host ?? "Website", url))
+            }
+            for child in node["Children"] as? [[String: Any]] ?? [] { walk(child) }
+        }
+        walk(root)
+        return found
     }
     func exportBookmarks(profileID: UUID) {
         do { saveFile(try BookmarkExchange.export(library.bookmarks.filter { $0.profileID == profileID }), name: "Neutrino Bookmarks.html", type: .html) }
@@ -562,6 +668,44 @@ final class AppState: ObservableObject {
             return false
         }
         return true
+    }
+    /// Clears what the person chose to clear on quit, before the final save.
+    func clearDataOnQuit() async {
+        let preferences = library.preferences
+        let visitedHosts = Dictionary(grouping: library.history, by: \.profileID).mapValues { Array(Set($0.compactMap { $0.url.host?.lowercased() })) }
+        if preferences.clearHistoryOnQuit == true, !library.history.isEmpty { library.history.removeAll() }
+        let cookies = preferences.clearCookiesOnQuit == true, cache = preferences.clearCacheOnQuit == true
+        guard cookies || cache else { return }
+        let cacheTypes: Set<String> = [WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeOfflineWebApplicationCache]
+        var types = Set<String>()
+        if cookies { types.formUnion(WKWebsiteDataStore.allWebsiteDataTypes().subtracting(cacheTypes)) }
+        if cache { types.formUnion(cacheTypes) }
+        // Every Profile's store, including Profiles with no window this session.
+        let pending = Set((library.pendingProfileDeletions ?? []) + (library.pendingWebsiteDataClears ?? []))
+        for profile in library.profiles where !pending.contains(profile.id) {
+            await webKitDataStore(profileID: profile.id).removeData(ofTypes: types, modifiedSince: .distantPast)
+        }
+        // Chromium clears through a live page of each Profile now, and every
+        // Profile's files once the engine has stopped (clearChromiumFilesOnQuit).
+        var cleared = Set<UUID>()
+        for model in windows.values.compactMap(\.model) where !model.isPrivate && !cleared.contains(model.session.profileID) {
+            guard let page = model.liveEngineTabs.map(\.page).first(where: { $0.engineID == .chromium }) else { continue }
+            cleared.insert(model.session.profileID)
+            await page.clearWebsiteData(cookies: cookies, cache: cache, hosts: visitedHosts[model.session.profileID] ?? [])
+        }
+    }
+    /// After Chromium has shut down: removes cookies, site storage and caches from
+    /// every regular Profile's Chromium folder, including Profiles with no open page.
+    func clearChromiumFilesOnQuit() {
+        let preferences = library.preferences
+        var entries: [String] = []
+        if preferences.clearCookiesOnQuit == true { entries += ChromiumProfileData.siteDataEntries }
+        if preferences.clearCacheOnQuit == true { entries += ChromiumProfileData.cacheEntries }
+        guard !entries.isEmpty else { return }
+        // Best effort: the app is exiting, and a failure leaves only data the person already had.
+        for profile in library.profiles {
+            try? ChromiumProfileData.eraseEntries(entries, profileID: profile.id, dataDirectory: dataDirectory)
+        }
     }
     func freezeQuitData() {
         windows.values.compactMap(\.model).forEach { $0.captureChromiumSessions() }
@@ -691,6 +835,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DistributionManager.shared.cancelledQuit()
                 sender.reply(toApplicationShouldTerminate: false); return
             }
+            await state.clearDataOnQuit()
             self.smokeTrace("Flushing application data before termination")
             let saved = await state.flush()
             self.smokeTrace("Termination flush completed: \(saved)")
@@ -729,7 +874,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     for browser in state.windows.values.compactMap(\.model) { browser.disposeEngineTabs() }
                     quit = await ChromiumRuntime.shared.shutdown()
                     if !quit { state.notice = ChromiumRuntime.shared.status }
-                    if quit { await state.finishPendingProfileDeletions() }
+                    if quit { await state.finishPendingProfileDeletions(); state.clearChromiumFilesOnQuit() }
                     if quit && state.uninstallRequested {
                         for browser in state.windows.values.compactMap(\.model) { await browser.stopInterface?() }
                         let failures=await AppUninstaller.remove(state)

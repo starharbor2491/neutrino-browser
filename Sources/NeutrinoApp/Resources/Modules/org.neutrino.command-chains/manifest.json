@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.command-chains",
+  "name": "Command Chains",
+  "version": 1,
+  "summary": "Run several browser actions in a row from the command bar.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

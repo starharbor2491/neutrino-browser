@@ -2,7 +2,7 @@
   "id": "org.neutrino.resource-monitor",
   "name": "Resource Monitor",
   "version": 2,
-  "summary": "Live system CPU and memory from an independently removable worker. Sampling stops when the panel closes.",
+  "summary": "See CPU and memory use while you browse.",
   "publisher": "Neutrino",
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "resourceMonitor",

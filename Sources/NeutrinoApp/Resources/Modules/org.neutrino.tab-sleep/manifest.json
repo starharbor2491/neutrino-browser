@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.tab-sleep",
+  "name": "Sleeping Tabs",
+  "version": 1,
+  "summary": "Put background tabs to sleep after a while to save memory and battery.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.little-arc",
+  "name": "Little Arc",
+  "version": 1,
+  "summary": "Open links from other apps in a small window first, with the Arc layout.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

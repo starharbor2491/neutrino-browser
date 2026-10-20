@@ -153,10 +153,14 @@ import Testing
 @Test func everyOfficialDataPackageHasACompleteCompatibleRemovablePayload() throws {
     let root = officialModuleDirectory("org.neutrino.notes").deletingLastPathComponent()
     let directories = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-    #expect(directories.count == 18)
+    #expect(directories.count == 53)
     for directory in directories {
         let manifest = try ModuleManifest.decode(Data(contentsOf: directory.appendingPathComponent("manifest.json")))
-        if manifest.runtime == .behaviorProgram {
+        if manifest.capability == .feature {
+            // Built-in features carry only a manifest: the host implements them.
+            #expect(manifest.runtime == nil)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["manifest.json"])
+        } else if manifest.runtime == .behaviorProgram {
             try ModuleProgram.decode(Data(contentsOf: directory.appendingPathComponent("program.json"))).validate(capability: manifest.capability)
         } else if manifest.runtime == .declarative {
             _ = try ModuleDefinition.decode(Data(contentsOf: directory.appendingPathComponent("definition.json")), capability: manifest.capability)
@@ -271,3 +275,16 @@ private func officialModuleDirectory(_ id: String) -> URL {
 private func officialProgram(_ id: String) throws -> ModuleProgram { try ModuleProgram.decode(Data(contentsOf: officialModuleDirectory(id).appendingPathComponent("program.json"))) }
 private func temporaryModuleDirectory() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("neutrino-program-test-" + UUID().uuidString) }
 private func behaviorManifest(_ id: String) -> ModuleManifest { ModuleManifest(id: id, name: id, summary: "Constrained program", capability: .notes, runtime: .behaviorProgram) }
+
+@Test func builtInFeatureModulesInstallAndToggleWithoutAPayload() throws {
+    let directory = temporaryModuleDirectory(); defer { try? FileManager.default.removeItem(at: directory) }
+    let repo = try ModuleRepository(root: directory.appendingPathComponent("Modules"))
+    let peek = ModuleManifest(id: "org.neutrino.peek", name: "Peek", summary: "Preview links.", capability: .feature)
+    let sounds = ModuleManifest(id: "org.neutrino.sounds", name: "Browser Sounds", summary: "Interface sounds.", capability: .feature)
+    try repo.seedDefaults([peek, sounds])
+    #expect(try repo.installed().filter(\.enabled).map(\.id).sorted() == [peek.id, sounds.id])
+    try repo.setEnabled(peek.id, false)
+    // Feature modules are not exclusive: turning one off leaves the others on.
+    #expect(try repo.installed().filter(\.enabled).map(\.id) == [sounds.id])
+    #expect(throws: (any Error).self) { try repo.install(peek, payload: Data("{}".utf8)) }
+}

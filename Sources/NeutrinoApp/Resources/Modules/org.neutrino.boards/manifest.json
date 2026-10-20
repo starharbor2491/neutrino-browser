@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.boards",
+  "name": "Boards",
+  "version": 1,
+  "summary": "Collect links and notes on a canvas, like Arc Easels and Opera Pinboards.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

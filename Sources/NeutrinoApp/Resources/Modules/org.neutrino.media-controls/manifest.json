@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.media-controls",
+  "name": "Media Controls",
+  "version": 1,
+  "summary": "Show what’s playing in the sidebar, with play and pause.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

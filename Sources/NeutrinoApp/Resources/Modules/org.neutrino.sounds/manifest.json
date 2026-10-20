@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.sounds",
+  "name": "Browser Sounds",
+  "version": 1,
+  "summary": "Interface and keyboard sounds, and generated background music.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

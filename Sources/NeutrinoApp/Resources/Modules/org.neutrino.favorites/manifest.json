@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.favorites",
+  "name": "Favorites",
+  "version": 1,
+  "summary": "Keep your most-used sites as icons at the top of the sidebar, as Arc does.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

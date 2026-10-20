@@ -17,13 +17,157 @@ pub const PRESETS: &[(&str, &str, &str)] = &[
         "Opera GX",
         "Dark workspace and visible resource tools",
     ),
+    ("vivaldi", "Vivaldi", "Panels, a status bar and every option"),
 ];
+
+/// Onboarding after the layout choice follows the chosen browser's own first-run
+/// flow. Account and sync steps are left out: they need the vendor's service.
+pub fn setup_flow(preset: &str) -> &'static [&'static str] {
+    match preset {
+        "arc" => &["layout", "arc-welcome", "arc-theme", "arc-import", "arc-favorites", "arc-modules", "arc-default", "arc-tour"],
+        "gx" => &["layout", "gx-welcome", "gx-theme", "gx-sounds", "gx-sidebar", "gx-blocking", "gx-modules", "gx-import"],
+        "vivaldi" => &["layout", "vivaldi-welcome", "vivaldi-edition", "vivaldi-modules", "vivaldi-import", "vivaldi-theme", "vivaldi-tabs", "vivaldi-blocking", "vivaldi-done"],
+        "brave" => &["layout", "brave-welcome", "brave-import", "brave-shields", "brave-modules", "brave-done"],
+        "chrome" => &["layout", "chrome-welcome", "chrome-theme", "chrome-modules", "chrome-default"],
+        "safari" => &["layout", "safari-modules"],
+        _ => &["layout", "workspace", "import", "appearance", "defaults", "modules", "ai", "review"],
+    }
+}
+
+/// Sites offered as favorites in the Arc-style setup: (name, address).
+pub const FAVORITE_SITES: &[(&str, &str)] = &[
+    ("Gmail", "https://mail.google.com/"),
+    ("Calendar", "https://calendar.google.com/"),
+    ("YouTube", "https://www.youtube.com/"),
+    ("GitHub", "https://github.com/"),
+    ("Notion", "https://www.notion.so/"),
+    ("Figma", "https://www.figma.com/"),
+    ("Slack", "https://app.slack.com/"),
+    ("Spotify", "https://open.spotify.com/"),
+    ("Linear", "https://linear.app/"),
+    ("WhatsApp", "https://web.whatsapp.com/"),
+    ("X", "https://x.com/"),
+    ("Reddit", "https://www.reddit.com/"),
+];
+/// Tools a GX-style sidebar can show: (id, label).
+pub const SIDEBAR_TOOLS: &[(&str, &str)] = &[
+    ("control", "Resource control"),
+    ("messengers", "Messengers"),
+    ("bookmarks", "Bookmarks"),
+    ("history", "History"),
+    ("downloads", "Downloads"),
+    ("notes", "Notes"),
+    ("player", "Media player"),
+];
+/// Web panels a GX setup adds for its Messengers and Player choices: (title, address).
+pub fn setup_web_panels(setup: &Value) -> Vec<(&'static str, &'static str)> {
+    let chosen = |tool: &str| setup["preset"] == "gx" && setup["sidebarTools"].as_array().is_some_and(|l| l.iter().any(|v| v == tool));
+    let mut out = vec![];
+    if chosen("messengers") {
+        out.extend([("WhatsApp", "https://web.whatsapp.com/"), ("Telegram", "https://web.telegram.org/"), ("Messenger", "https://www.messenger.com/"), ("Discord", "https://discord.com/app")]);
+    }
+    if chosen("player") {
+        out.extend([("Spotify", "https://open.spotify.com/"), ("YouTube Music", "https://music.youtube.com/")]);
+    }
+    out
+}
+/// Filter lists the chosen browser's blocking step subscribes: Brave's Shields,
+/// Vivaldi's and Opera's blockers all build on EasyList for ads and EasyPrivacy for trackers.
+pub fn setup_filter_lists(setup: &Value) -> Vec<&'static str> {
+    if !["brave", "vivaldi", "gx"].contains(&setup["preset"].as_str().unwrap_or("")) || setup["blockTrackers"] == false {
+        return vec![];
+    }
+    if setup["blockAds"] == true { vec!["easylist", "easyprivacy"] } else { vec!["easyprivacy"] }
+}
+/// Opera GX's named color themes, applied as a custom accent.
+pub const GX_THEMES: &[(&str, &str)] = &[
+    ("GX Classic", "fa1e4e"),
+    ("Ultraviolet", "8f44fd"),
+    ("Hackerman", "1ed760"),
+    ("Lambda", "ff6a00"),
+    ("Frutti di mare", "1ec8e6"),
+    ("Rose quartz", "ff6fa8"),
+];
+/// Named GX and Vivaldi themes with their window colors:
+/// (name, accent, color mode, window surface, text). An empty surface keeps the mode's own.
+pub const THEME_PACKS: &[(&str, &str, &str, &str, &str)] = &[
+    ("GX Classic", "fa1e4e", "dark", "1c1420", "f3edf2"),
+    ("Ultraviolet", "8f44fd", "dark", "16112a", "eee9ff"),
+    ("Hackerman", "1ed760", "dark", "0d1910", "e3f4e7"),
+    ("Lambda", "ff6a00", "dark", "1c140e", "f6ede6"),
+    ("Frutti di mare", "1ec8e6", "dark", "0e191e", "e5f4f8"),
+    ("Rose quartz", "ff6fa8", "dark", "20141c", "f8eaf1"),
+    ("Vivaldi", "ef3939", "light", "", ""),
+    ("Blueprint", "4a90d9", "dark", "1b2633", "e1e8f0"),
+    ("Subtle", "6a7f99", "light", "eceff3", "1e2733"),
+];
+/// Applies a named theme's accent, mode and window colors.
+pub fn apply_theme_pack(theme: &mut Value, name: &str) -> bool {
+    let Some(pack) = THEME_PACKS.iter().find(|p| p.0 == name) else { return false };
+    theme["accentHex"] = json!(pack.1);
+    theme["colorMode"] = json!(pack.2);
+    theme["surfaceHex"] = if pack.3.is_empty() { Value::Null } else { json!(pack.3) };
+    theme["textHex"] = if pack.4.is_empty() { Value::Null } else { json!(pack.4) };
+    theme["themePack"] = json!(pack.0);
+    true
+}
+/// Vivaldi's bundled themes: (id, label, color mode, accent hex).
+pub const VIVALDI_THEMES: &[(&str, &str, &str, &str)] = &[
+    ("vivaldi", "Vivaldi", "light", "ef3939"),
+    ("dark", "Dark", "dark", "ef3939"),
+    ("blueprint", "Blueprint", "dark", "4a90d9"),
+    ("subtle", "Subtle", "light", "6a7f99"),
+    ("system", "Match system", "system", "ef3939"),
+];
+
+/// The configuration a finished setup applies, shared by the macOS host and tests.
+pub fn setup_configuration(setup: &Value) -> Value {
+    let id = setup["preset"].as_str().filter(|p| PRESETS.iter().any(|x| x.0 == *p)).unwrap_or("neutrino");
+    let mut c = preset(id).unwrap_or_default();
+    if let Some(accent) = setup["accent"].as_str().filter(|a| ["purple", "blue", "teal", "orange", "pink"].contains(a)) {
+        c["theme"]["accent"] = json!(accent);
+    }
+    if let Some(mode) = setup["appearance"].as_str().filter(|m| ["system", "light", "dark"].contains(m)) {
+        c["theme"]["colorMode"] = json!(mode);
+    }
+    if let Some(tabs) = setup["layout"].as_str().filter(|t| ["leading", "trailing", "top", "bottom"].contains(t)) {
+        c["layout"]["tabs"] = json!(tabs);
+    }
+    if let Some(hex_value) = setup["accentHex"].as_str().filter(|h| hex(h)) {
+        c["theme"]["accentHex"] = json!(hex_value.trim_start_matches('#'));
+    }
+    // A GX color theme in the dark appearance, or a Vivaldi theme, also tints the window.
+    let pack = match id {
+        "gx" if setup["appearance"].as_str() != Some("light") => GX_THEMES.iter().find(|t| setup["accentHex"].as_str() == Some(t.1)).map(|t| t.0),
+        "vivaldi" => VIVALDI_THEMES.iter().find(|t| setup["theme"].as_str() == Some(t.0)).map(|t| t.1),
+        _ => None,
+    };
+    if let Some(name) = pack {
+        apply_theme_pack(&mut c["theme"], name);
+    }
+    if id == "gx" {
+        c["theme"]["sounds"] = json!(setup["sounds"].as_bool().unwrap_or(true));
+        // The sidebar shows the panels chosen in setup; messengers and the player become web panels.
+        let chosen: Vec<&str> = SIDEBAR_TOOLS.iter().map(|t| t.0).filter(|t| !["messengers", "player"].contains(t) && setup["sidebarTools"].as_array().is_some_and(|l| l.iter().any(|v| v == t))).collect();
+        c["layout"]["panelItems"] = if chosen.is_empty() { json!(["none"]) } else { json!(chosen) };
+    }
+    if id == "vivaldi" {
+        let edition = setup["edition"].as_str().unwrap_or("classic");
+        c["layout"]["statusBar"] = json!(edition != "essentials");
+        c["layout"]["panelBar"] = json!(edition != "essentials");
+        c["layout"]["bookmarksBar"] = json!(edition == "full");
+        c["layout"]["pageTools"] = json!(if edition == "full" { "toolbar" } else { "menu" });
+    }
+    c["theme"] = normalize_theme(c["theme"].clone());
+    c["layout"] = normalize_layout(c["layout"].clone());
+    c
+}
 
 pub fn preset(id: &str) -> Option<Value> {
     if !PRESETS.iter().any(|p| p.0 == id) {
         return None;
     }
-    let horizontal = matches!(id, "chrome" | "safari" | "brave");
+    let horizontal = matches!(id, "chrome" | "safari" | "brave" | "gx" | "vivaldi");
     let mut config = json!({
         "theme":{"design":"graphite","colorMode":"dark","accent":"purple","density":"comfortable","cornerRadius":8.,"transparency":false,"reducedMotion":false,"iconPack":"outline","iconStroke":1.7,"preset":id},
         "layout":{"tabs":if horizontal{"top"}else{"leading"},"navigation":"top","sidebar":"trailing","sidebarWidth":300.,"tabsWidth":248.,"bookmarksBar":id=="chrome","statusBar":false,"treeTabs":false}
@@ -44,12 +188,23 @@ pub fn preset(id: &str) -> Option<Value> {
         }
         "brave" => {
             config["theme"]["accent"] = json!("orange");
+            // Brave's sidebar: bookmarks, reading list and history beside the page.
+            config["layout"]["panelBar"] = json!(true);
+            config["layout"]["panelItems"] = json!(["bookmarks", "reading", "history"]);
         }
         "gx" => {
             config["theme"]["accent"] = json!("pink");
+            config["theme"]["accentHex"] = json!("fa1e4e");
             config["theme"]["iconPack"] = json!("precision");
             config["theme"]["cornerRadius"] = json!(4.);
-            config["layout"]["secondaryPanel"] = json!("resources");
+            config["layout"]["panelBar"] = json!(true);
+        }
+        "vivaldi" => {
+            config["theme"]["colorMode"] = json!("system");
+            config["theme"]["accentHex"] = json!("ef3939");
+            config["theme"]["cornerRadius"] = json!(6.);
+            config["layout"]["panelBar"] = json!(true);
+            config["layout"]["statusBar"] = json!(true);
         }
         _ => {}
     }
@@ -85,6 +240,9 @@ pub fn normalize_theme(mut t: Value) -> Value {
             t[key] = Value::Null;
         }
     }
+    if t["themePack"].as_str().is_some_and(|v| !THEME_PACKS.iter().any(|p| p.0 == v)) {
+        t["themePack"] = Value::Null;
+    }
     if t["surfaceHex"].is_null() != t["textHex"].is_null() {
         t["surfaceHex"] = Value::Null;
         t["textHex"] = Value::Null;
@@ -118,6 +276,9 @@ pub fn normalize_layout(mut l: Value) -> Value {
     if l["treeTabs"] == true && matches!(l["tabs"].as_str(), Some("top" | "bottom")) {
         l["tabs"] = json!("leading");
     }
+    if l["pageTools"].as_str().is_some_and(|v| !["menu", "toolbar"].contains(&v)) {
+        l["pageTools"] = Value::Null;
+    }
     if l["secondaryPanel"]
         .as_str()
         .is_some_and(|v| !["bookmarks", "history", "downloads", "notes", "resources"].contains(&v))
@@ -135,4 +296,20 @@ pub fn normalize_layout(mut l: Value) -> Value {
         components.truncate(32);
     }
     l
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn setup_themes_tint_the_window_as_their_browsers_do() {
+        // A GX color in the dark appearance tints the window; in light it is only the accent.
+        let dark = setup_configuration(&json!({"preset":"gx","accentHex":"8f44fd","appearance":"dark"}));
+        assert_eq!(dark["theme"]["surfaceHex"], "16112a");
+        let light = setup_configuration(&json!({"preset":"gx","accentHex":"8f44fd","appearance":"light"}));
+        assert!(light["theme"]["surfaceHex"].is_null() && light["theme"]["accentHex"] == "8f44fd");
+        let blueprint = setup_configuration(&json!({"preset":"vivaldi","theme":"blueprint","appearance":"dark","accentHex":"4a90d9"}));
+        assert_eq!(blueprint["theme"]["surfaceHex"], "1b2633");
+        assert!(normalize_theme(json!({"themePack":"Nope"}))["themePack"].is_null());
+    }
 }

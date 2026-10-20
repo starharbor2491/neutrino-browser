@@ -68,6 +68,36 @@ import CSQLite
     session.normalize()
     #expect(session.tabs[9].parentID == nil)
 }
+@Test func chatStreamReadsServerSentPieces() {
+    #expect(ChatStream.event(#"data: {"choices":[{"delta":{"content":"Hel"}}]}"#) == .text("Hel"))
+    #expect(ChatStream.event(#"data:{"choices":[{"delta":{"role":"assistant"}}]}"#) == .ignored)
+    #expect(ChatStream.event("data: [DONE]") == .done)
+    #expect(ChatStream.event(": keep-alive") == .ignored)
+    #expect(ChatStream.event(#"data: {"error":{"message":"Rate limited"}}"#) == .failed("Rate limited"))
+    #expect(ChatStream.event("data: not json") == .ignored)
+    #expect(ChatStream.text(of: "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" there\"}}]}\ndata: [DONE]\n") == "Hi there")
+    #expect(ChatStream.text(of: "{\"choices\":[]}") == nil)
+}
+@Test func splitTilesUpToFourPagesAndShrinksAsTheyClose() throws {
+    let tabs = (0..<5).map { _ in BrowserTab() }
+    var session = WindowSession(profileID: UUID(), tabs: tabs)
+    session.enableSplit()
+    let three = try #require(session.split?.adding(tabs[2].id))
+    #expect(three.panes == [tabs[0].id, tabs[1].id, tabs[2].id])
+    #expect(three.adding(tabs[1].id) == nil)
+    let four = try #require(three.adding(tabs[3].id))
+    #expect(four.adding(tabs[4].id) == nil)
+    session.split = four
+    // Selecting a tab outside the tiles shows it in the selected tile; the others stay.
+    session.selectTab(tabs[3].id); session.selectTab(tabs[4].id)
+    #expect(session.split?.panes == [tabs[0].id, tabs[1].id, tabs[2].id, tabs[4].id])
+    let restored = try JSONDecoder().decode(WindowSession.self, from: JSONEncoder().encode(session))
+    #expect(restored == session)
+    session.tabs.removeAll { $0.id == tabs[1].id }; session.normalize()
+    #expect(session.split?.panes == [tabs[0].id, tabs[2].id, tabs[4].id])
+    #expect(session.split?.removing(tabs[0].id)?.panes == [tabs[2].id, tabs[4].id])
+    #expect(TabSplit(first: tabs[0].id, second: tabs[2].id).removing(tabs[0].id) == nil)
+}
 @Test func splitSelectionReplacesOnlyActivePaneAndRepairsMissingTabs() throws {
     let a = BrowserTab(), b = BrowserTab(), c = BrowserTab()
     var session = WindowSession(profileID: UUID(), tabs: [a, b, c])

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import AppKit
+import CryptoKit
 import SwiftUI
 @preconcurrency import WebKit
 import NeutrinoCore
@@ -26,7 +27,61 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     private var blockingRuleList: WKContentRuleList?
     private var disposed = false
     private var failedNavigationURL: URL?
+    /// An http address this tab tried as https first; it falls back if https fails.
+    private var pendingUpgrade: (secure: URL, original: URL)?
+    private var insecureHosts = Set<String>()
     private let startPageURL = URL(string: "about:blank#neutrino-start-" + UUID().uuidString)!
+    private var credentialCaptureInstalled = false
+    private var fingerprintProtectionInstalled = false
+    private static let fingerprintControllers = NSHashTable<WKUserContentController>.weakObjects()
+    override func installFingerprintProtection(_ source: String) {
+        guard !fingerprintProtectionInstalled, !disposed else { return }
+        fingerprintProtectionInstalled = true
+        // A popup shares its opener's content controller, which may already have the script.
+        let controller = webView.configuration.userContentController
+        guard !Self.fingerprintControllers.contains(controller) else { return }
+        Self.fingerprintControllers.add(controller)
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    }
+    /// Sign-ins are reported from a content world the page's own scripts can't reach.
+    override func installCredentialCapture() {
+        guard !credentialCaptureInstalled, !disposed, let source = PageScript.source("credentialCapture") else { return }
+        credentialCaptureInstalled = true
+        CredentialMessages.tabs.setObject(self, forKey: webView)
+        // A popup shares its opener's content controller, which may already report sign-ins.
+        let controller = webView.configuration.userContentController
+        guard !CredentialMessages.controllers.contains(controller) else { return }
+        CredentialMessages.controllers.add(controller)
+        let world = WKContentWorld.world(name: "org.neutrino.passwords")
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
+        controller.add(CredentialMessages(), contentWorld: world, name: "neutrinoCredential")
+    }
+    private var gestureCaptureInstalled = false
+    /// Gestures are reported from a content world the page's own scripts can't reach.
+    override func installGestureCapture() {
+        guard !gestureCaptureInstalled, !disposed, let source = PageScript.source("gestures") else { return }
+        gestureCaptureInstalled = true
+        GestureMessages.tabs.setObject(self, forKey: webView)
+        let world = WKContentWorld.world(name: "org.neutrino.gestures")
+        // The page already showing gets the script now; later pages get it from the user script.
+        webView.evaluateJavaScript(source, in: nil, in: world) { _ in }
+        let controller = webView.configuration.userContentController
+        guard !GestureMessages.controllers.contains(controller) else { return }
+        GestureMessages.controllers.add(controller)
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
+        controller.add(GestureMessages(), contentWorld: world, name: "neutrinoGesture")
+    }
+    fileprivate func receiveGesture(_ message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, message.webView === webView, let shape = message.body as? String,
+              Self.validGesture(shape) else { return }
+        onGesture?(shape)
+    }
+    fileprivate func receiveCredential(_ message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, message.webView === webView, let body = message.body as? [String: Any],
+              let origin = body["origin"] as? String, let username = body["username"] as? String, let password = body["password"] as? String,
+              !password.isEmpty, let url = webView.url, (try? LocalCredential.origin(for: url)) == origin else { return }
+        onCredential?(origin, String(username.prefix(500)), String(password.prefix(8192)))
+    }
     init(dataStore: WKWebsiteDataStore, downloads: DownloadCenter, profileID: UUID, configuration: WKWebViewConfiguration? = nil) {
         let config = configuration ?? WKWebViewConfiguration()
         if configuration == nil { config.websiteDataStore = dataStore }
@@ -76,29 +131,65 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
             if let pendingLoadURL { load(pendingLoadURL) }
             return
         }
-        guard let rules = try? ContentBlocking.webKitRules() else { return }
+        // Subscribed lists WebKit couldn't take are left out, so browsing never stops on them.
+        let allSubscribed = blockingSubscribed
+        var subscribed = RuleListCache.usable(allSubscribed)
+        var source = RuleListCache.source(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom, subscribed: subscribed)
+        if source == nil, !subscribed.isEmpty {
+            RuleListCache.reject(allSubscribed); subscribed = []
+            source = RuleListCache.source(ads: blockAds, exceptions: blockingExceptions, custom: blockingCustom, subscribed: [])
+        }
+        guard let (identifier, rules) = source else {
+            blockingReady = false; compilingRules = false
+            onNotice?("Content blocking could not load.")
+            if let url = pendingLoadURL {
+                failedNavigationURL = url; pendingLoadURL = nil; loading = false
+                errorMessage = "Blocking rules could not load. Retry or change blocking in Settings."; onChange?(false)
+            }
+            return
+        }
+        if let compiled = RuleListCache.compiled[identifier] {
+            if let previous = blockingRuleList, previous !== compiled { controller.remove(previous) }
+            if blockingRuleList !== compiled { controller.add(compiled) }
+            blockingRuleList = compiled; blockingReady = true; compilingRules = false
+            if let pendingLoadURL { load(pendingLoadURL) }
+            return
+        }
         blockingReady = blockingRuleList != nil; compilingRules = true
-        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "org.neutrino.blocking.v1", encodedContentRuleList: rules) { [weak self] list, error in
+        let includesSubscribed = !subscribed.isEmpty
+        let finish: @MainActor (WKContentRuleList?, (any Error)?) -> Void = { [weak self] list, error in
+            guard let self, !self.disposed, self.blockingEnabled, self.blockingRevision == revision else { return }
+            self.compilingRules = false
+            if let list {
+                RuleListCache.compiled = [identifier: list]
+                let controller = self.webView.configuration.userContentController
+                if let previous = self.blockingRuleList { controller.remove(previous) }
+                controller.add(list); self.blockingRuleList = list; self.blockingReady = true
+                if let url = self.pendingLoadURL { self.load(url) }
+            } else if includesSubscribed {
+                RuleListCache.reject(allSubscribed)
+                self.onNotice?("WebKit couldn’t load your subscribed filter lists, so WebKit tabs use the built-in blocking for now.")
+                self.updateBlockingPolicy()
+            } else {
+                self.onNotice?(error?.localizedDescription ?? "Content blocking could not load.")
+                if let url = self.pendingLoadURL {
+                    self.failedNavigationURL = url; self.pendingLoadURL = nil; self.loading = false
+                    self.errorMessage = "Blocking rules could not load. Retry or change blocking in Settings."; self.onChange?(false)
+                }
+            }
+        }
+        // A list compiled earlier for the same rules is reused, even after relaunch.
+        WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: identifier) { list, _ in
             Task { @MainActor in
-                guard let self, !self.disposed, self.blockingEnabled, self.blockingRevision == revision else { return }
-                self.compilingRules = false
-                if let list {
-                    let controller = self.webView.configuration.userContentController
-                    if let previous = self.blockingRuleList { controller.remove(previous) }
-                    controller.add(list); self.blockingRuleList = list; self.blockingReady = true
-                    if let url = self.pendingLoadURL { self.load(url) }
-                } else {
-                    self.onNotice?(error?.localizedDescription ?? "Content blocking could not load.")
-                    if let url = self.pendingLoadURL {
-                        self.failedNavigationURL = url; self.pendingLoadURL = nil; self.loading = false
-                        self.errorMessage = "Blocking rules could not load. Retry or change blocking in Settings."; self.onChange?(false)
-                    }
+                if let list { finish(list, nil); return }
+                WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { list, error in
+                    Task { @MainActor in finish(list, error); RuleListCache.removeStale(keeping: identifier) }
                 }
             }
         }
     }
-    private func extractText(_ expression: String) async throws -> String {
-        let id=UUID(), request=WebPageSnapshotRequest()
+    private func extractText(_ expression: String, timeout: Duration = .seconds(8)) async throws -> String {
+        let id=UUID(), request=WebPageSnapshotRequest(timeout: timeout)
         pageSnapshots[id]=request
         defer {pageSnapshots.removeValue(forKey:id)}
         return try await request.capture { [weak self] completion in
@@ -107,9 +198,56 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         }
     }
     override func pageText() async throws -> String {try await extractText("(document.body?.innerText ?? '').slice(0, 40000)")}
+    // WebKit runs evaluated scripts as a user action, which picture in picture needs.
+    override func runPageScript(_ source: String, userGesture: Bool = false, wait: Duration? = nil) async throws -> String { try await extractText(source, timeout: wait ?? .seconds(8)) }
+    override func printPage() {
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.view?.frame = webView.bounds
+        if let window = webView.window { operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil) }
+        else { operation.run() }
+    }
+    override func pagePDF() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.createPDF(configuration: WKPDFConfiguration()) { result in continuation.resume(with: result) }
+        }
+    }
+    override func pageArchive() async throws -> (data: Data, type: String) {
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            webView.createWebArchiveData { result in continuation.resume(with: result) }
+        }
+        return (data, "webarchive")
+    }
+    override func fullPageCapture() async throws -> (data: Data, type: String) { (try await pagePDF(), "pdf") }
+    override func showDeveloperTools() {
+        webView.isInspectable = true
+        let preferences = webView.configuration.preferences
+        if preferences.responds(to: NSSelectorFromString("_setDeveloperExtrasEnabled:")) { preferences.setValue(true, forKey: "developerExtrasEnabled") }
+        if webView.responds(to: NSSelectorFromString("_inspector")), let inspector = webView.value(forKey: "_inspector") as? NSObject,
+           inspector.responds(to: NSSelectorFromString("show")) {
+            inspector.perform(NSSelectorFromString("show"))
+        } else { onNotice?("Right-click the page and choose Inspect Element.") }
+    }
+    override func navigationEntries(back: Bool) async -> [[String: Any]] {
+        let list = back ? Array(webView.backForwardList.backList.reversed()) : webView.backForwardList.forwardList
+        return list.prefix(15).enumerated().map { index, item in
+            ["offset": back ? -(index + 1) : index + 1, "title": item.title ?? "", "url": item.url.absoluteString]
+        }
+    }
+    override func goToHistory(offset: Int) {
+        guard let item = webView.backForwardList.item(at: offset) else { return }
+        showingStartPage = false; failedNavigationURL = nil; webView.go(to: item)
+    }
+    override func resourceUsage() async -> (memoryMB: Double, cpuSeconds: Double)? {
+        guard webView.responds(to: NSSelectorFromString("_webProcessIdentifier")),
+              let pid = (webView.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0 else { return nil }
+        return ProcessUsage.sample(pid)
+    }
     override func selectedText() async throws -> String {try await extractText("(window.getSelection()?.toString() ?? '').slice(0, 8000)")}
     override func fillCredential(_ credential: LocalCredential) async throws {
         _ = try await webView.callAsyncJavaScript(credential.autofillScript, arguments: [:], in: nil, contentWorld: .defaultClient)
+    }
+    override func fillCredentialOnUse(_ credential: LocalCredential) async throws {
+        _ = try await webView.callAsyncJavaScript(credential.autofillOnUseScript, arguments: [:], in: nil, contentWorld: .defaultClient)
     }
     override func reload() {
         if let failedNavigationURL { load(failedNavigationURL) }
@@ -131,22 +269,56 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         onChange?(finished)
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        failedNavigationURL = nil
+        failedNavigationURL = nil; estimatedBlocked = nil
         didStartNavigation()
         imageSnapshots.values.forEach { $0.cancel() }; imageSnapshots.removeAll()
         pageSnapshots.values.forEach { $0.cancel() }; pageSnapshots.removeAll()
         errorMessage = nil; loading = true; refresh(false)
     }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        failedNavigationURL = nil
+        failedNavigationURL = nil; pendingUpgrade = nil
         // Native history gestures also leave Home without using our commands.
         if webView.url != startPageURL { showingStartPage = false }
         refresh(false)
     }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; refresh(true) }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; refresh(true); onPageLoaded?(); estimateBlocked() }
+    /// Resources from blocked domains still named on the finished page: WebKit's rule lists don't report what they block.
+    private var estimatedBlocked: Int?
+    private var estimatedBlockedTotal = 0
+    override var blockedOnPage: Int? { estimatedBlocked }
+    override var blockedTotal: Int? { blockingEnabled ? estimatedBlockedTotal : nil }
+    private func estimateBlocked() {
+        estimatedBlocked = nil
+        guard blockingEnabled, !ContentBlocking.isException(url?.host, in: blockingExceptions),
+              let script = PageScript.source("resourceHosts") else { return }
+        let page = url
+        let blocked = RuleListCache.blockedDomains(ads: blockAds, custom: blockingCustom, subscribed: RuleListCache.usable(blockingSubscribed))
+        Task { @MainActor [weak self] in
+            guard let value = try? await self?.runPageScript(script), let data = value.data(using: .utf8),
+                  let hosts = try? JSONSerialization.jsonObject(with: data) as? [String: Int], let self, self.url == page else { return }
+            // A host counts when it or a parent domain is blocked, as the rules match.
+            let count = hosts.reduce(0) { total, entry in
+                var host = Substring(entry.key)
+                while !host.isEmpty {
+                    if blocked.contains(String(host)) { return total + entry.value }
+                    guard let dot = host.firstIndex(of: ".") else { break }
+                    host = host[host.index(after: dot)...]
+                }
+                return total
+            }
+            self.estimatedBlocked = count; self.estimatedBlockedTotal += count; self.onChange?(false)
+        }
+    }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let failure = error as NSError
+        // The secure version of an http site failed: load the site as it was asked for.
+        if let upgrade = pendingUpgrade, failure.code != NSURLErrorCancelled,
+           (failure.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.host == upgrade.secure.host {
+            pendingUpgrade = nil
+            if let host = upgrade.original.host { insecureHosts.insert(host) }
+            webView.load(URLRequest(url: upgrade.original)); return
+        }
         // WebKit restores the previous committed URL after a provisional error.
         // Retain the attempted website so the address and Reload still target it.
         if failure.code != NSURLErrorCancelled, !showingStartPage,
@@ -165,17 +337,17 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         pageSnapshots.values.forEach { $0.cancel() }; pageSnapshots.removeAll()
         loading = false; errorMessage = "The website's process stopped. Reload the page to continue."; refresh(false)
     }
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if url == startPageURL || url.absoluteString == "about:blank" { decisionHandler(.allow); return }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        guard let url = navigationAction.request.url else { decisionHandler(.cancel, preferences); return }
+        if url == startPageURL || url.absoluteString == "about:blank" { decisionHandler(.allow, preferences); return }
         // Websites can generate embedded documents without changing the browser's
         // top-level address or gaining access to local files.
         if navigationAction.targetFrame?.isMainFrame == false,
            url.scheme?.lowercased() == "data" || url.absoluteString.components(separatedBy: "#").first == "about:srcdoc" {
-            decisionHandler(.allow); return
+            decisionHandler(.allow, preferences); return
         }
         if url.scheme?.lowercased() == "blob" {
-            decisionHandler(navigationAction.shouldPerformDownload ? (downloads.acceptsDownloads(for: profileID) ? .download : .cancel) : .allow); return
+            decisionHandler(navigationAction.shouldPerformDownload ? (downloads.acceptsDownloads(for: profileID) ? .download : .cancel) : .allow, preferences); return
         }
         guard AddressResolver.isWebURL(url) else {
             // Only a deliberate click may hand off common non-web protocols.
@@ -185,10 +357,37 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
                 alert.addButton(withTitle: "Open app"); alert.addButton(withTitle: "Cancel")
                 if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
             }
-            decisionHandler(.cancel); return
+            decisionHandler(.cancel, preferences); return
         }
-        if navigationAction.shouldPerformDownload { decisionHandler(downloads.acceptsDownloads(for: profileID) ? .download : .cancel) }
-        else { decisionHandler(.allow) }
+        if navigationAction.shouldPerformDownload { decisionHandler(downloads.acceptsDownloads(for: profileID) ? .download : .cancel, preferences); return }
+        if navigationAction.targetFrame?.isMainFrame == true {
+            if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.shift), onPeek?(url) == true {
+                decisionHandler(.cancel, preferences); return
+            }
+            if let replacement = rewrittenAddress(url) {
+                decisionHandler(.cancel, preferences)
+                webView.load(URLRequest(url: replacement)); return
+            }
+            if let site = ContentBlocking.site(url) { preferences.allowsContentJavaScript = scriptsBlocked?(site) != true }
+        }
+        decisionHandler(.allow, preferences)
+    }
+    /// The address to load instead: without tracking parameters, and https for http sites.
+    private func rewrittenAddress(_ url: URL) -> URL? {
+        var next = url
+        if stripsTracking, let stripped = ContentBlocking.strippingTracking(next) { next = stripped }
+        // A site that redirects its https address back to http only works over http.
+        if next.scheme == "http", let host = next.host, let pending = pendingUpgrade, pending.secure.host == host {
+            insecureHosts.insert(host); pendingUpgrade = nil
+        }
+        if upgradesToHTTPS, next.scheme == "http", let host = next.host, !insecureHosts.contains(host),
+           host.contains("."), !host.hasSuffix(".local"), host.rangeOfCharacter(from: CharacterSet(charactersIn: "0123456789.:").inverted) != nil,
+           var components = URLComponents(url: next, resolvingAgainstBaseURL: false) {
+            components.scheme = "https"
+            if components.port == 80 { components.port = nil }
+            if let secure = components.url { pendingUpgrade = (secure, next); next = secure }
+        }
+        return next == url ? nil : next
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
         decisionHandler(navigationResponse.canShowMIMEType ? .allow : (downloads.acceptsDownloads(for: profileID) ? .download : .cancel))
@@ -231,10 +430,18 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
     }
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) {
         guard origin.protocol == "https" else { decisionHandler(.deny); return }
-        let alert = NSAlert(); alert.messageText = "Allow \(origin.host) to use your camera or microphone?"
+        let site = origin.host.hasPrefix("www.") ? String(origin.host.dropFirst(4)) : origin.host
+        let kinds = type == .camera ? ["camera"] : type == .microphone ? ["microphone"] : ["camera", "microphone"]
+        let saved = kinds.map { sitePermission?(site, $0) }
+        if saved.allSatisfy({ $0 == "allow" }) { decisionHandler(.grant); return }
+        if saved.contains(where: { $0 == "block" }) { decisionHandler(.deny); return }
+        let alert = NSAlert(); alert.messageText = "Allow \(origin.host) to use your \(kinds.count == 2 ? "camera and microphone" : kinds[0])?"
         alert.informativeText = "This permission applies to this website. macOS may also ask for permission."
+        alert.showsSuppressionButton = true; alert.suppressionButton?.title = "Remember for this site"
         alert.addButton(withTitle: "Don't allow"); alert.addButton(withTitle: "Allow")
-        decisionHandler(alert.runModal() == .alertSecondButtonReturn ? .grant : .deny)
+        let allowed = alert.runModal() == .alertSecondButtonReturn
+        if alert.suppressionButton?.state == .on { for kind in kinds { onSitePermission?(site, kind, allowed ? "allow" : "block") } }
+        decisionHandler(allowed ? .grant : .deny)
     }
     override func capturePNG() async throws -> Data {
         let id = UUID(), request = WebImageSnapshotRequest()
@@ -316,7 +523,23 @@ final class EngineViewContainer: NSView {
     var isPreviewing = false {
         didSet { setAccessibilityHidden(isPreviewing) }
     }
+    /// Where the interface draws over the page (a sidebar expanded above it), in this
+    /// view's coordinates. That part is masked out, and clicks there reach the interface.
+    var uncovered: NSRect = .zero {
+        didSet { if uncovered != oldValue { updateMask() } }
+    }
+    private func updateMask() {
+        guard let layer else { return }
+        let hole = uncovered.intersection(bounds)
+        guard !hole.isEmpty else { layer.mask = nil; return }
+        let mask = CAShapeLayer()
+        let path = CGMutablePath()
+        path.addRect(bounds); path.addRect(hole)
+        mask.path = path; mask.fillRule = .evenOdd; mask.frame = bounds
+        layer.mask = mask
+    }
     override func hitTest(_ point: NSPoint) -> NSView? {
+        if !uncovered.isEmpty, let superview, uncovered.contains(convert(point, from: superview)) { return nil }
         let hit = super.hitTest(point)
         return isPreviewing && hit != nil ? self : hit
     }
@@ -337,6 +560,7 @@ final class EngineViewContainer: NSView {
     override func layout() {
         super.layout()
         if let page, page.superview === self { page.frame = bounds }
+        updateMask()
     }
     func unmount() {
         if let page, page.superview === self { page.removeFromSuperview() }
@@ -375,5 +599,68 @@ private final class WebImageSnapshotRequest {
             continuation.resume(throwing: ValidationError("The page could not be captured within the 32 MB limit.")); return
         }
         continuation.resume(returning: png)
+    }
+}
+
+/// Compiled WebKit rule lists, shared by every tab. The store keeps them across
+/// launches under an identifier derived from their content.
+@MainActor
+enum RuleListCache {
+    private static var lastKey: [String]?
+    private static var last: (identifier: String, source: String)?
+    static var compiled: [String: WKContentRuleList] = [:]
+    /// Subscribed rules WebKit couldn't compile; left out until the lists change.
+    private static var rejectedSubscribed: Int?
+    private static var domainSet: (key: [Int], set: Set<String>)?
+    /// Every blocked domain, subscribed lists included, for counting what a page tried to load.
+    static func blockedDomains(ads: Bool, custom: [String], subscribed: [String]) -> Set<String> {
+        let key = [ads ? 1 : 0, custom.hashValue, subscribed.count, subscribed.hashValue]
+        if let domainSet, domainSet.key == key { return domainSet.set }
+        let set = Set(ContentBlocking.domains(ads: ads, custom: custom, subscribed: subscribed))
+        domainSet = (key, set)
+        return set
+    }
+    static func usable(_ subscribed: [String]) -> [String] { !subscribed.isEmpty && rejectedSubscribed == subscribed.hashValue ? [] : subscribed }
+    static func reject(_ subscribed: [String]) { rejectedSubscribed = subscribed.hashValue }
+    static func source(ads: Bool, exceptions: [String], custom: [String], subscribed: [String]) -> (String, String)? {
+        let key = [ads ? "ads" : "trackers", exceptions.joined(separator: ","), custom.joined(separator: ","), String(subscribed.count), String(subscribed.hashValue)]
+        if key == lastKey, let last { return (last.identifier, last.source) }
+        guard let rules = try? ContentBlocking.webKitRules(ads: ads, exceptions: exceptions, custom: custom, subscribed: Array(subscribed.prefix(130_000))) else { return nil }
+        let digest = SHA256.hash(data: Data(rules.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        let identifier = "org.neutrino.blocking." + digest
+        lastKey = key; last = (identifier, rules)
+        return (identifier, rules)
+    }
+    /// Removes lists compiled for rules no longer in use.
+    static func removeStale(keeping identifier: String) {
+        WKContentRuleListStore.default().getAvailableContentRuleListIdentifiers { ids in
+            let stale = (ids ?? []).filter { $0.hasPrefix("org.neutrino.blocking.") && $0 != identifier } + ["org.neutrino.blocking.v1"]
+            Task { @MainActor in
+                for id in stale { WKContentRuleListStore.default().removeContentRuleList(forIdentifier: id) { _ in } }
+            }
+        }
+    }
+}
+
+/// Forwards sign-in messages without the content controller keeping the tab alive.
+/// Reports sign-ins to the tab whose page sent them; one handler serves each content controller.
+private final class GestureMessages: NSObject, WKScriptMessageHandler {
+    @MainActor static let controllers = NSHashTable<WKUserContentController>.weakObjects()
+    @MainActor static let tabs = NSMapTable<WKWebView, WebTab>.weakToWeakObjects()
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated {
+            guard let webView = message.webView else { return }
+            Self.tabs.object(forKey: webView)?.receiveGesture(message)
+        }
+    }
+}
+private final class CredentialMessages: NSObject, WKScriptMessageHandler {
+    @MainActor static let controllers = NSHashTable<WKUserContentController>.weakObjects()
+    @MainActor static let tabs = NSMapTable<WKWebView, WebTab>.weakToWeakObjects()
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated {
+            guard let webView = message.webView else { return }
+            Self.tabs.object(forKey: webView)?.receiveCredential(message)
+        }
     }
 }

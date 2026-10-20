@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.sessions",
+  "name": "Saved Sessions",
+  "version": 1,
+  "summary": "Save a Space’s open tabs and reopen them later.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

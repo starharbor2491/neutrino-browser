@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.forget-sites",
+  "name": "Forget Me",
+  "version": 1,
+  "summary": "Clear a site’s cookies and storage when its last tab closes.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

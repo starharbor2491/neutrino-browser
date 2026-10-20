@@ -7,7 +7,7 @@ import NeutrinoCore
 @MainActor
 final class BrowserModel: ObservableObject {
     var visibleEngineTabs: [(id: UUID, page: BrowserEngineTab)] {
-        let ids = session.split.map { [$0.first, $0.second] } ?? [session.selectedTabID]
+        let ids = session.split?.panes ?? [session.selectedTabID]
         return ids.map { ($0, webTab($0)) }
     }
     var shellAction: (([String: Any]) -> Void)?
@@ -47,6 +47,8 @@ final class BrowserModel: ObservableObject {
         focusMode = false
     }
     @Published var sheet: BrowserSheet?
+    /// The window's feature host, for engine callbacks such as a submitted sign-in.
+    weak var features: BrowserFeatures?
     private struct ClosedTabContext: Hashable { let profileID: UUID; let spaceID: UUID? }
     private var closedTabStacks: [ClosedTabContext: [BrowserTab]] = [:]
     var closedTabs: [BrowserTab] {
@@ -68,6 +70,9 @@ final class BrowserModel: ObservableObject {
         return webTabs[id]
     }
     private var movedTabPlaceholders: [UUID: BrowserEngineTab] = [:]
+    /// The AMP page each tab last left for its canonical article, so two pages can't bounce.
+    /// AMP pages each tab left for their canonical article, since the last page that wasn't AMP.
+    var deAmped: [UUID: Set<URL>] = [:]
     private var spacePresentations: [UUID: WindowSession] = [:]
     var space: BrowserSpace? { app.library.spaces?.first { $0.id == session.spaceID } }
     var configuration: Configuration { app.previewConfiguration ?? app.library.configuration(for: session.spaceID) }
@@ -105,6 +110,11 @@ final class BrowserModel: ObservableObject {
         }
         address = selectedTab.url?.absoluteString ?? ""
         app.registerWindow(self)
+        if !isPrivate, let pending = app.pendingWindowTab {
+            app.pendingWindowTab = nil
+            if session.spaceID != pending.spaceID { switchSpace(pending.spaceID) }
+            if session.tabs.contains(where: { $0.id == pending.tabID }) { selectTab(pending.tabID); moveLiveTabHere(pending.tabID) }
+        }
     }
     func webTab(_ id: UUID) -> BrowserEngineTab {
         if app.deletingProfileIDs.contains(session.profileID) { return UnavailableEngineTab(engine: selectedTab.engineID ?? .chromium, reason: "This profile is being deleted.") }
@@ -219,12 +229,129 @@ final class BrowserModel: ObservableObject {
             default: break
             }
         }
-        tab.allowPopups = { [weak self] in self?.app.library.preferences.blockPopups == false }
-        tab.blockingEnabled = app.library.preferences.blockTrackers != false
+        tab.allowPopups = { [weak self, weak tab] in
+            guard let self else { return false }
+            let site = ContentBlocking.site(tab?.url)
+            return self.app.library.preferences.blockPopups == false || site.flatMap { self.app.library.preferences.siteSettings?[$0]?.allowPopups } == true
+        }
+        applyPagePolicy(to: tab)
+        tab.onPageLoaded = { [weak self, weak tab] in
+            guard let self, let tab, !self.isClosed else { return }
+            self.pageLoaded(tab, id: id)
+        }
+        applyBlocking(to: tab)
         webTabs[id] = tab
     }
+    /// Per-site choices and privacy settings every engine tab consults.
+    func applyPagePolicy(to tab: BrowserEngineTab) {
+        let preferences = app.library.preferences
+        tab.upgradesToHTTPS = preferences.httpsUpgrade != false
+        tab.stripsTracking = preferences.stripTracking != false
+        tab.scriptsBlocked = { [weak self] site in self?.app.library.preferences.siteSettings?[site]?.blockScripts == true }
+        tab.sitePermission = { [weak self] site, kind in
+            guard let preferences = self?.app.library.preferences else { return nil }
+            let settings = preferences.siteSettings?[site]
+            // The site's own decision first, then the default in Privacy > Permission defaults.
+            let blocked = kind == "camera" ? preferences.blockCamera == true : preferences.blockMicrophone == true
+            return (kind == "camera" ? settings?.camera : settings?.microphone) ?? (blocked ? "block" : nil)
+        }
+        tab.onSitePermission = { [weak self] site, kind, decision in
+            guard let self, !self.isPrivate else { return }
+            var settings = self.app.library.preferences.siteSettings?[site] ?? SiteSettings()
+            if kind == "camera" { settings.camera = decision } else { settings.microphone = decision }
+            self.app.library.preferences.siteSettings = (self.app.library.preferences.siteSettings ?? [:]).merging([site: settings]) { $1 }
+        }
+        tab.onCredential = isPrivate ? nil : { [weak self] origin, username, password in
+            guard let self, !self.isPrivate, self.app.feature("password-manager") else { return }
+            self.features?.offerToSave(origin: origin, username: username, password: password, profileID: self.session.profileID)
+        }
+        tab.onGesture = { [weak self, weak tab] shape in
+            guard let self, let tab, !self.isClosed, self.app.feature("mouse-gestures") else { return }
+            // A gesture drawn on a tiled page acts on that page.
+            if let id = self.webTabs.first(where: { $0.value === tab })?.key, self.session.selectedTabID != id { self.selectTab(id) }
+            self.shellAction?(["op": "gesture", "value": shape])
+        }
+        tab.onPeek = { [weak self] url in
+            guard let self, self.app.feature("peek") else { return false }
+            PeekWindow.show(url, model: self); return true
+        }
+        tab.setPrivacyPreferences(httpsOnly: preferences.httpsUpgrade != false, blockThirdPartyCookies: preferences.blockThirdPartyCookies != false, hideLocalIP: preferences.hideLocalIP != false)
+        tab.setPermissionDefaults(blocked: Set([("camera", preferences.blockCamera), ("microphone", preferences.blockMicrophone),
+                                                ("location", preferences.blockLocation), ("notifications", preferences.blockNotifications)]
+            .filter { $0.1 == true }.map(\.0)))
+        if !isPrivate { tab.setSitePermissions(preferences.siteSettings ?? [:]) }
+        if app.feature("fingerprinting"), let script = FingerprintProtection.script(exceptions: preferences.shieldsDown ?? []) { tab.installFingerprintProtection(script) }
+    }
+    func updatePagePolicies() { webTabs.values.forEach(applyPagePolicy); webTabs.values.forEach { $0.applyScriptPolicy() } }
+
+    // MARK: Sleeping tabs, web panels and tab actions
+
+    /// Engine pages currently loaded in this window.
+    var liveEngineTabs: [(id: UUID, page: BrowserEngineTab)] { webTabs.map { ($0.key, $0.value) } }
+    func liveEngineTab(_ id: UUID) -> BrowserEngineTab? { webTabs[id] }
+    /// Tabs with a page that is not loaded: put to sleep, or not yet opened since launch.
+    var sleepingTabIDs: [UUID] {
+        session.tabs.filter { $0.url != nil && webTabs[$0.id] == nil && (isPrivate || app.tabOwnership.owner(of: $0.id) == nil) }.map(\.id)
+    }
+    /// Unloads a background tab's page. Selecting it again reloads the saved address.
+    func sleepTab(_ id: UUID) {
+        guard !app.finalQuitDataFrozen, id != session.selectedTabID, session.split?.contains(id) != true,
+              let page = webTabs[id], !page.hasActiveDownloads else { return }
+        captureChromiumSessions()
+        if !isPrivate { app.tabOwnership.release(id, from: session.id) }
+        webTabs.removeValue(forKey: id)?.dispose(); tabProfiles.removeValue(forKey: id)
+        objectWillChange.send()
+    }
+    func newTab(after id: UUID) {
+        newTab()
+        let created = session.selectedTabID
+        var tabs = session.tabs
+        guard let from = tabs.firstIndex(where: { $0.id == created }) else { return }
+        let item = tabs.remove(at: from)
+        guard let anchor = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs.insert(item, at: max(anchor + 1, tabs.firstIndex(where: { !$0.pinned }) ?? tabs.count))
+        session.tabs = tabs
+    }
+    func closeTabs(_ ids: [UUID]) {
+        for id in ids where id != session.selectedTabID { closeTab(id) }
+        if ids.contains(session.selectedTabID) { closeTab(session.selectedTabID) }
+    }
+    private var panelTabs: [UUID: BrowserEngineTab] = [:]
+    /// A web panel's page, kept loaded while the window is open. Panels use WebKit
+    /// with the Profile's website data, so their sign-ins persist.
+    func panelTab(_ panel: WebPanel) -> BrowserEngineTab {
+        if let existing = panelTabs[panel.id] { return existing }
+        let store = privateDataStore ?? app.webKitDataStore(profileID: session.profileID)
+        let tab = WebTab(dataStore: store, downloads: downloads, profileID: session.profileID)
+        // Links a panel opens in a new window open as tabs instead.
+        tab.onCreateWindow = { [weak self] _, url in
+            if let url, AddressResolver.isWebURL(url) { self?.newTab(url: url) }
+            return false
+        }
+        tab.allowPopups = { false }
+        applyPagePolicy(to: tab); applyBlocking(to: tab)
+        tab.load(panel.url)
+        panelTabs[panel.id] = tab
+        return tab
+    }
+    /// A WebKit page outside the window's tabs, sharing this window's website data.
+    func makeDetachedWebTab() -> WebTab {
+        let tab = WebTab(dataStore: privateDataStore ?? app.webKitDataStore(profileID: session.profileID), downloads: downloads, profileID: session.profileID)
+        applyPagePolicy(to: tab); applyBlocking(to: tab)
+        tab.onPeek = nil
+        return tab
+    }
+    func reloadPanel(_ id: UUID) { panelTabs[id]?.reload() }
+    func closePanel(_ id: UUID) { panelTabs.removeValue(forKey: id)?.dispose() }
     func updatePopupPolicy() { webTabs.values.forEach { $0.updatePopupPolicy() } }
-    func updateBlockingPolicy() { webTabs.values.forEach { $0.blockingEnabled = app.library.preferences.blockTrackers != false } }
+    func updateBlockingPolicy() { webTabs.values.forEach(applyBlocking); panelTabs.values.forEach(applyBlocking) }
+    private func applyBlocking(to tab: BrowserEngineTab) {
+        tab.blockAds = app.library.preferences.blockAds != false
+        tab.blockingExceptions = app.library.preferences.shieldsDown ?? []
+        tab.blockingCustom = app.library.preferences.customBlockList ?? []
+        tab.blockingSubscribed = app.filterListDomains
+        tab.blockingEnabled = app.library.preferences.blockTrackers != false
+    }
     func navigate(_ input: String) {
         guard !isClosed, !app.finalQuitDataFrozen else { return }
         guard let url = AddressResolver.resolve(input, search: app.library.preferences.search) else {
@@ -326,15 +453,23 @@ final class BrowserModel: ObservableObject {
         webTabs.removeValue(forKey: id)?.dispose()
         tabProfiles.removeValue(forKey: id)
         app.tabOwnership.release(id, from: session.id)
+        defer { forgetSiteIfClosed(closing.url) }
         for i in session.tabs.indices where session.tabs[i].parentID == id { session.tabs[i].parentID = closing.parentID }
-        let otherPane = session.split.map { $0.first == id ? $0.second : $0.first }
-        if session.split?.contains(id) == true { session.split = nil; session.splitSuppressed = true }
+        let otherPane = session.split?.panes.first { $0 != id }
+        if let split = session.split, split.contains(id) {
+            session.split = split.removing(id)
+            if session.split == nil { session.splitSuppressed = true }
+        }
         session.tabs.remove(at: index)
         if session.tabs.isEmpty { session.tabs = [BrowserTab(engineID: profile.engineID ?? .chromium)] }
         if session.selectedTabID == id { selectTab(otherPane ?? session.tabs[min(index, session.tabs.count - 1)].id) }
     }
-    func reopenClosedTab() {
-        guard !app.finalQuitDataFrozen, session.tabs.count < 200, var tab = closedTabs.popLast() else { return }
+    func reopenClosedTab() { reopenClosedTab(at: 0) }
+    /// Reopens a recently closed tab; 0 is the most recent.
+    func reopenClosedTab(at index: Int) {
+        let position = closedTabs.count - 1 - index
+        guard !app.finalQuitDataFrozen, session.tabs.count < 200, closedTabs.indices.contains(position) else { return }
+        var tab = closedTabs.remove(at: position)
         tab.id = UUID(); tab.parentID = nil; tab.collapsed = nil
         if let folder = tab.folderID, space?.folders.contains(where: { $0.id == folder }) != true { tab.folderID = nil }
         if tab.pinned {
@@ -367,7 +502,8 @@ final class BrowserModel: ObservableObject {
     func pinTab(_ id: UUID) {
         guard !app.finalQuitDataFrozen, let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
         session.tabs[index].pinned.toggle()
-        if session.tabs[index].pinned { session.tabs[index].parentID = nil }
+        if session.tabs[index].pinned { session.tabs[index].parentID = nil; session.tabs[index].pinnedURL = session.tabs[index].url }
+        else { session.tabs[index].pinnedURL = nil }
         session.tabs = session.tabs.filter(\.pinned) + session.tabs.filter { !$0.pinned }
     }
     func synchronizeSplit(force: Bool = false) {
@@ -389,12 +525,12 @@ final class BrowserModel: ObservableObject {
         session.split = nil; session.splitSuppressed = true
     }
     func selectOtherPane() {
-        guard let pair = session.split else { return }
-        selectTab(pair.first == session.selectedTabID ? pair.second : pair.first)
+        guard let panes = session.split?.panes, let index = panes.firstIndex(of: session.selectedTabID) else { return }
+        selectTab(panes[(index + 1) % panes.count])
     }
     func updateFocusedTab(_ responder: NSResponder?) {
-        guard let pair = session.split, let view = responder as? NSView else { return }
-        for id in [pair.first, pair.second] where id != session.selectedTabID {
+        guard let split = session.split, let view = responder as? NSView else { return }
+        for id in split.panes where id != session.selectedTabID {
             if let tab = webTabs[id], view === tab.nativeView || view.isDescendant(of: tab.nativeView) {
                 selectTab(id); return
             }
@@ -551,6 +687,7 @@ final class BrowserModel: ObservableObject {
     func disposeEngineTabs() {
         for id in webTabs.keys { app.tabOwnership.release(id, from: session.id) }
         webTabs.values.forEach { $0.dispose() }; webTabs.removeAll(); tabProfiles.removeAll()
+        panelTabs.values.forEach { $0.dispose() }; panelTabs.removeAll()
     }
     func disposeEngineTabs(profileID: UUID) {
         closedTabStacks = closedTabStacks.filter { $0.key.profileID != profileID }
@@ -627,6 +764,35 @@ final class BrowserModel: ObservableObject {
         }
         switchSpace(destination)
         if let live { attach(live, id: id) }
+        selectTab(id)
+    }
+    /// A tab dropped here from another window: it joins this window's Space, and its
+    /// page moves with it. Windows showing the same Space simply hand over the page.
+    func adoptTab(_ id: UUID, from source: BrowserModel) {
+        guard !isPrivate, !isClosed, !app.finalQuitDataFrozen, source !== self, !source.isPrivate,
+              source.session.profileID == session.profileID,
+              let from = source.session.spaceID, let destination = session.spaceID,
+              let fromIndex = app.library.spaces?.firstIndex(where: { $0.id == from }),
+              let toIndex = app.library.spaces?.firstIndex(where: { $0.id == destination }),
+              let descriptor = source.session.tabs.first(where: { $0.id == id }) else { return }
+        guard from != destination else { moveLiveTabHere(id); selectTab(id); return }
+        guard (app.library.spaces?[toIndex].tabs.count ?? 200) < 200 else { app.notice = "This Space is full. Close a tab first."; return }
+        moveLiveTabHere(id)
+        var moved = source.session.tabs.first(where: { $0.id == id }) ?? descriptor
+        moved.parentID = nil; moved.folderID = nil; moved.collapsed = nil
+        // One library transaction, so normalization never sees the tab twice.
+        var library = app.library
+        library.spaces?[fromIndex].tabs.removeAll { $0.id == id }
+        for i in library.spaces![fromIndex].tabs.indices where library.spaces![fromIndex].tabs[i].parentID == id {
+            library.spaces![fromIndex].tabs[i].parentID = descriptor.parentID
+        }
+        if library.spaces![fromIndex].tabs.isEmpty { library.spaces![fromIndex].tabs = [BrowserTab(engineID: profile.engineID ?? .chromium)] }
+        library.spaces?[toIndex].tabs.append(moved)
+        app.library = library
+        for window in app.windows.values.compactMap(\.model) {
+            if window.session.spaceID == from { window.receiveSharedTabs(library.spaces![fromIndex].tabs) }
+            if window.session.spaceID == destination { window.receiveSharedTabs(library.spaces![toIndex].tabs) }
+        }
         selectTab(id)
     }
     func captureChromiumSessions() {

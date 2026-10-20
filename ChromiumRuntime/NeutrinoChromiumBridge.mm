@@ -13,11 +13,15 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include "NeutrinoEngineABI.h"
+#include "NeutrinoTrackingStrip.h"
+#include "NeutrinoFilterMatch.h"
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
+#include "include/cef_cookie.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_client.h"
 #include "include/cef_parser.h"
@@ -282,6 +286,12 @@ class EngineApp final : public CefApp, public CefBrowserProcessHandler {
       if (!features.empty()) features+=",";
       features+="PMLoadingPageVoter";
       command_line->AppendSwitchWithValue("enable-features",features);
+      // Neutrino publishes Now Playing and answers the media keys for both engines;
+      // Chrome's own handler would answer the same key a second time.
+      std::string disabled=command_line->GetSwitchValue("disable-features").ToString();
+      if (!disabled.empty()) disabled+=",";
+      disabled+="HardwareMediaKeyHandling";
+      command_line->AppendSwitchWithValue("disable-features",disabled);
     }
     if (process_type.empty() && diagnostics &&
         [[[NSProcessInfo processInfo] environment] objectForKey:@"NEUTRINO_SMOKE_TEST_EXTENSION_FIXTURE"]) {
@@ -373,6 +383,7 @@ struct Page {
   bool requested_close = false;
   bool navigated = false;
   bool popups = false;
+  bool strip_tracking = false;
   bool awaiting_context = true;
   bool pending_popup = false;
   bool management = false;
@@ -395,6 +406,7 @@ int query_command=0;
 bool reconciling_windows=false;
 Page* Group(Page* page) { return page->group ? page->group : page; }
 bool RefreshActive(Page* group);
+int BlockedCount(Page* page);
 void SetActive(Page* page);
 void FinishEmptyGroup(Page* group);
 void ReconcileWindows();
@@ -444,6 +456,7 @@ void State(Page* page, bool finished = false) {
   value->SetBool("canGoBack", page->browser->CanGoBack());
   value->SetBool("canGoForward", page->browser->CanGoForward());
   value->SetDouble("zoom",std::pow(1.2,page->published_zoom_level));
+  value->SetInt("blocked",BlockedCount(page));
   // A pristine active page may acquire an inactive extension-created sibling.
   // Publish that inventory without turning the untouched blank page into a URL.
   auto inner=CefListValue::Create();
@@ -492,28 +505,55 @@ Page* AdoptAuxiliaryBrowser(CefRefPtr<CefBrowser> browser,Page* preferred_owner)
 
 struct BlockPolicy {
   std::atomic<bool> enabled{false};
-  std::shared_ptr<const std::vector<std::string>> domains;
+  /// Requests cancelled since the tab group opened, for the shield count.
+  std::atomic<uint64_t> blocked{0};
+  std::shared_ptr<const std::unordered_set<std::string>> domains;
+  /// Address rules anchored to a host, from subscribed filter lists.
+  std::shared_ptr<const neutrino_filter::Index> patterns;
 };
 class BlockedResourceHandler final : public CefResourceRequestHandler {
  public:
   explicit BlockedResourceHandler(std::shared_ptr<BlockPolicy> policy) : policy_(std::move(policy)) {}
-  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame>,
+  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,
       CefRefPtr<CefRequest> request,CefRefPtr<CefCallback>) override {
     if (!policy_->enabled.load()) return RV_CONTINUE;
-    auto domains=std::atomic_load(&policy_->domains); if (!domains) return RV_CONTINUE;
-    CefURLParts parts; if (!CefParseURL(request->GetURL(),parts)) return RV_CONTINUE;
+    auto domains=std::atomic_load(&policy_->domains);
+    auto patterns=std::atomic_load(&policy_->patterns);
+    if (!domains && !patterns) return RV_CONTINUE;
+    const std::string url=request->GetURL().ToString();
+    CefURLParts parts; if (!CefParseURL(url,parts)) return RV_CONTINUE;
     const std::string scheme=CefString(&parts.scheme).ToString();
     if (scheme!="http" && scheme!="https") return RV_CONTINUE;
     std::string host=CefString(&parts.host).ToString();
     std::transform(host.begin(),host.end(),host.begin(),[](unsigned char ch){ return std::tolower(ch); });
-    for (const auto& domain : *domains) {
-      if (host==domain || (host.size()>domain.size() && host.ends_with("."+domain))) return RV_CANCEL;
+    // The host and each parent domain: a.b.example.com, b.example.com, example.com, com.
+    if (domains) for (size_t start=0; start<host.size();) {
+      if (domains->count(host.substr(start))) { policy_->blocked.fetch_add(1); return RV_CANCEL; }
+      const size_t dot=host.find('.',start);
+      if (dot==std::string::npos) break;
+      start=dot+1;
+    }
+    if (patterns && neutrino_filter::Blocked(*patterns,url,frame ? frame->GetURL().ToString() : std::string())) {
+      policy_->blocked.fetch_add(1); return RV_CANCEL;
     }
     return RV_CONTINUE;
   }
  private:
   std::shared_ptr<BlockPolicy> policy_;
   IMPLEMENT_REFCOUNTING(BlockedResourceHandler);
+};
+
+// "Clear browsing data" with a time range: deletes the Profile's cookies created since a time.
+class RecentCookieRemover final : public CefCookieVisitor {
+ public:
+  explicit RecentCookieRemover(int64_t since) : since_(since) {}
+  bool Visit(const CefCookie& cookie,int,int,bool& deleteCookie) override {
+    deleteCookie=cookie.creation.val>=since_;
+    return true;
+  }
+ private:
+  const int64_t since_;
+  IMPLEMENT_REFCOUNTING(RecentCookieRemover);
 };
 
 class Client final : public CefClient, public CefLifeSpanHandler,
@@ -577,8 +617,10 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
-  void SetBlocking(bool enabled,const std::vector<std::string>& domains) {
-    std::atomic_store(&blocking_->domains,std::make_shared<const std::vector<std::string>>(domains));
+  uint64_t BlockedCount() const { return blocking_->blocked.load(); }
+  void SetBlocking(bool enabled,const std::vector<std::string>& domains,std::shared_ptr<const neutrino_filter::Index> patterns) {
+    std::atomic_store(&blocking_->domains,std::make_shared<const std::unordered_set<std::string>>(domains.begin(),domains.end()));
+    std::atomic_store(&blocking_->patterns,std::move(patterns));
     blocking_->enabled.store(enabled);
   }
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>,
@@ -809,6 +851,14 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (auto client = ForBrowser(browser); client && client != this) return client->OnBeforeBrowse(browser,frame,request,gesture,redirect);
     const std::string url = request->GetURL().ToString();
     if (page_ && url.rfind("chrome://",0)==0) return false;
+    if (Allowed(url) && page_ && Group(page_)->strip_tracking && frame->IsMain() && !redirect) {
+      // Load the address without click and campaign identifiers instead, once CEF has left this callback.
+      if (const std::string clean = neutrino_tracking::StripTracking(url); !clean.empty() && clean != url) {
+        CefRefPtr<CefFrame> target = frame;
+        dispatch_async(dispatch_get_main_queue(), ^{ if (target->IsValid()) target->LoadURL(clean); });
+        return true;
+      }
+    }
     if (Allowed(url) || (page_ && page_->management && url.rfind("chrome://extensions/",0)==0) || (!frame->IsMain() &&
         (url.rfind("data:",0)==0 || url=="about:srcdoc"))) return false;
     if (page_ && frame->IsMain()) Message(page_,NEUTRINO_CEF_ERROR,"This Chromium adapter allows HTTP and HTTPS navigation only.");
@@ -900,6 +950,11 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (callback && path && *path) callback->Continue(path,false);
     else if (found->second.control) found->second.control->Cancel();
   }
+  void PauseDownload(int id,bool pause) {
+    auto found = downloads_.find(id);
+    if (found == downloads_.end() || !found->second.control) return;
+    if (pause) found->second.control->Pause(); else found->second.control->Resume();
+  }
   void CancelDownload(int id) {
     auto found = downloads_.find(id);
     if (found == downloads_.end()) return;
@@ -919,6 +974,20 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (!page_ || page_!=Active(Group(page_))) return;
     const std::string name = method.ToString();
     auto value = CefDictionaryValue::Create();
+    if (name == "Runtime.bindingCalled") {
+      // Only Neutrino's password and gesture bindings, each of which exists solely in its isolated world.
+      if (!params || size > 8192) return;
+      auto parsed = CefParseJSON(std::string(static_cast<const char*>(params),size),JSON_PARSER_RFC);
+      auto dictionary = parsed ? parsed->GetDictionary() : nullptr;
+      if (!dictionary) return;
+      const std::string binding = dictionary->GetString("name").ToString();
+      if (binding != "neutrinoCredential" && binding != "neutrinoGesture") return;
+      const std::string payload = dictionary->GetString("payload").ToString();
+      if (payload.empty() || payload.size() > (binding == "neutrinoGesture" ? 4u : 4096u)) return;
+      value->SetString("payload",payload);
+      Emit(page_,binding == "neutrinoGesture" ? NEUTRINO_CEF_GESTURE : NEUTRINO_CEF_CREDENTIAL,value);
+      return;
+    }
     if (name == "Runtime.executionContextsCleared") {
       value->SetBool("clear",true);
     } else if (name == "Runtime.executionContextCreated" ||
@@ -972,6 +1041,9 @@ class Client final : public CefClient, public CefLifeSpanHandler,
 // Upstream extension APIs remain active behind the clipped native chrome.
 Page::Page() { [view setWantsLayer:YES]; generation=++next_page_generation; group=this; }
 Page::~Page() { [view release]; }
+int BlockedCount(Page* page) {
+  return page && page->client ? static_cast<int>(std::min<uint64_t>(page->client->BlockedCount(),INT_MAX)) : 0;
+}
 void SetActive(Page* page) {
   auto owner=Group(page);
   if (owner->active==page) return;
@@ -1406,9 +1478,10 @@ int NativeTabCommand(void* opaque,int command) {
 }
 void Command(void* opaque,int command,const char* text,double value) {
   auto owner=static_cast<Page*>(opaque); if (!pages.count(owner) || owner->closing) return;
-  if (command==NEUTRINO_CEF_DOWNLOAD_PATH || command==NEUTRINO_CEF_DOWNLOAD_CANCEL) {
+  if (command==NEUTRINO_CEF_DOWNLOAD_PATH || command==NEUTRINO_CEF_DOWNLOAD_CANCEL || command==NEUTRINO_CEF_DOWNLOAD_PAUSE) {
     for (auto& entry : pages) if (entry.first->client->HasDownload(static_cast<int>(value),owner)) {
       if (command==NEUTRINO_CEF_DOWNLOAD_PATH) entry.first->client->DownloadPath(static_cast<int>(value),text);
+      else if (command==NEUTRINO_CEF_DOWNLOAD_PAUSE) entry.first->client->PauseDownload(static_cast<int>(value),text && text[0]=='1');
       else entry.first->client->CancelDownload(static_cast<int>(value));
       return;
     }
@@ -1427,17 +1500,30 @@ void Command(void* opaque,int command,const char* text,double value) {
   }
   if (final_quit_frozen && command!=NEUTRINO_CEF_SYNC_ACTIVE) return;
   if (command==NEUTRINO_CEF_POPUPS) { owner->popups=value!=0; return; }
+  if (command==NEUTRINO_CEF_STRIP_TRACKING) { Group(owner)->strip_tracking=value!=0; return; }
+  if (command==NEUTRINO_CEF_CLEAR_COOKIES_SINCE) {
+    if (!owner->browser || !(value>0) || value>32.0*86400) return;
+    auto context=owner->browser->GetHost()->GetRequestContext();
+    auto manager=context ? context->GetCookieManager(nullptr) : nullptr;
+    if (manager) manager->VisitAllCookies(new RecentCookieRemover(cef_basetime_now().val-static_cast<int64_t>(value*1000000.0)));
+    return;
+  }
   if (command==NEUTRINO_CEF_SET_BLOCKING) {
     std::vector<std::string> domains; std::string source=text ? text : "";
-    if (source.size()>32768) return;
-    size_t offset=0;
-    while (offset<source.size() && domains.size()<200) {
+    // Subscribed filter lists bring tens of thousands of domains.
+    if (source.size()>4*1024*1024) return;
+    // Lines starting with "||" are address rules anchored to a host.
+    auto patterns=std::make_shared<neutrino_filter::Index>();
+    size_t offset=0,rules=0;
+    while (offset<source.size() && domains.size()<150000) {
       const size_t end=source.find('\n',offset);
       const std::string domain=source.substr(offset,end==std::string::npos ? end : end-offset);
-      if (!domain.empty() && domain.size()<=253 && domain.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-")==std::string::npos) domains.push_back(domain);
+      if (domain.compare(0,2,"||")==0) { if (rules<30000 && neutrino_filter::Add(*patterns,domain)) ++rules; }
+      else if (!domain.empty() && domain.size()<=253 && domain.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-")==std::string::npos) domains.push_back(domain);
       if (end==std::string::npos) break; offset=end+1;
     }
-    for (Page* member : Members(owner)) if (member->client) member->client->SetBlocking(value!=0,domains);
+    std::shared_ptr<const neutrino_filter::Index> shared=rules ? std::shared_ptr<const neutrino_filter::Index>(patterns) : nullptr;
+    for (Page* member : Members(owner)) if (member->client) member->client->SetBlocking(value!=0,domains,shared);
     return;
   }
   if (command==NEUTRINO_CEF_RESTORE_TABS) {
@@ -1521,6 +1607,62 @@ void Command(void* opaque,int command,const char* text,double value) {
       if (!text || !*text) host->StopFinding(true);
       else host->Find(text,value==0,false,true);
       break;
+    case NEUTRINO_CEF_MUTE: host->SetAudioMuted(value!=0); break;
+    case NEUTRINO_CEF_CHROME_COMMAND: {
+      // A fixed set of page commands; nothing that changes settings or profiles.
+      static const std::set<std::string> allowed={"IDC_PRINT","IDC_DEV_TOOLS","IDC_DEV_TOOLS_INSPECT","IDC_SAVE_PAGE"};
+      const std::string name=text ? text : "";
+      if (!allowed.count(name)) break;
+      const int id=cef_id_for_command_id_name(name.c_str());
+      if (id>0 && host->CanExecuteChromeCommand(id)) host->ExecuteChromeCommand(id,CEF_WOD_CURRENT_TAB);
+      else Message(owner,NEUTRINO_CEF_NOTICE,"Chrome can’t do that for this page.");
+      break;
+    }
+    case NEUTRINO_CEF_SITE_PERMISSION: {
+      // A site's own camera or microphone choice, made in Neutrino's site settings.
+      const std::string spec=text ? text : "";
+      const auto split=spec.find('\n');
+      if (split==std::string::npos || spec.size()>600 || !(value==0 || value==1 || value==2)) break;
+      const std::string kind=spec.substr(0,split), site=spec.substr(split+1);
+      if ((kind!="camera" && kind!="microphone") || (site.rfind("https://",0)!=0 && site.rfind("http://",0)!=0)) break;
+      auto context=host->GetRequestContext();
+      if (!context) break;
+      context->SetContentSetting(site,site,
+          kind=="camera" ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA : CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC,
+          value==1 ? CEF_CONTENT_SETTING_VALUE_ALLOW : value==2 ? CEF_CONTENT_SETTING_VALUE_BLOCK : CEF_CONTENT_SETTING_VALUE_DEFAULT);
+      break;
+    }
+    case NEUTRINO_CEF_PREFERENCE: {
+      const std::string name=text ? text : "";
+      // Default permission for a kind of request: 2 blocks every request, 3 asks.
+      const bool permission=name=="profile.default_content_setting_values.media_stream_camera" ||
+          name=="profile.default_content_setting_values.media_stream_mic" ||
+          name=="profile.default_content_setting_values.geolocation" ||
+          name=="profile.default_content_setting_values.notifications";
+      if (!permission && name!="https_only_mode_enabled" && name!="profile.cookie_controls_mode" && name!="webrtc.ip_handling_policy") break;
+      if (!std::isfinite(value) || value<0 || value>(permission ? 3 : 2) || (permission && value<2)) break;
+      auto context=host->GetRequestContext();
+      if (!context) break;
+      if (permission) {
+        // CEF's documented way to set a default: a content setting with no URLs.
+        const cef_content_setting_types_t type=
+            name=="profile.default_content_setting_values.media_stream_camera" ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA :
+            name=="profile.default_content_setting_values.media_stream_mic" ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC :
+            name=="profile.default_content_setting_values.geolocation" ? CEF_CONTENT_SETTING_TYPE_GEOLOCATION :
+            CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS;
+        context->SetContentSetting(CefString(),CefString(),type,
+            value==2 ? CEF_CONTENT_SETTING_VALUE_BLOCK : CEF_CONTENT_SETTING_VALUE_ASK);
+      }
+      if (!context->CanSetPreference(name)) break;
+      auto preference=CefValue::Create();
+      if (permission || name=="profile.cookie_controls_mode") preference->SetInt(static_cast<int>(value));
+      // Keep the local network address out of WebRTC unless a proxy carries the call.
+      else if (name=="webrtc.ip_handling_policy") preference->SetString(value!=0 ? "disable_non_proxied_udp" : "default");
+      else preference->SetBool(value!=0);
+      CefString error;
+      context->SetPreference(name,preference,error);
+      break;
+    }
   }
 }
 // Inspect only this process's own accessibility objects, and only in the

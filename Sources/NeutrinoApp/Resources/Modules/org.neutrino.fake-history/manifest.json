@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.fake-history",
+  "name": "Fake My History",
+  "version": 1,
+  "summary": "Add ordinary-looking visits to your history, as Opera GX does.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

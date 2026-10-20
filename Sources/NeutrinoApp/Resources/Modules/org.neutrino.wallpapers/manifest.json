@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.wallpapers",
+  "name": "Wallpapers",
+  "version": 1,
+  "summary": "Use your own picture behind the start page.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

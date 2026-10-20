@@ -2,7 +2,7 @@
   "id": "org.neutrino.reader",
   "name": "Reader",
   "version": 2,
-  "summary": "Extract article, main, or body text in a removable worker. Best-effort reading of page snapshots up to 1 MB.",
+  "summary": "Show the current article as plain, readable text.",
   "publisher": "Neutrino",
   "source": "https://github.com/starharbor2491/neutrino-browser",
   "capability": "reader",

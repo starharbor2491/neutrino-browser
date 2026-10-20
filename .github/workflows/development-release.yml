@@ -184,12 +184,7 @@ jobs:
           (root / 'RELEASE.md').write_text(
               'Download the **.app.zip** to expand `Neutrino.app`, or use the DMG and drag the app to Applications. '
               'Apple Silicon only. Blink, WebKit support, built-in modules, and the updater are included.\n\n'
-              '### What changed\n\n'
-              '- Open destinations with **⌘T**, switch tabs with **⌘K**, and edit the address with **⌘L**. No new-tab page.\n'
-              '- Capture quotations beside live sources, search note bodies and quotes, and recover the original source across Spaces and Chromium page groups.\n'
-              '- Start with six familiar browser layouts. Drag tabs and components, choose SVG icons, and save, rename, replace, or delete appearance setups.\n'
-              '- Use modules directly in the workspace. Reader, CPU and memory workers now run in Rust alongside the Rust interface and portable services.\n'
-              '- Remove the app, browser data, settings and credentials with the explicit uninstall control; downloads and exports stay.\n\n'
+              '### What changed\n\n' + Path('PREVIEW_NOTES.md').read_text().strip() + '\n\n'
               'Automatic updates download the complete app, including its pinned Chromium engine, from this GitHub repository and install after you quit. '
               'Tabs, Profiles, website data, passwords, modules, and appearance stay on your Mac. '
               'Use Settings > Updates & engines to disable automatic updates or restart immediately.\n\n'
@@ -257,7 +252,9 @@ jobs:
           else
             gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
           fi
-          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json --clobber
+          # The Homebrew cask for this release, also committed to main below.
+          python3 scripts/update-cask.py --version "$release_version" --zip "release/Neutrino-$release_version-AppleSilicon.app.zip" --output release/neutrino.rb
+          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json release/neutrino.rb --clobber
           gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
       - name: Publish signed Sparkle feed after release assets are public
         env:
@@ -268,3 +265,17 @@ jobs:
             gh release upload "$NEUTRINO_RELEASE_TAG" release/preview.xml --clobber
             python3 scripts/publish-appcast.py preview
           fi
+      - name: Point the Homebrew tap at this release
+        if: github.ref == 'refs/heads/main'
+        run: |
+          release_version="${NEUTRINO_RELEASE_TAG#v}"
+          # Rewrite only the version and checksum on the current main, keeping any cask edits made since this build.
+          git fetch origin main
+          git checkout -q origin/main
+          python3 scripts/update-cask.py --version "$release_version" --zip "release/Neutrino-$release_version-AppleSilicon.app.zip"
+          if git diff --quiet Casks/neutrino.rb; then exit 0; fi
+          git config user.name 'Neutrino release automation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -q -m "Point the Homebrew cask at $NEUTRINO_RELEASE_TAG" Casks/neutrino.rb
+          # A fast-forward-only push rejects concurrent main changes; the release's neutrino.rb stays correct either way.
+          git push origin HEAD:main

@@ -1,0 +1,11 @@
+{
+  "id": "org.neutrino.limiter",
+  "name": "Resource Limits",
+  "version": 1,
+  "summary": "Put background tabs to sleep when memory, processor or network use passes a limit.",
+  "publisher": "Neutrino",
+  "source": "https://github.com/starharbor2491/neutrino-browser",
+  "capability": "feature",
+  "dependencies": [],
+  "defaultInstalled": true
+}

@@ -14,7 +14,7 @@ use std::{
 fn fixture() -> Value {
     json!({
      "completedOnboarding":true,"private":false,"spaceName":"Everyday","profileName":"Personal","blinkAvailable":true,
-     "configuration":{"theme":{"design":"graphite","accent":"purple","colorMode":"dark","density":"comfortable","cornerRadius":6},"layout":{"tabs":"leading","tabsWidth":256,"navigation":"top","sidebar":"leading"}},
+     "configuration":{"theme":{"design":"graphite","accent":"purple","colorMode":"system","density":"comfortable","cornerRadius":6},"layout":{"tabs":"leading","tabsWidth":256,"navigation":"top","sidebar":"leading"}},
      "preferences":{"search":"duckDuckGo","restoreSession":true,"blockTrackers":true,"blockPopups":true},
      "session":{"id":"window1","profileID":"profile1","spaceID":"space1","selectedTabID":"tab4","tabs":[
       {"id":"tab1","title":"GitHub","url":"https://github.com/","pinned":true},
