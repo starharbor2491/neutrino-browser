@@ -43,6 +43,11 @@ class BrowserEngineTab: NSObject, ObservableObject {
     /// A sign-in submitted on the page's own origin: origin, username, password.
     var onCredential: ((String, String, String) -> Void)? { didSet { if onCredential != nil { installCredentialCapture() } } }
     func installCredentialCapture() {}
+    /// A mouse gesture drawn on the page: its strokes, such as "DR" for down then right.
+    var onGesture: ((String) -> Void)?
+    /// Installs the gesture script in Neutrino's own isolated world; safe to call again.
+    func installGestureCapture() {}
+    static func validGesture(_ value: String) -> Bool { (1...4).contains(value.count) && value.allSatisfy { "LRUD".contains($0) } }
     /// Domains from subscribed filter lists.
     var blockingSubscribed: [String] = []
     /// Called after each page finishes loading, so per-site tools can be reapplied.

@@ -17,7 +17,35 @@ pub const OPS: &[&str] = &[
     "delete-profile", "capture-mode", "capture-area", "markup", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed", "dial-group",
+    "gesture", "gesture-action",
 ];
+
+/// Mouse gesture shapes, drawn as strokes left, right, up and down, and what each does
+/// until the person changes it: back, forward, reload, new tab and close tab as in Opera and Vivaldi.
+pub const GESTURES: &[(&str, &str)] = &[
+    ("L", "back"), ("R", "forward"), ("U", "scroll-top"), ("D", "new-tab"),
+    ("UD", "reload"), ("DU", "none"), ("DR", "close-tab"), ("DL", "none"),
+    ("UR", "none"), ("UL", "none"), ("LR", "none"), ("RL", "none"),
+];
+/// Page actions a gesture can run besides every command in ACTIONS.
+pub const GESTURE_PAGE_ACTIONS: &[(&str, &str)] = &[
+    ("back", "Back"), ("forward", "Forward"), ("reload", "Reload"),
+    ("scroll-top", "Scroll to top"), ("scroll-bottom", "Scroll to bottom"),
+];
+pub fn gesture_action_valid(id: &str) -> bool {
+    id == "none" || GESTURE_PAGE_ACTIONS.iter().any(|a| a.0 == id) || ACTIONS.iter().any(|a| a.0 == id)
+}
+/// What a gesture does now: the person's choice, else the default.
+pub fn gesture_action<'a>(s: &'a Shell, shape: &str) -> &'a str {
+    s.snapshot["preferences"]["gestureActions"][shape].as_str().filter(|a| gesture_action_valid(a))
+        .or_else(|| GESTURES.iter().find(|g| g.0 == shape).map(|g| g.1))
+        .unwrap_or("none")
+}
+/// Arrows for a gesture shape, and the words a screen reader says for it.
+pub fn gesture_arrows(shape: &str) -> (String, String) {
+    let arrow = |c| match c { 'L' => ("←", "left"), 'R' => ("→", "right"), 'U' => ("↑", "up"), _ => ("↓", "down") };
+    (shape.chars().map(|c| arrow(c).0).collect(), shape.chars().map(|c| arrow(c).1).collect::<Vec<_>>().join(" then "))
+}
 
 /// Fake My History kinds: key, label, and the pages a visit can be to.
 pub const FAKE_HISTORY: &[(&str, &str, &[(&str, &str)])] = &[
@@ -225,6 +253,8 @@ pub fn valid_binding(binding: &str) -> bool {
 pub fn action_request(s: &Shell, id: &str) -> Option<Value> {
     let tab = s.active()["id"].clone();
     Some(match id {
+        "back" | "forward" | "reload" => json!({"op":id}),
+        "scroll-top" | "scroll-bottom" => json!({"op":"page-command","value":id}),
         "new-tab" => json!({"op":"newTab"}),
         "new-window" => json!({"op":"newWindow"}),
         "private-window" => json!({"op":"privateWindow"}),
@@ -656,6 +686,9 @@ fn valid_setting(key: &str, v: &Value) -> bool {
                 && ["serif", "sans"].contains(&o.get("font").and_then(Value::as_str).unwrap_or(""))
         }),
         "downloadFolder" => v.is_null(),
+        "gestureActions" => v.as_object().is_some_and(|o| {
+            o.len() <= GESTURES.len() && o.iter().all(|(k, v)| GESTURES.iter().any(|g| g.0 == k) && v.as_str().is_some_and(gesture_action_valid))
+        }),
         "liveWallpaper" => ["", "aurora", "waves", "embers"].contains(&v.as_str().unwrap_or("-")),
         _ => int(i64::MIN, i64::MIN),
     }
@@ -861,6 +894,8 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 "pick-element" => "pickElement",
                 "fast-forward" => "fastForward",
                 "rewind" => "rewind",
+                "scroll-top" if !blank => "scrollTop",
+                "scroll-bottom" if !blank => "scrollBottom",
                 "media" => "mediaToggle",
                 "break" => "breakMode",
                 "panic" => "panic",
@@ -1447,6 +1482,27 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
             }
             s.menu.clear();
         }
+        // A gesture the page reported (from Neutrino's isolated world); the host checks its shape too.
+        "gesture" => {
+            let shape = value;
+            if !on(s, "mouse-gestures") || shape.is_empty() || shape.len() > 4 || !shape.chars().all(|c| "LRUD".contains(c)) {
+                return;
+            }
+            let action = gesture_action(s, shape).to_string();
+            if let Some(request) = (action != "none").then(|| action_request(s, &action)).flatten() {
+                let result = s.dispatch(request);
+                commands.extend(array(&result["commands"]).iter().cloned());
+            }
+        }
+        "gesture-action" => {
+            let shape = text(r, "key");
+            if let Some(default) = GESTURES.iter().find(|g| g.0 == shape).map(|g| g.1).filter(|_| gesture_action_valid(value)) {
+                let mut map = s.snapshot["preferences"]["gestureActions"].as_object().cloned().unwrap_or_default();
+                if value == default { map.remove(shape); } else { map.insert(shape.into(), json!(value)); }
+                map.retain(|k, v| GESTURES.iter().any(|g| g.0 == k) && v.as_str().is_some_and(gesture_action_valid));
+                commands.push(json!({"op":"preference","key":"gestureActions","value":map}));
+            }
+        }
         "split-ratio" => {
             if let Some(v) = r["value"].as_f64().filter(|v| (0.2..=0.8).contains(v)) {
                 commands.push(json!({"op":"splitRatio","value":v}));
@@ -1626,7 +1682,8 @@ const timer=setTimeout(()=>end(''),100000)}})",
         "mediaToggle" => "(()=>{const ms=[...document.querySelectorAll('video,audio')];const p=ms.find(m=>!m.paused&&!m.ended);if(p){p.pause();return 'paused'}const q=ms.find(m=>m.currentTime>0&&!m.ended)||ms[0];if(q){q.play();return 'playing'}return 'none'})()".into(),
         // Hold Option and drag: left goes back, right forward, up then down reloads,
         // up or down scrolls to the top or bottom.
-        "gestures" => "(()=>{if(window.__neutrinoGestures)return 'ready';window.__neutrinoGestures=true;let start=null,path=[],moved=false;addEventListener('mousedown',e=>{if(e.button===0&&e.altKey){start=[e.clientX,e.clientY];path=[];moved=false}},true);addEventListener('mousemove',e=>{if(!start||!(e.buttons&1))return;const dx=e.clientX-start[0],dy=e.clientY-start[1];if(Math.hypot(dx,dy)<40)return;const d=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');if(path[path.length-1]!==d)path.push(d);start=[e.clientX,e.clientY];if(!moved){moved=true;getSelection()&&getSelection().removeAllRanges();document.documentElement.style.userSelect='none'}},true);addEventListener('mouseup',()=>{if(!start)return;start=null;document.documentElement.style.userSelect='';if(!moved)return;const g=path.join('');addEventListener('click',e=>{e.preventDefault();e.stopPropagation()},{capture:true,once:true});if(g==='L')history.back();else if(g==='R')history.forward();else if(g==='UD')location.reload();else if(g==='U')scrollTo({top:0,behavior:'smooth'});else if(g==='D')scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})},true);return 'installed'})()".into(),
+        // Runs in Neutrino's own isolated world and only reports the shape; the shell decides what it does.
+        "gestures" => "(()=>{if(window.__neutrinoGestures)return 'ready';window.__neutrinoGestures=true;const send=g=>{try{if(window.webkit&&webkit.messageHandlers&&webkit.messageHandlers.neutrinoGesture)webkit.messageHandlers.neutrinoGesture.postMessage(g);else if(typeof neutrinoGesture==='function')neutrinoGesture(g)}catch(_){}};let start=null,path=[],moved=false;addEventListener('mousedown',e=>{if(e.button===0&&e.altKey){start=[e.clientX,e.clientY];path=[];moved=false}},true);addEventListener('mousemove',e=>{if(!start||!(e.buttons&1))return;const dx=e.clientX-start[0],dy=e.clientY-start[1];if(Math.hypot(dx,dy)<40)return;const d=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');if(path[path.length-1]!==d)path.push(d);start=[e.clientX,e.clientY];if(!moved){moved=true;getSelection()&&getSelection().removeAllRanges();document.documentElement.style.userSelect='none'}},true);addEventListener('mouseup',()=>{if(!start)return;start=null;document.documentElement.style.userSelect='';if(!moved)return;addEventListener('click',e=>{e.preventDefault();e.stopPropagation()},{capture:true,once:true});if(path.length<=4)send(path.join(''))},true);return 'installed'})()".into(),
         "pauseAll" => "(()=>{document.querySelectorAll('video,audio').forEach(m=>m.pause());return 'paused'})()".into(),
         "pip" => "(()=>{if(document.pictureInPictureElement){document.exitPictureInPicture();return 'exit'}const vs=[...document.querySelectorAll('video')].filter(v=>v.readyState>0).sort((a,b)=>b.clientWidth*b.clientHeight-a.clientWidth*a.clientHeight);const v=vs.find(v=>!v.paused)||vs[0];if(!v)return 'none';if(v.requestPictureInPicture){v.disablePictureInPicture=false;v.requestPictureInPicture();return 'pip'}if(v.webkitSetPresentationMode){v.webkitSetPresentationMode('picture-in-picture');return 'pip'}return 'none'})()".into(),
         "findCount" => format!("(()=>{{const q={}.toLowerCase();if(!q)return '0';const t=(document.body&&document.body.innerText||'').toLowerCase();let n=0,i=0;while((i=t.indexOf(q,i))!==-1&&n<9999){{n++;i+=q.length}}return String(n)}})()", quote(text(r, "query"))),

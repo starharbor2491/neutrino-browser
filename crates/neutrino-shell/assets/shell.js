@@ -992,6 +992,10 @@
       send({ op: "editor-value", key: el.dataset.editorColor, value: el.value.replace("#", "") });
       return;
     }
+    if (el.dataset.gesture) {
+      send({ op: "gesture-action", key: el.dataset.gesture, value: el.value });
+      return;
+    }
     if (el.dataset.setupName) {send({op:"editor-rename-named",id:el.dataset.setupName,value:el.value});}
     else if (el.dataset.moduleSetting) {
       const value = el.type === "number" ? Number(el.value) : el.value;

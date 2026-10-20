@@ -36,6 +36,23 @@ pub fn setting_toggle(label: &str, detail: &str, key: &str, value: bool) -> Mark
     html! {button class="toggle-row" data-op="setting" data-key=(key) data-value=((!value).to_string()) data-type="bool" role="switch" aria-checked=(value.to_string()) {span {strong{(label)}@if !detail.is_empty(){small{(detail)}}} span class=(if value{"switch on"}else{"switch"}) {span{}}}}
 }
 /// A switch for a built-in feature module, shown where its settings live.
+/// Vivaldi's gesture mapping: each shape runs a page action or any browser command.
+fn gesture_settings(s: &Shell) -> Markup {
+    html! {div class="gesture-list" role="group" aria-label="Mouse gestures" {
+        @for (shape, _) in features::GESTURES {
+            @let (arrows, words) = features::gesture_arrows(shape);
+            @let current = features::gesture_action(s, shape);
+            label class="gesture-row" {
+                span class="gesture-shape" aria-hidden="true" {(arrows)}
+                select data-gesture=(shape) aria-label=(format!("Gesture {words}")) {
+                    option value="none" selected[current == "none"] {"Nothing"}
+                    optgroup label="Page" {@for (id, label) in features::GESTURE_PAGE_ACTIONS {option value=(id) selected[current == *id] {(label)}}}
+                    optgroup label="Browser" {@for (id, label, _, _) in features::ACTIONS {option value=(id) selected[current == *id] {(label)}}}
+                }
+            }
+        }
+    }}
+}
 pub fn module_toggle(s: &Shell, key: &str, label: &str, detail: &str) -> Markup {
     let value = features::on(s, key);
     html! {button class="toggle-row" data-op="native" data-action="toggleModule" data-id=(format!("org.neutrino.{key}")) role="switch" aria-checked=(value.to_string()) {span {strong{(label)}@if !detail.is_empty(){small{(detail)}}} span class=(if value{"switch on"}else{"switch"}) {span{}}}}
@@ -1158,7 +1175,8 @@ pub fn general_extra(s: &Shell) -> Markup {
             div class="list-row"{div{strong{"Downloads"}small{(if text(p,"downloadFolder").is_empty(){"Ask where to save each file".to_string()}else{format!("Save to {}", text(p,"downloadFolder"))})}}button class="button" data-op="native" data-action="chooseDownloadFolder"{"Choose folder…"}@if !text(p,"downloadFolder").is_empty(){button class="button quiet" data-op="native" data-action="clearDownloadFolder"{"Always ask"}}}
             @if style(s) == "arc" {(module_toggle(s, "little-arc", "Little Arc", "Open links from other apps in a small window. Keep it as a tab or close it."))}
             (module_toggle(s, "peek", "Peek at links", "Shift-click a link to preview it in a floating window. WebKit tabs only."))
-            (module_toggle(s, "mouse-gestures", "Mouse gestures", "Hold ⌥ and drag on a page: left goes back, right forward, up then down reloads."))
+            (module_toggle(s, "mouse-gestures", "Mouse gestures", "Hold ⌥ and drag on a page. Choose what each gesture does below."))
+            @if features::on(s, "mouse-gestures") {(gesture_settings(s))}
             @if style(s) == "gx" {(module_toggle(s, "tab-islands", "Tab islands", "Tabs you open from a page stay beside it as an island."))}
         }
         (link_routes(s))

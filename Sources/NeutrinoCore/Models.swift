@@ -366,6 +366,8 @@ public struct Preferences: Codable, Equatable, Sendable {
     public var tabIslands: Bool?
     /// Option-drag gestures on pages; on by default in the Vivaldi and Opera GX styles.
     public var mouseGestures: Bool?
+    /// What each gesture shape (strokes L, R, U, D) does when it differs from the default.
+    public var gestureActions: [String: String]?
     public init() {}
 }
 public struct SearchEngine: Identifiable, Codable, Equatable, Sendable {

@@ -5765,6 +5765,30 @@ input[type="color"] {
 .split-canvas[data-axis="stacked"] > .split-divider::after {
   inset: 3px 30%;
 }
+/* Mouse gesture mapping */
+.gesture-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px 16px;
+  padding: 4px 0 12px 14px;
+}
+.gesture-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+.gesture-shape {
+  flex: none;
+  width: 44px;
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: var(--ink);
+}
+.gesture-row select {
+  flex: 1;
+  min-width: 0;
+}
 /* Three or four tiled pages, as Arc's split view and Vivaldi's tiling arrange them */
 .split-canvas.tiled {
   display: grid;

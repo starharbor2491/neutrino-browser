@@ -442,6 +442,11 @@ final class BrowserFeatures {
                 self?.refresh()
             }
         case "devTools": model?.activeWebTab.showDeveloperTools()
+        case "scrollTop", "scrollBottom":
+            guard let model else { break }
+            let tab = model.activeWebTab
+            let target = operation == "scrollTop" ? "0" : "document.documentElement.scrollHeight"
+            Task { _ = try? await tab.runPageScript("scrollTo({top:\(target),behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});'ok'") }
         case "fastForward":
             guard let model, let script = PageScript.source("nextPage") else { break }
             let tab = model.activeWebTab
@@ -1002,6 +1007,9 @@ final class BrowserFeatures {
         case "peek": preferences.peek = value as? Bool
         case "tabIslands": preferences.tabIslands = value as? Bool
         case "mouseGestures": preferences.mouseGestures = value as? Bool
+        case "gestureActions":
+            let actions = (value as? [String: String] ?? [:]).filter { $0.key.count <= 4 && $0.key.allSatisfy { "LRUD".contains($0) } && $0.value.count <= 40 }
+            preferences.gestureActions = actions.isEmpty ? nil : actions
         case "interfaceSounds": preferences.interfaceSounds = value as? Bool
         case "keyboardSounds": preferences.keyboardSounds = value as? Bool
         case "backgroundMusic": preferences.backgroundMusic = value as? Bool
@@ -1249,7 +1257,7 @@ extension BrowserModel {
                 self?.features?.foundFeed(feed, page: url, tab: id)
             }
         }
-        if app.feature("mouse-gestures"), let script = PageScript.source("gestures") { Task { _ = try? await tab.runPageScript(script) } }
+        if app.feature("mouse-gestures") { tab.installGestureCapture() }
         // Brave's De-AMP: an AMP page opens the publisher's own version of the article.
         if preferences.stripTracking != false, !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? []),
            let url = tab.url, let script = PageScript.source("deAmp") {

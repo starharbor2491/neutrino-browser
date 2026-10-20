@@ -56,6 +56,26 @@ final class WebTab: BrowserEngineTab, WKNavigationDelegate, WKUIDelegate {
         controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
         controller.add(CredentialMessages(), contentWorld: world, name: "neutrinoCredential")
     }
+    private var gestureCaptureInstalled = false
+    /// Gestures are reported from a content world the page's own scripts can't reach.
+    override func installGestureCapture() {
+        guard !gestureCaptureInstalled, !disposed, let source = PageScript.source("gestures") else { return }
+        gestureCaptureInstalled = true
+        GestureMessages.tabs.setObject(self, forKey: webView)
+        let world = WKContentWorld.world(name: "org.neutrino.gestures")
+        // The page already showing gets the script now; later pages get it from the user script.
+        webView.evaluateJavaScript(source, in: nil, in: world) { _ in }
+        let controller = webView.configuration.userContentController
+        guard !GestureMessages.controllers.contains(controller) else { return }
+        GestureMessages.controllers.add(controller)
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
+        controller.add(GestureMessages(), contentWorld: world, name: "neutrinoGesture")
+    }
+    fileprivate func receiveGesture(_ message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, message.webView === webView, let shape = message.body as? String,
+              Self.validGesture(shape) else { return }
+        onGesture?(shape)
+    }
     fileprivate func receiveCredential(_ message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, message.webView === webView, let body = message.body as? [String: Any],
               let origin = body["origin"] as? String, let username = body["username"] as? String, let password = body["password"] as? String,
@@ -624,6 +644,16 @@ enum RuleListCache {
 
 /// Forwards sign-in messages without the content controller keeping the tab alive.
 /// Reports sign-ins to the tab whose page sent them; one handler serves each content controller.
+private final class GestureMessages: NSObject, WKScriptMessageHandler {
+    @MainActor static let controllers = NSHashTable<WKUserContentController>.weakObjects()
+    @MainActor static let tabs = NSMapTable<WKWebView, WebTab>.weakToWeakObjects()
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated {
+            guard let webView = message.webView else { return }
+            Self.tabs.object(forKey: webView)?.receiveGesture(message)
+        }
+    }
+}
 private final class CredentialMessages: NSObject, WKScriptMessageHandler {
     @MainActor static let controllers = NSHashTable<WKUserContentController>.weakObjects()
     @MainActor static let tabs = NSMapTable<WKWebView, WebTab>.weakToWeakObjects()

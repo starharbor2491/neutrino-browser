@@ -372,6 +372,21 @@ final class ChromiumTab: BrowserEngineTab {
             } catch { self.credentialCaptureInstalled = false }
         }
     }
+    private var gestureCaptureWanted = false, gestureCaptureInstalled = false
+    override func installGestureCapture() { gestureCaptureWanted = true; if activeContentKnown && !loading { installGestureBinding() } }
+    /// A binding that only Neutrino's gesture world can call reports mouse gestures.
+    private func installGestureBinding() {
+        guard gestureCaptureWanted, !gestureCaptureInstalled, let source = PageScript.source("gestures") else { return }
+        gestureCaptureInstalled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.request("Runtime.enable", parameters: [:])
+                _ = try await self.request("Runtime.addBinding", parameters: ["name": "neutrinoGesture", "executionContextName": "org.neutrino.gestures"])
+                _ = try await self.request("Page.addScriptToEvaluateOnNewDocument", parameters: ["source": source, "worldName": "org.neutrino.gestures", "runImmediately": true])
+            } catch { self.gestureCaptureInstalled = false }
+        }
+    }
     private var permissionDefaults: Set<String>?
     override func setPermissionDefaults(blocked: Set<String>) {
         permissionDefaults = blocked
@@ -625,6 +640,7 @@ final class ChromiumTab: BrowserEngineTab {
                     guard let self, self.page != nil, self.navigationRevision == revision, !self.loading else { return }
                     self.sendPrivacyPreferences()
                     self.installCredentialBinding()
+                    self.installGestureBinding()
                     self.onPageLoaded?()
                 }
             }
@@ -686,6 +702,9 @@ final class ChromiumTab: BrowserEngineTab {
                   let origin = body["origin"] as? String, let username = body["username"] as? String, let password = body["password"] as? String,
                   !password.isEmpty, let url = pageURL, (try? LocalCredential.origin(for: url)) == origin else { return }
             onCredential?(origin, String(username.prefix(500)), String(password.prefix(8192)))
+        case Int32(NEUTRINO_CEF_GESTURE):
+            guard let shape = value["payload"] as? String, Self.validGesture(shape) else { return }
+            onGesture?(shape)
         case Int32(NEUTRINO_CEF_READER_CONTEXT):
             if value["clear"] as? Bool == true { readerContexts.removeAll() }
             else if value["destroyed"] as? Bool == true {

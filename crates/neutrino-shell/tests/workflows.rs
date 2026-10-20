@@ -228,6 +228,33 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn mouse_gestures_run_the_action_chosen_for_each_shape() {
+    let mut s = shell();
+    assert_eq!(commands(&s.dispatch(json!({"op":"gesture","value":"L"})))[0], json!({"op":"back"}));
+    assert!(!commands(&s.dispatch(json!({"op":"gesture","value":"DR"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"DL"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"LX"}))).is_empty());
+    let r = s.dispatch(json!({"op":"gesture-action","key":"DL","value":"reopen-tab"}));
+    assert_eq!(commands(&r)[0], json!({"op":"preference","key":"gestureActions","value":{"DL":"reopen-tab"}}));
+    assert!(commands(&s.dispatch(json!({"op":"gesture-action","key":"DL","value":"format-disk"}))).is_empty());
+    assert!(commands(&s.dispatch(json!({"op":"gesture-action","key":"LLLLL","value":"back"}))).is_empty());
+    s.snapshot["preferences"]["gestureActions"] = json!({"DL":"reopen-tab","L":"none"});
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert_eq!(commands(&s.dispatch(json!({"op":"gesture","value":"DL"})))[0], json!({"op":"reopenTab"}));
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"L"}))).is_empty());
+    // Choosing the default again drops the custom entry.
+    let r = s.dispatch(json!({"op":"gesture-action","key":"L","value":"back"}));
+    assert_eq!(commands(&r)[0]["value"], json!({"DL":"reopen-tab"}));
+    s.dispatch(json!({"op":"screen","value":"settings"}));
+    let html = s.dispatch(json!({"op":"section","value":"general"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("data-gesture=\"DR\"") && html.contains("aria-label=\"Gesture down then right\""));
+    assert!(html.contains("<option value=\"reopen-tab\" selected>"));
+    // Off as a module, gestures do nothing.
+    s.snapshot["modules"] = json!([{"id":"org.neutrino.mouse-gestures","name":"Mouse gestures","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(commands(&s.dispatch(json!({"op":"gesture","value":"DL"}))).is_empty());
+}
+#[test]
 fn assistant_keeps_a_thread_and_streams_the_answer() {
     let mut s = shell();
     s.snapshot["preferences"]["ai"] = json!({"provider":"local","endpoint":"http://localhost:11434/v1","model":"llama"});
