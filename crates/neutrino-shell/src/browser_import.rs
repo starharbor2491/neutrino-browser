@@ -2,6 +2,7 @@
 //! Reads bookmarks and history other browsers keep on this Mac. Chromium-family
 //! browsers share one JSON bookmarks format and one SQLite history format; Firefox
 //! and Safari keep SQLite databases. Safari's bookmarks are read by the host.
+use crate::state::array;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -207,9 +208,167 @@ pub fn logins(source: &str, home: &str) -> Result<Value, &'static str> {
     result.map(|found| json!(found))
 }
 
+/// One DER element: its tag, its contents and what follows it.
+fn der(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, rest) = input.split_first()?;
+    let (&first, rest) = rest.split_first()?;
+    let (length, rest) = if first < 0x80 {
+        (first as usize, rest)
+    } else {
+        let count = (first & 0x7f) as usize;
+        if count == 0 || count > 3 || rest.len() < count {
+            return None;
+        }
+        (rest[..count].iter().fold(0usize, |n, b| n << 8 | *b as usize), &rest[count..])
+    };
+    (rest.len() >= length).then(|| (tag, &rest[..length], &rest[length..]))
+}
+/// The elements in a run of DER: a sequence's contents.
+fn der_children(mut body: &[u8]) -> Option<Vec<(u8, &[u8])>> {
+    let mut out = vec![];
+    while !body.is_empty() {
+        let (tag, value, rest) = der(body)?;
+        out.push((tag, value));
+        body = rest;
+    }
+    Some(out)
+}
+/// The elements inside an encoded DER sequence.
+fn der_items(sequence: &[u8]) -> Option<Vec<(u8, &[u8])>> {
+    let (tag, body, _) = der(sequence)?;
+    if tag != 0x30 {
+        return None;
+    }
+    der_children(body)
+}
+const OID_PBES2: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0d];
+const OID_PBKDF2: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0c];
+const OID_AES256_CBC: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2a];
+const OID_DES3_CBC: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x03, 0x07];
+
+/// A key4.db item NSS encrypted with PBES2 (PBKDF2-HMAC-SHA256, AES-256-CBC):
+/// `{salt, iterations, iv, data}` in base64, for the host to decrypt.
+fn firefox_pbes2(item: &[u8]) -> Option<Value> {
+    use base64::Engine;
+    let b64 = |v: &[u8]| base64::engine::general_purpose::STANDARD.encode(v);
+    let top = der_items(item)?;
+    let ((0x30, algorithm), (0x04, data)) = (top.first()?.clone(), top.get(1)?.clone()) else { return None };
+    let algorithm = der_children(algorithm)?;
+    let ((0x06, OID_PBES2), (0x30, params)) = (algorithm.first()?.clone(), algorithm.get(1)?.clone()) else { return None };
+    let params = der_children(params)?;
+    let kdf = der_children(params.first()?.1)?;
+    let cipher = der_children(params.get(1)?.1)?;
+    let ((0x06, OID_PBKDF2), (0x30, kdf_params)) = (kdf.first()?.clone(), kdf.get(1)?.clone()) else { return None };
+    let kdf_params = der_children(kdf_params)?;
+    let ((0x04, salt), (0x02, iterations)) = (kdf_params.first()?.clone(), kdf_params.get(1)?.clone()) else { return None };
+    let ((0x06, OID_AES256_CBC), (0x04, iv)) = (cipher.first()?.clone(), cipher.get(1)?.clone()) else { return None };
+    let iterations = iterations.iter().fold(0u64, |n, b| n << 8 | *b as u64);
+    // NSS keeps 14 bytes; the IV is that octet string's whole encoding, 04 0E and the bytes.
+    let iv: Vec<u8> = match iv.len() { 14 => [&[0x04, 0x0e][..], iv].concat(), 16 => iv.to_vec(), _ => return None };
+    (iterations > 0 && iterations <= 10_000_000 && !data.is_empty() && data.len() % 16 == 0)
+        .then(|| json!({"salt": b64(salt), "iterations": iterations, "iv": b64(&iv), "data": b64(data)}))
+}
+/// One encrypted login field from logins.json: `{cipher: "des3"|"aes", iv, data}`.
+fn firefox_field(encoded: &str) -> Option<Value> {
+    use base64::Engine;
+    let b64 = |v: &[u8]| base64::engine::general_purpose::STANDARD.encode(v);
+    let raw = base64::engine::general_purpose::STANDARD.decode(encoded.trim()).ok()?;
+    let items = der_items(&raw)?;
+    let ((0x30, algorithm), (0x04, data)) = (items.get(1)?.clone(), items.get(2)?.clone()) else { return None };
+    let algorithm = der_children(algorithm)?;
+    let ((0x06, oid), (0x04, iv)) = (algorithm.first()?.clone(), algorithm.get(1)?.clone()) else { return None };
+    let cipher = match (oid, iv.len()) { (OID_DES3_CBC, 8) => "des3", (OID_AES256_CBC, 16) => "aes", _ => return None };
+    (!data.is_empty() && data.len() <= 16_384).then(|| json!({"cipher": cipher, "iv": b64(iv), "data": b64(data)}))
+}
+/// Firefox's saved logins from its last used profile, still encrypted: the key store's
+/// salt and items plus each login's fields, which only the host decrypts.
+pub fn firefox_logins(home: &str) -> Result<Value, &'static str> {
+    use base64::Engine;
+    let home = Path::new(home);
+    if !home.is_absolute() {
+        return Err("Invalid home folder.");
+    }
+    let profile = firefox_places(home).and_then(|p| p.parent().map(Path::to_path_buf)).ok_or("Firefox wasn’t found on this Mac.")?;
+    let logins: Value = serde_json::from_slice(&read_bounded(&profile.join("logins.json")).map_err(|_| "Firefox has no saved passwords on this Mac.")?)
+        .map_err(|_| "Firefox’s saved passwords use an unsupported format.")?;
+    let copy = std::env::temp_dir().join(format!("neutrino-key4-{}.sqlite", std::process::id()));
+    std::fs::write(&copy, read_bounded(&profile.join("key4.db")).map_err(|_| "Firefox’s password key wasn’t found.")?)
+        .map_err(|_| "Firefox’s password key couldn’t be copied for import.")?;
+    let keys = (|| {
+        let db = rusqlite::Connection::open_with_flags(&copy, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|_| "Firefox’s password key couldn’t be opened.")?;
+        let (salt, check): (Vec<u8>, Vec<u8>) = db
+            .query_row("SELECT item1, item2 FROM metaData WHERE id = 'password'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|_| "Firefox’s password key uses an unsupported format.")?;
+        let id: &[u8] = &[0xf8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let mut query = db.prepare("SELECT a11, a102 FROM nssPrivate").map_err(|_| "Firefox’s password key uses an unsupported format.")?;
+        let key = query
+            .query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))
+            .map_err(|_| "Firefox’s password key couldn’t be read.")?
+            .flatten()
+            .find(|(_, a102)| a102 == id)
+            .map(|(a11, _)| a11)
+            .ok_or("Firefox’s password key wasn’t found.")?;
+        Ok::<_, &'static str>((salt, check, key))
+    })();
+    let _ = std::fs::remove_file(&copy);
+    let (salt, check, key) = keys?;
+    // Profiles from before 2019 use an older scheme; their passwords can be exported as CSV.
+    let (Some(check), Some(key)) = (firefox_pbes2(&check), firefox_pbes2(&key)) else {
+        return Err("This Firefox profile uses an older password format. Export a CSV from Firefox instead.");
+    };
+    let found: Vec<Value> = array(&logins["logins"]).iter().take(5000).filter_map(|l| {
+        let origin = l["hostname"].as_str().filter(|o| web(o) && o.len() <= 2048)?;
+        Some(json!({"origin": origin, "username": firefox_field(l["encryptedUsername"].as_str()?)?, "password": firefox_field(l["encryptedPassword"].as_str()?)?}))
+    }).collect();
+    if found.is_empty() {
+        return Err("Firefox has no saved passwords on this Mac.");
+    }
+    Ok(json!({"globalSalt": base64::engine::general_purpose::STANDARD.encode(salt), "check": check, "key": key, "logins": found}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A key store and logins made as NSS makes them (PBES2 with PBKDF2-HMAC-SHA256 and
+    // AES-256-CBC; logins in 3DES-CBC), from a fixed salt and key.
+    const FIREFOX_CHECK: &str = "308182306e06092a864886f70d01050d3061304206092a864886f70d01050c30350420070707070707070707070707070707070707070707070707070707070707070702022710020120300a06082a864886f70d0209301b060960864801650304012a040e09090909090909090909090909090410ee92a0e9f954b4ba745b00d454fee861";
+    const FIREFOX_KEY: &str = "308192306e06092a864886f70d01050d3061304206092a864886f70d01050c30350420050505050505050505050505050505050505050505050505050505050505050502022710020120300a06082a864886f70d0209301b060960864801650304012a040e03030303030303030303030303030420d32d2813b7954b0e789c03c1eef3aa5fabf7173f586e9cc2523c5c0d40cd087d";
+    const FIREFOX_USERNAME: &str = "MDoEEPgAAAAAAAAAAAAAAAAAAAEwFAYIKoZIhvcNAwcECAEBAQEBAQEBBBBhM6DTSre88jrDlqX1qexG";
+    const FIREFOX_PASSWORD: &str = "MEIEEPgAAAAAAAAAAAAAAAAAAAEwFAYIKoZIhvcNAwcECAICAgICAgICBBjEbqDd/qCdwi11SCXGCP5jKfgz5Uf8UMU=";
+
+    #[test]
+    fn reads_firefox_key_store_and_logins_still_encrypted() {
+        let hex = |h: &str| (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect::<Vec<u8>>();
+        let home = std::env::temp_dir().join(format!("neutrino-firefox-test-{}", std::process::id()));
+        let profile = home.join("Library/Application Support/Firefox/Profiles/abc.default-release");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("places.sqlite"), b"").unwrap();
+        let db = rusqlite::Connection::open(profile.join("key4.db")).unwrap();
+        db.execute_batch("CREATE TABLE metaData (id, item1, item2); CREATE TABLE nssPrivate (id, a11, a102);").unwrap();
+        db.execute("INSERT INTO metaData VALUES ('password', ?1, ?2)", rusqlite::params![(1u8..=20).collect::<Vec<u8>>(), hex(FIREFOX_CHECK)]).unwrap();
+        let id: Vec<u8> = [vec![0xf8], vec![0; 14], vec![1]].concat();
+        db.execute("INSERT INTO nssPrivate VALUES (1, ?1, ?2)", rusqlite::params![hex(FIREFOX_KEY), id]).unwrap();
+        drop(db);
+        let logins = json!({"logins": [
+            {"hostname": "https://example.com", "encryptedUsername": FIREFOX_USERNAME, "encryptedPassword": FIREFOX_PASSWORD},
+            {"hostname": "chrome://FirefoxAccounts", "encryptedUsername": FIREFOX_USERNAME, "encryptedPassword": FIREFOX_PASSWORD},
+        ]});
+        std::fs::write(profile.join("logins.json"), logins.to_string()).unwrap();
+        let found = firefox_logins(home.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(found["globalSalt"], "AQIDBAUGBwgJCgsMDQ4PEBESExQ=");
+        assert_eq!(found["check"]["iterations"], 10000);
+        assert_eq!(found["check"]["iv"], "BA4JCQkJCQkJCQkJCQkJCQ==");
+        assert_eq!(found["key"]["iv"], "BA4DAwMDAwMDAwMDAwMDAw==");
+        let rows = found["logins"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["origin"], "https://example.com");
+        assert_eq!(rows[0]["username"]["cipher"], "des3");
+        assert_eq!(rows[0]["username"]["iv"], "AQEBAQEBAQE=");
+        assert!(firefox_pbes2(&hex(FIREFOX_CHECK)[..40]).is_none());
+        assert!(firefox_field("bm90IERFUg==").is_none());
+    }
 
     #[test]
     fn reads_chromium_logins_as_encrypted_values() {

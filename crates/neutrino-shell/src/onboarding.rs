@@ -21,7 +21,7 @@ pub const IMPORT_SOURCES: &[(&str, &str)] = &[
 ];
 
 /// Browsers whose saved passwords can be imported: those that keep them in Chromium's format.
-pub const PASSWORD_SOURCES: &[&str] = &["chrome", "edge", "brave", "arc", "vivaldi", "opera", "operagx"];
+pub const PASSWORD_SOURCES: &[&str] = &["chrome", "edge", "brave", "arc", "vivaldi", "opera", "operagx", "firefox"];
 
 pub fn render(s: &Shell) -> Markup {
     let preset = text(&s.setup, "preset");

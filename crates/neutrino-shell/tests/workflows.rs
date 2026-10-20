@@ -468,14 +468,15 @@ fn array_all_null(v: &Value, key: &str) -> bool {
     v.as_array().unwrap().iter().all(|f| f[key].is_null())
 }
 #[test]
-fn passwords_import_from_chromium_family_browsers_only() {
+fn passwords_import_from_chromium_family_browsers_and_firefox() {
     let mut s = shell();
     s.dispatch(json!({"op":"screen","value":"settings"}));
     let html = s.dispatch(json!({"op":"section","value":"passwords"}))["html"].as_str().unwrap().to_string();
     assert!(html.contains("data-op=\"browser-passwords\" data-value=\"arc\"") && !html.contains("data-op=\"browser-passwords\" data-value=\"safari\""));
     let r = s.dispatch(json!({"op":"browser-passwords","value":"brave"}));
     assert_eq!(commands(&r)[0], json!({"op":"importBrowserPasswords","value":"brave"}));
-    assert!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"firefox"}))).is_empty());
+    assert_eq!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"firefox"})))[0], json!({"op":"importBrowserPasswords","value":"firefox"}));
+    assert!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"safari"}))).is_empty());
     s.snapshot["modules"] = json!([{"id":"org.neutrino.password-manager","capability":"feature","bundled":true,"installed":true,"enabled":false}]);
     assert!(commands(&s.dispatch(json!({"op":"browser-passwords","value":"brave"}))).is_empty());
 }

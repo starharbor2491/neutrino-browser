@@ -219,6 +219,7 @@ pub fn request(r: Value) -> Result<Value, &'static str> {
         "browserHistory" => crate::browser_import::history(text(&r, "source"), text(&r, "home"))?,
         "browserBookmarks" => crate::browser_import::bookmarks(text(&r, "source"), text(&r, "home"))?,
         "browserLogins" => crate::browser_import::logins(text(&r, "source"), text(&r, "home"))?,
+        "firefoxLogins" => crate::browser_import::firefox_logins(text(&r, "home"))?,
         "resolveAddress" => json!(resolve_address(text(&r,"input"), text(&r,"search"))),
         "isWebURL" => json!(Url::parse(text(&r,"url")).is_ok_and(|u| matches!(u.scheme(),"http"|"https") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none())),
         "pageTitle" => json!(text(&r,"title").chars().take(512).collect::<String>()),

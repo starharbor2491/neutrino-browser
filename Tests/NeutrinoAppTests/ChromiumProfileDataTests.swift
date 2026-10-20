@@ -14,6 +14,20 @@ struct ChromiumProfileDataTests {
         #expect(BrowserPasswordImport.decrypt(Data("v11".utf8) + value.dropFirst(3), key: key) == nil)
         #expect(BrowserPasswordImport.decrypt(value, key: Data(repeating: 1, count: 16)) == nil)
     }
+    @Test func importedFirefoxPasswordsDecryptWithTheKeyStore() throws {
+        // What Rust reads from a key4.db and logins.json made as NSS makes them (PBES2 with
+        // PBKDF2-HMAC-SHA256 and AES-256-CBC, logins in 3DES-CBC), without a primary password.
+        let json = #"{"check":{"data":"7pKg6flUtLp0WwDUVP7oYQ==","iterations":10000,"iv":"BA4JCQkJCQkJCQkJCQkJCQ==","salt":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="},"globalSalt":"AQIDBAUGBwgJCgsMDQ4PEBESExQ=","key":{"data":"0y0oE7eVSw54nAPB7vOqX6v3Fz9YbpzCUjxcDUDNCH0=","iterations":10000,"iv":"BA4DAwMDAwMDAwMDAwMDAw==","salt":"BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU="},"logins":[{"origin":"https://example.com","password":{"cipher":"des3","data":"xG6g3f6gncItdUglxgj+Yyn4M+VH/FDF","iv":"AgICAgICAgI="},"username":{"cipher":"des3","data":"YTOg00q3vPI6w5al9ansRg==","iv":"AQEBAQEBAQE="}}]}"#
+        let found = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let logins = try BrowserPasswordImport.firefoxDecrypt(found)
+        #expect(logins.count == 1)
+        #expect(logins.first?.origin == "https://example.com")
+        #expect(logins.first?.username == "ada@example.com")
+        #expect(logins.first?.password == "correct horse é")
+        // Another global salt is what a primary password looks like: the check fails.
+        var locked = found; locked["globalSalt"] = Data(repeating: 9, count: 20).base64EncodedString()
+        #expect(throws: (any Error).self) { try BrowserPasswordImport.firefoxDecrypt(locked) }
+    }
     @Test func erasesOnlySelectedProfileAndDoesNotFollowInteriorLinks() throws {
         let root = temporaryDirectory(), id = UUID(), other = UUID()
         defer { try? FileManager.default.removeItem(at: root) }
