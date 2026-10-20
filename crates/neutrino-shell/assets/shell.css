@@ -4460,6 +4460,10 @@ details.start-guide > .guide-keys {
 .style-arc {
   --tone-strength: 34%;
 }
+/* The rail sits on the Space's tinted gradient; quieter text stays close to the ink. */
+.style-arc > .workspace-rail {
+  --muted: color-mix(in oklab, var(--ink) 82%, var(--bg));
+}
 .style-arc.browser-shell {
   padding: 8px 8px 8px 0;
   background:
@@ -4643,7 +4647,8 @@ details.start-guide > .guide-keys {
 .style-vivaldi .horizontal-tabs {
   gap: 2px;
   padding: 4px 6px 0;
-  background: var(--accent);
+  /* The accent, deepened just enough that white labels read at 4.5:1 with every theme. */
+  background: color-mix(in oklab, var(--accent) 78%, #000);
 }
 .style-vivaldi .horizontal-group .tab-row,
 .style-vivaldi .horizontal-tab-scroll > .stack-tab {
@@ -4656,7 +4661,7 @@ details.start-guide > .guide-keys {
 }
 .style-vivaldi .horizontal-tabs .horizontal-group-label,
 .style-vivaldi .horizontal-tabs .new-tab {
-  color: #fff;
+  color: var(--on-strip, #fff);
 }
 .style-vivaldi .horizontal-tab-scroll > .stack-tab.active,
 .style-vivaldi .horizontal-group .tab-row.active {
@@ -4666,11 +4671,11 @@ details.start-guide > .guide-keys {
 }
 .style-vivaldi .tab-strip-lead .workspace-switch,
 .style-vivaldi .tab-strip-lead .workspace-switch .icon {
-  color: #fff;
+  color: var(--on-strip, #fff);
 }
 .style-vivaldi .horizontal-tab-scroll > .horizontal-group > .icon-button,
 .style-vivaldi .horizontal-tabs > .icon-button {
-  color: #fff;
+  color: var(--on-strip, #fff);
 }
 .style-vivaldi .page-toolbar {
   height: 40px;
@@ -5703,12 +5708,12 @@ input[type="color"] {
 .theme-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 8px;
 }
 .theme-chip {
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--chip-ground, var(--chip)) 50%, var(--chip) 50%);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent);

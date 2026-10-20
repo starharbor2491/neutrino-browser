@@ -41,6 +41,15 @@ fn theme_style(s: &Shell) -> String {
         style.push_str(&format!(
             ";--accent:#{accent};--tint:#{accent};--tint-light:#{accent}"
         ));
+        // Text drawn on the accent (Vivaldi's tab strip): white, or near-black on light accents.
+        let channel = |i: usize| {
+            let v = u8::from_str_radix(&accent[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        let luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+        if luminance > 0.3 {
+            style.push_str(";--on-strip:#16161a");
+        }
     }
     let surface = text(t, "surfaceHex").trim_start_matches('#');
     let ink = text(t, "textHex").trim_start_matches('#');
@@ -1306,7 +1315,7 @@ fn assistant(s: &Shell) -> Markup {
     let turn = |question: &str, answer: &str, live: bool| html! {
         div class="assistant-turn" {
             p class="assistant-question"{(question)}
-            div class=(if live {"assistant-response live"} else {"assistant-response"}) aria-live=[live.then_some("polite")] aria-busy=[live.then_some("true")] {
+            div class=(if live {"assistant-response live"} else {"assistant-response"}) {
                 @if answer.is_empty() {span class="assistant-typing" aria-label="Answering"{i{}i{}i{}}} @else {(answer)}
             }
         }
@@ -1314,7 +1323,8 @@ fn assistant(s: &Shell) -> Markup {
     html! {div class="assistant-content"{@if s.snapshot["preferences"]["ai"].is_null(){(empty("Connect an AI provider","Ask questions about the page you’re reading. You need an API key, an OpenAI account, or a local model.","spark"))button class="button primary" data-op="screen" data-value="settings" data-section="ai"{"Set up a provider"}} @else {
         p class="section-description"{"Ask about this page. Sending shares the page’s text with your configured provider; if you’ve selected text on the page, only the selection is shared."}
         @if !turns.is_empty() || !pending.is_empty() {
-            div class="assistant-thread"{
+            // A log: screen readers read each finished answer once, not every streamed piece.
+            div class="assistant-thread" role="log" aria-live="polite" aria-busy=(busy.to_string()) {
                 @for t in turns {(turn(text(t,"question"),text(t,"answer"),false))}
                 @if !pending.is_empty() {(turn(pending,text(&s.snapshot,"assistantResponse"),true))}
             }
