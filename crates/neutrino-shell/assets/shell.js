@@ -1753,7 +1753,10 @@
   document.addEventListener("dragend", () => { bookmarkDrag = null; });
   // A tab dropped outside the window opens in a new window, as in Chrome and Arc.
   document.addEventListener("dragleave", (e) => {
-    if (!e.relatedTarget) markIncoming(false);
+    if (e.relatedTarget) return;
+    markIncoming(false);
+    // Leaving the window, for the page or elsewhere, starts the stack dwell over.
+    resetDwell();
   });
   document.addEventListener("dragend", (e) => {
     const outside = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth || e.clientY >= innerHeight;

@@ -29,6 +29,20 @@ final class BrowserFeatures {
     private var thumbnailData: [UUID: String] = [:]
     /// The address each Chromium thumbnail shows; Chromium pages are pictured once per page.
     private var thumbnailURLs: [UUID: URL] = [:]
+    /// Safari's Tab Overview is open: the pictures taken so far go to the interface.
+    var overviewVisible = false {
+        didSet {
+            guard overviewVisible, !oldValue else { return }
+            for (id, image) in thumbnails where thumbnailData[id] == nil { thumbnailData[id] = Self.thumbnailAddress(image) }
+            refresh()
+        }
+    }
+    private func picturesWanted(_ model: BrowserModel) -> Bool { model.configuration.layout.tabThumbnails == true || overviewVisible }
+    private static func thumbnailAddress(_ image: NSImage) -> String? {
+        // Pictures travel with every interface refresh, so they are small: 240 px wide, at most 16 KB.
+        guard let jpeg = jpeg(image, maxWidth: 240, quality: 0.5), jpeg.count <= 16_000 else { return nil }
+        return "data:image/jpeg;base64," + jpeg.base64EncodedString()
+    }
     private lazy var preview = TabPreviewPanel()
     /// A sign-in waiting for Save, Never or Not now. The password never reaches the interface.
     private var passwordPrompt: (profileID: UUID, credential: LocalCredential, update: Bool)?
@@ -128,7 +142,7 @@ final class BrowserFeatures {
         if let queue = playlist, !model.isPrivate, let item = app.library.preferences.readingList?.first(where: { $0.id == queue.items[queue.position] }) {
             snapshot["playlist"] = ["position": queue.position + 1, "count": queue.items.count, "title": item.title]
         }
-        if model.configuration.layout.tabThumbnails == true, !model.isPrivate {
+        if picturesWanted(model), !model.isPrivate {
             snapshot["tabThumbnails"] = Dictionary(uniqueKeysWithValues: thumbnailData.prefix(60).map { ($0.key.uuidString, $0.value) })
         }
         if throttled.remove(model.session.selectedTabID) != nil { model.liveEngineTab(model.session.selectedTabID)?.setProcessorThrottle(1) }
@@ -318,7 +332,10 @@ final class BrowserFeatures {
     }
     /// Pictures the selected tab while it is showing, for its hover preview later.
     private func captureThumbnail(_ model: BrowserModel) async {
-        guard app.feature("tab-previews") || model.configuration.layout.tabThumbnails == true else { thumbnails.removeAll(); thumbnailData.removeAll(); return }
+        // Hover previews, tab-bar pictures and Safari's Tab Overview all use these pictures.
+        guard app.feature("tab-previews") || model.configuration.layout.tabThumbnails == true || model.configuration.theme.preset == "safari" else {
+            thumbnails.removeAll(); thumbnailData.removeAll(); return
+        }
         let id = model.session.selectedTabID
         guard let page = model.liveEngineTab(id), let url = page.url, !page.loading, page.nativeView.window != nil,
               page.engineID == .webkit || thumbnailURLs[id] != url,
@@ -330,11 +347,8 @@ final class BrowserFeatures {
         image.draw(in: NSRect(origin: .zero, size: NSSize(width: width, height: image.size.height * scale)).offsetBy(dx: 0, dy: small.size.height - image.size.height * scale))
         small.unlockFocus()
         thumbnails[id] = small
-        // Pictures in tab rows travel with every interface refresh, so they are small:
-        // 240 px wide, about the width a sidebar row shows, and at most 16 KB each.
-        if model.configuration.layout.tabThumbnails == true, let jpeg = Self.jpeg(small, maxWidth: 240, quality: 0.5), jpeg.count <= 16_000 {
-            thumbnailData[id] = "data:image/jpeg;base64," + jpeg.base64EncodedString(); refresh()
-        }
+        if picturesWanted(model), let address = Self.thumbnailAddress(small) { thumbnailData[id] = address; refresh() }
+        else { thumbnailData[id] = nil }
         let open = Set(model.session.tabs.map(\.id))
         thumbnails = thumbnails.filter { open.contains($0.key) }
         thumbnailData = thumbnailData.filter { open.contains($0.key) }
@@ -964,6 +978,10 @@ final class BrowserFeatures {
         }
     }
     private func applySite(_ host: String, reloadWebKit: Bool) {
+        // Chromium keeps camera and microphone choices per profile: every Blink tab hears the change.
+        for model in app.windows.values.compactMap(\.model) where !model.isPrivate {
+            for (_, page) in model.liveEngineTabs where page.engineID == .chromium { page.setSitePermissions(app.library.preferences.siteSettings ?? [:]) }
+        }
         for model in app.windows.values.compactMap(\.model) {
             for (tabID, page) in model.liveEngineTabs where ContentBlocking.site(page.url) == host {
                 model.pageLoaded(page, id: tabID)
@@ -1264,10 +1282,12 @@ extension BrowserModel {
         if preferences.stripTracking != false, !ContentBlocking.isException(tab.url?.host, in: preferences.shieldsDown ?? []),
            let url = tab.url, let script = PageScript.source("deAmp") {
             Task { [weak self] in
-                guard let value = try? await tab.runPageScript(script), let canonical = URL(string: value),
-                      // Back on the AMP page left last time means the canonical page redirected here: stop.
-                      AddressResolver.isWebURL(canonical), let self, tab.url == url, self.deAmped[id] != url else { return }
-                self.deAmped[id] = url
+                guard let value = try? await tab.runPageScript(script), let self, tab.url == url else { return }
+                // A page that isn't AMP ends the chain, so the same AMP page can be de-AMPed again later.
+                guard let canonical = URL(string: value), AddressResolver.isWebURL(canonical) else { self.deAmped[id] = nil; return }
+                // An AMP page already left in this chain means the pages lead back to each other: stay.
+                guard !(self.deAmped[id]?.contains(url) ?? false) else { return }
+                self.deAmped[id, default: []].insert(url)
                 tab.load(canonical)
             }
         }

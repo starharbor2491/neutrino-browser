@@ -41,13 +41,20 @@ fn theme_style(s: &Shell) -> String {
         style.push_str(&format!(
             ";--accent:#{accent};--tint:#{accent};--tint-light:#{accent}"
         ));
-        // Text drawn on the accent (Vivaldi's tab strip): white, or near-black on light accents.
+        // Text on the accent: white or near-black, whichever reads better. Vivaldi's strip is the
+        // accent mixed 78% with black in oklab, which scales its luminance by 0.78³.
         let channel = |i: usize| {
             let v = u8::from_str_radix(&accent[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
             if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
         };
         let luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-        if luminance > 0.3 {
+        let dark_reads_better = |ground: f64| (ground + 0.05) / 0.058 > 1.05 / (ground + 0.05);
+        if dark_reads_better(luminance) {
+            style.push_str(";--on-accent:#16161a");
+        } else {
+            style.push_str(";--on-accent:#ffffff");
+        }
+        if dark_reads_better(luminance * 0.78_f64.powi(3)) {
             style.push_str(";--on-strip:#16161a");
         }
     }
@@ -55,7 +62,8 @@ fn theme_style(s: &Shell) -> String {
     let ink = text(t, "textHex").trim_start_matches('#');
     if valid(surface) && valid(ink) {
         style.push_str(&format!(
-            ";--bg:#{surface};--rail:#{surface};--surface:#{surface};--ink:#{ink};--muted:#{ink}"
+            // Secondary text is the text colour eased toward the window, still well above 4.5:1.
+            ";--bg:#{surface};--rail:#{surface};--surface:#{surface};--ink:#{ink};--muted:color-mix(in oklab, #{ink} 74%, #{surface})"
         ));
     }
     for (component, key) in [
@@ -1105,7 +1113,8 @@ fn editor_extra(s: &Shell) -> Markup {
                 }}
             }
             p class="control-label"{"Built-in buttons"}
-            @for (key, label) in REMOVABLE_BUTTONS {
+            // Arc has no bookmark star, so there is nothing for that switch to remove.
+            @for (key, label) in REMOVABLE_BUTTONS.iter().filter(|(k, _)| !(*k == "bookmark" && style(s) == "arc")) {
                 @let hidden: Vec<&str> = array(&layout["hiddenButtons"]).iter().filter_map(Value::as_str).collect();
                 @let shown = !hidden.contains(key);
                 @let next: Vec<&str> = if shown { hidden.iter().copied().chain([*key]).collect() } else { hidden.iter().copied().filter(|h| h != key).collect() };

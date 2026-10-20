@@ -1289,7 +1289,9 @@ impl Shell {
                 .unwrap_or(false),
             _ => v.is_boolean(),
         };
-        if valid && self.draft.as_ref().unwrap()[target][key] != *v {
+        // A named accent replaces a custom accent colour, even when the name itself is unchanged.
+        let custom_accent = key == "accent" && !self.draft.as_ref().unwrap()["theme"]["accentHex"].is_null();
+        if valid && (self.draft.as_ref().unwrap()[target][key] != *v || custom_accent) {
             let gesture = bound(text(r, "gesture"), 80);
             if gesture.is_empty() || gesture != self.adjustment {
                 self.push_undo();
@@ -1302,6 +1304,10 @@ impl Shell {
                 for k in ["surfaceHex", "textHex", "themePack"] {
                     draft["theme"][k] = Value::Null;
                 }
+            }
+            if key == "accent" {
+                draft["theme"]["accentHex"] = Value::Null;
+                draft["theme"]["themePack"] = Value::Null;
             }
         }
     }

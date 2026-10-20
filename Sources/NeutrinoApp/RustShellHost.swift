@@ -536,6 +536,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         // Read aloud belongs to the Reader: leaving it stops the speech.
         if response["screen"] as? String != "reader", readerVoice?.speaking == true { readerVoice?.stop() }
         features.sampleResources = response["performanceVisible"] as? Bool == true
+        features.overviewVisible = response["screen"] as? String == "overview"
         renderGeneration += 1
         var result = response; result["generation"] = renderGeneration
         showingOverlay = response["overlay"] as? Bool ?? true

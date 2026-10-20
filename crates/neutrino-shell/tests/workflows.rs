@@ -254,6 +254,18 @@ fn safari_tab_overview_lists_tabs_and_opens_one() {
     assert_eq!(s.screen, "overview");
 }
 #[test]
+fn a_named_accent_replaces_a_custom_accent_colour() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["accentHex"] = json!("ef3939");
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    s.dispatch(json!({"op":"screen","value":"editor"}));
+    // The stored name is already "rose"; choosing it again still drops the custom colour.
+    s.dispatch(json!({"op":"editor-value","key":"accent","value":"rose"}));
+    assert!(s.draft.as_ref().unwrap()["theme"]["accentHex"].is_null());
+    s.dispatch(json!({"op":"editor-value","key":"accent","value":"teal"}));
+    assert_eq!(s.draft.as_ref().unwrap()["theme"]["accent"], "teal");
+}
+#[test]
 fn choosing_a_mode_drops_a_themes_window_colours() {
     let mut s = shell();
     s.snapshot["configuration"]["theme"]["surfaceHex"] = json!("1c1420");

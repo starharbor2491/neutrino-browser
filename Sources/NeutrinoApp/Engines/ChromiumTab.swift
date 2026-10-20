@@ -390,7 +390,10 @@ final class ChromiumTab: BrowserEngineTab {
     private var permissionDefaults: Set<String>?
     private var sitePermissions: [String: SiteSettings]?, sentSitePermissions: [String: SiteSettings] = [:]
     override func setSitePermissions(_ sites: [String: SiteSettings]) {
-        sitePermissions = sites.filter { $0.value.camera != nil || $0.value.microphone != nil || sentSitePermissions[$0.key] != nil }
+        // A site that was sent before and has no choice now goes back to the default.
+        var wanted = sites.filter { $0.value.camera != nil || $0.value.microphone != nil }
+        for site in sentSitePermissions.keys where wanted[site] == nil { wanted[site] = SiteSettings() }
+        sitePermissions = wanted
         if activeContentKnown && !loading { sendPrivacyPreferences() }
     }
     override func setPermissionDefaults(blocked: Set<String>) {
@@ -409,7 +412,7 @@ final class ChromiumTab: BrowserEngineTab {
             // Chromium keeps its own record per origin; the site and its www name both get the choice.
             for (site, settings) in sites.sorted(by: { $0.key < $1.key }).prefix(300) where site.count <= 253 && !site.contains("/") {
                 guard sentSitePermissions[site] != settings else { continue }
-                sentSitePermissions[site] = settings
+                sentSitePermissions[site] = settings.camera == nil && settings.microphone == nil ? nil : settings
                 for (kind, choice) in [("camera", settings.camera), ("microphone", settings.microphone)] {
                     let value: Double = choice == "allow" ? 1 : choice == "block" ? 2 : 0
                     for host in [site, "www." + site] { command(Int(NEUTRINO_CEF_SITE_PERMISSION), text: kind + "\nhttps://" + host + "/", value: value) }

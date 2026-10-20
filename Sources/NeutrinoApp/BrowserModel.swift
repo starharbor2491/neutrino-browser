@@ -71,7 +71,8 @@ final class BrowserModel: ObservableObject {
     }
     private var movedTabPlaceholders: [UUID: BrowserEngineTab] = [:]
     /// The AMP page each tab last left for its canonical article, so two pages can't bounce.
-    var deAmped: [UUID: URL] = [:]
+    /// AMP pages each tab left for their canonical article, since the last page that wasn't AMP.
+    var deAmped: [UUID: Set<URL>] = [:]
     private var spacePresentations: [UUID: WindowSession] = [:]
     var space: BrowserSpace? { app.library.spaces?.first { $0.id == session.spaceID } }
     var configuration: Configuration { app.previewConfiguration ?? app.library.configuration(for: session.spaceID) }

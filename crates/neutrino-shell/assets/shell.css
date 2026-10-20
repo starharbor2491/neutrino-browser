@@ -10,7 +10,7 @@
   --surface: #202025;
   --elevated: #27272e;
   --ink: #f0f0f3;
-  --muted: #a5a5b0;
+  --muted: #b2b2bc;
   --line: #ffffff17;
   --accent: #ac93fa;
   --on-accent: #17121f;
@@ -156,7 +156,7 @@ kbd {
     11px -apple-system,
     BlinkMacSystemFont,
     sans-serif;
-  color: var(--muted);
+  color: color-mix(in oklab, var(--muted) 70%, var(--ink));
   white-space: nowrap;
 }
 svg {
@@ -199,7 +199,7 @@ svg {
   --surface: #f7f7fa;
   --elevated: #fff;
   --ink: #232329;
-  --muted: #676771;
+  --muted: #5a5a63;
   --line: #00000017;
   --hover: #0000000a;
   --selected: #0000000f;
@@ -218,7 +218,7 @@ svg {
     --surface: #f7f7fa;
     --elevated: #fff;
     --ink: #232329;
-    --muted: #676771;
+    --muted: #5a5a63;
     --line: #00000017;
     --hover: #0000000a;
     --selected: #0000000f;
@@ -741,7 +741,8 @@ svg {
   border-radius: calc(6px * var(--sq));
   font-weight: 650;
   font-size: 11px;
-  color: var(--tone, var(--muted));
+  /* The Space's tint, pulled toward the text colour so the letter reads on any ground. */
+  color: color-mix(in oklab, var(--tone, var(--muted)) 45%, var(--ink));
   background: color-mix(in oklab, var(--tone, var(--muted)) 20%, transparent);
   transition:
     background var(--t-med) var(--ease-out),
@@ -752,6 +753,11 @@ svg {
   color: var(--on-accent);
   background: var(--tone, var(--accent));
   transform: scale(1.08);
+}
+/* Space tones are light pastels: their letter is dark in either mode. */
+.space-button.selected .space-symbol[data-tone],
+.space-button.selected[data-tone] .space-symbol {
+  color: #17121f;
 }
 .space-add .icon {
   width: 15px;
@@ -1281,6 +1287,11 @@ li.done .guide-check {
 @container strip-tab (max-width: 76px) {
   .tab-row:not(.active) .tab-close {
     display: none !important;
+  }
+  /* Safari shows a crowded tab's close button while the pointer or focus is on it. */
+  .style-safari .tab-row:not(.active):is(:hover, :focus-within) .tab-close {
+    display: flex !important;
+    opacity: 1;
   }
   .tab-row:not(.active) .tab-select {
     justify-content: center;
@@ -2157,10 +2168,12 @@ li.done .guide-check {
   background: currentColor;
   opacity: 0.6;
 }
+/* The dot carries the accent; the word stays in the text colour so it reads with any accent. */
 .module-status.active {
-  color: var(--accent);
+  color: var(--ink);
 }
 .module-status.active::before {
+  background: var(--accent);
   opacity: 1;
 }
 .module-card-footer .button {
@@ -4109,6 +4122,10 @@ details.start-guide > .guide-keys {
   width: 20px;
   height: 20px;
 }
+.style-vivaldi .tab-strip-lead .space-symbol {
+  color: var(--on-strip, #fff);
+  background: color-mix(in oklab, var(--on-strip, #fff) 18%, transparent);
+}
 /* Top tab strip */
 .horizontal-tabs {
   align-items: center;
@@ -4590,14 +4607,14 @@ details.start-guide > .guide-keys {
 }
 /* GX's Light appearance: a lighter frame around the same angular layout. */
 .app-shell[data-mode="light"] .style-gx {
-  --gx-ground: color-mix(in oklab, var(--bg) 90%, #000);
+  --gx-ground: color-mix(in oklab, var(--bg) 95%, #000);
   --gx-tab: color-mix(in oklab, var(--surface) 50%, var(--bg));
   --gx-tab-active: var(--surface);
   --gx-strip: var(--surface);
 }
 @media (prefers-color-scheme: light) {
   .app-shell[data-mode="system"] .style-gx {
-    --gx-ground: color-mix(in oklab, var(--bg) 90%, #000);
+    --gx-ground: color-mix(in oklab, var(--bg) 95%, #000);
     --gx-tab: color-mix(in oklab, var(--surface) 50%, var(--bg));
     --gx-tab-active: var(--surface);
     --gx-strip: var(--surface);
@@ -4738,8 +4755,9 @@ details.start-guide > .guide-keys {
 .style-safari .horizontal-group .tab-row {
   flex: 1;
   width: auto;
-  /* As in Safari, crowded inactive tabs shrink to their icon before the bar scrolls. */
-  min-width: 36px;
+  /* As in Safari, crowded inactive tabs shrink to their icon before the bar scrolls,
+     keeping room for the close button that appears on hover. */
+  min-width: 60px;
   max-width: 260px;
   justify-content: center;
 }
