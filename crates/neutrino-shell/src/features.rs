@@ -17,7 +17,7 @@ pub const OPS: &[&str] = &[
     "delete-profile", "capture-mode", "capture-area", "markup", "split-axis", "custom-rules", "search-engine",
     "address-book", "shortcut", "chain", "run-action", "rail-peek", "setting", "record-shortcut",
     "library-filter", "board-select", "boost", "startup-pages", "split-ratio", "tidy-tabs", "link-route", "site-reset", "filter-list", "password-prompt", "move-bookmark", "tab-preview", "stack-tabs", "card", "feed", "dial-group",
-    "gesture", "gesture-action",
+    "gesture", "gesture-action", "overview-open",
 ];
 
 /// Opera GX's background music, generated in the interface: (id, name, what it sounds like).
@@ -195,6 +195,7 @@ pub const ACTIONS: &[(&str, &str, &str, &str)] = &[
     ("task-manager", "Task manager", "activity", "shift+esc"),
     ("clear-data", "Clear browsing data", "trash", "shift+cmd+delete"),
     ("tab-search", "Search tabs", "search", "shift+cmd+a"),
+    ("tab-overview", "Show all tabs", "grid", ""),
     ("sidebar", "Show or hide sidebar", "sidebar", "cmd+b"),
     ("focus", "Focus mode", "focus", ""),
     ("zoom-in", "Zoom in", "plus", "cmd+="),
@@ -291,6 +292,7 @@ pub fn action_request(s: &Shell, id: &str) -> Option<Value> {
         "task-manager" => json!({"op":"screen","value":"settings","section":"performance"}),
         "clear-data" => json!({"op":"menu","value":"clear-data"}),
         "tab-search" => json!({"op":"menu","value":"tab-search"}),
+        "tab-overview" => json!({"op":"screen","value":"overview"}),
         "sidebar" => json!({"op":"sidebar"}),
         "focus" => json!({"op":"native","action":"toggleFocus"}),
         "zoom-in" => json!({"op":"zoom-step","value":"1"}),
@@ -1510,6 +1512,13 @@ pub fn dispatch(s: &mut Shell, op: &str, r: &Value, commands: &mut Vec<Value>) {
                 s.notice = "Grouping tabs…".into();
             }
             s.menu.clear();
+        }
+        // Safari's Tab Overview: choosing a tab shows it.
+        "overview-open" => {
+            if let Some(id) = s.tabs().iter().find(|t| t["id"] == r["id"]).map(|t| t["id"].clone()) {
+                commands.push(json!({"op":"selectTab","id":id}));
+                s.screen = "browse".into();
+            }
         }
         // A gesture the page reported (from Neutrino's isolated world); the host checks its shape too.
         "gesture" => {

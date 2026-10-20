@@ -228,6 +228,22 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn safari_tab_overview_lists_tabs_and_opens_one() {
+    let mut s = shell();
+    s.snapshot["configuration"]["theme"]["preset"] = json!("safari");
+    s.snapshot["configuration"]["layout"]["tabs"] = json!("top");
+    let html = s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("aria-label=\"Show all tabs\""));
+    let html = s.dispatch(json!({"op":"screen","value":"overview"}))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("All tabs") && html.contains("data-op=\"overview-open\" data-id=\"c\"") && html.contains("overview-card active"));
+    let r = s.dispatch(json!({"op":"overview-open","id":"c"}));
+    assert_eq!(commands(&r)[0], json!({"op":"selectTab","id":"c"}));
+    assert_eq!(s.screen, "browse");
+    assert!(commands(&s.dispatch(json!({"op":"overview-open","id":"missing"}))).is_empty());
+    assert_eq!(commands(&s.dispatch(json!({"op":"run-action","value":"tab-overview"}))).len(), 0);
+    assert_eq!(s.screen, "overview");
+}
+#[test]
 fn choosing_a_mode_drops_a_themes_window_colours() {
     let mut s = shell();
     s.snapshot["configuration"]["theme"]["surfaceHex"] = json!("1c1420");

@@ -54,6 +54,29 @@ pub fn setting_toggle(label: &str, detail: &str, key: &str, value: bool) -> Mark
     html! {button class="toggle-row" data-op="setting" data-key=(key) data-value=((!value).to_string()) data-type="bool" role="switch" aria-checked=(value.to_string()) {span {strong{(label)}@if !detail.is_empty(){small{(detail)}}} span class=(if value{"switch on"}else{"switch"}) {span{}}}}
 }
 /// A switch for a built-in feature module, shown where its settings live.
+/// Safari's Tab Overview: every open tab as a card, with its picture when one was taken.
+pub fn tab_overview(s: &Shell) -> Markup {
+    let tabs: Vec<&Value> = s.tabs().iter().filter(|t| crate::render::tab_visible(t, s)).collect();
+    html! {div class="tab-overview" {
+        p class="section-description"{(format!("{} {}", tabs.len(), if tabs.len() == 1 {"tab"} else {"tabs"}))}
+        div class="overview-grid" {
+            @for t in &tabs {
+                @let id = text(t, "id");
+                @let name = tab_title(s, t);
+                @let picture = s.snapshot["tabThumbnails"][id].as_str().filter(|v| v.starts_with("data:image/jpeg;base64,") && v.len() <= 24_000);
+                div class=(if t["id"] == s.active()["id"] {"overview-card active"} else {"overview-card"}) {
+                    button class="overview-open" data-op="overview-open" data-id=(id) aria-current=[(t["id"] == s.active()["id"]).then_some("page")] {
+                        span class="overview-picture" {@if let Some(src) = picture {img src=(src) alt="";} @else {(crate::render::site(t))}}
+                        span class="overview-title"{(name)}
+                        @if !text(t, "url").is_empty() {small{(host(text(t, "url")))}}
+                    }
+                    button class="icon-button overview-close" data-op="closeTab" data-id=(id) title="Close tab" aria-label=(format!("Close {name}")){(icon("close"))}
+                }
+            }
+            button class="overview-card overview-new" data-op="newTab" {(icon("plus"))span{"New tab"}}
+        }
+    }}
+}
 /// Vivaldi's gesture mapping: each shape runs a page action or any browser command.
 fn gesture_settings(s: &Shell) -> Markup {
     html! {div class="gesture-list" role="group" aria-label="Mouse gestures" {

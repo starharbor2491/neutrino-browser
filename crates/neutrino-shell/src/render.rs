@@ -593,7 +593,7 @@ fn page_actions(s: &Shell, style: &str) -> Markup {
         @for item in &items {(toolbar_item(s, item, blank))}
         @if focus {button class="button focus-exit" data-op="native" data-action="toggleFocus" aria-label="Exit Focus mode"{(icon("focus"))"Exit Focus"}}
         @if !["chrome", "brave", "safari"].contains(&style) && !button_hidden(s, "bookmark") {(bookmark_button(s))}
-        @if style == "safari" {button class="icon-button" data-op="newTab" title="New tab (⌘T)" aria-label="New tab"{(icon("plus"))}}
+        @if style == "safari" {button class="icon-button" data-op="newTab" title="New tab (⌘T)" aria-label="New tab"{(icon("plus"))}button class="icon-button" data-op="screen" data-value="overview" title="Show all tabs" aria-label="Show all tabs"{(icon("grid"))}}
         button class="icon-button" data-op="menu" data-value="page" title=(if blank {"Page options: open a page first"} else {"Page options"}) aria-label="Page options"{(icon("more"))}
         // Chrome's, Brave's and GX's Extensions button, and Chrome's side panel.
         @if ["chrome", "brave", "gx"].contains(&style) && !items.contains(&"extensions") {button class="icon-button" data-op="menu" data-value="extensions-menu" title="Extensions" aria-label="Extensions"{(icon("plug"))}}
@@ -959,7 +959,7 @@ pub(crate) fn feedback(s: &Shell) -> Markup {
 }
 fn utility_page(s: &Shell) -> Markup {
     html! {section class="utility-screen" data-screen=(s.screen.as_str()) aria-label=(s.screen.as_str()){
-        header class="utility-header"{h1{(match s.screen.as_str(){"settings"=>"Settings","library"=>"Library","modules"=>"Modules","extensions"=>"Extensions","assistant"=>"Assistant","reader"=>"Reader","resources"=>"Resources","source"=>"Page source",_=>"Recovery"})}span class="spacer"{}@if s.screen=="reader" {(crate::views::reader_controls(s))}button class="button quiet" data-op="escape"{(icon("back"))"Back to browsing"}}
+        header class="utility-header"{h1{(match s.screen.as_str(){"settings"=>"Settings","library"=>"Library","modules"=>"Modules","extensions"=>"Extensions","assistant"=>"Assistant","reader"=>"Reader","resources"=>"Resources","source"=>"Page source","overview"=>"All tabs",_=>"Recovery"})}span class="spacer"{}@if s.screen=="reader" {(crate::views::reader_controls(s))}button class="button quiet" data-op="escape"{(icon("back"))"Back to browsing"}}
         (utility(s))
     }}
 }
@@ -1149,6 +1149,7 @@ fn utility(s: &Shell) -> Markup {
         "resources" => resources(s),
         "settings" => settings(s),
         "library" => library(s),
+        "overview" => crate::views::tab_overview(s),
         "assistant" => assistant(s),
         "reader" => {
             let r = &s.snapshot["preferences"]["readerStyle"];

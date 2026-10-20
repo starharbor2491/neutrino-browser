@@ -278,6 +278,7 @@ impl Shell {
                         "resources",
                         "recovery",
                         "source",
+                        "overview",
                     ]
                     .contains(&screen)
                     {
