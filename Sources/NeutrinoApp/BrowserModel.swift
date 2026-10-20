@@ -264,9 +264,10 @@ final class BrowserModel: ObservableObject {
             guard let self, !self.isPrivate, self.app.feature("password-manager") else { return }
             self.features?.offerToSave(origin: origin, username: username, password: password, profileID: self.session.profileID)
         }
-        tab.onGesture = { [weak self] shape in
-            guard let self, !self.isClosed, self.app.feature("mouse-gestures") else { return }
-            if self.session.selectedTabID != id { self.selectTab(id) }
+        tab.onGesture = { [weak self, weak tab] shape in
+            guard let self, let tab, !self.isClosed, self.app.feature("mouse-gestures") else { return }
+            // A gesture drawn on a tiled page acts on that page.
+            if let id = self.webTabs.first(where: { $0.value === tab })?.key, self.session.selectedTabID != id { self.selectTab(id) }
             self.shellAction?(["op": "gesture", "value": shape])
         }
         tab.onPeek = { [weak self] url in
