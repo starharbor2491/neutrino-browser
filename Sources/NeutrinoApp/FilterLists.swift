@@ -78,6 +78,20 @@ extension AppState {
         loadFilterLists()
     }
 
+    /// Lists the setup's blocking step chose, as Brave's Shields start with EasyList and EasyPrivacy.
+    func subscribeSetupFilterLists(_ chosen: [Any]) {
+        var lists = library.preferences.filterLists ?? []
+        for case let entry as [String: Any] in chosen.prefix(8) {
+            guard let id = entry["id"] as? String, !id.isEmpty, !lists.contains(where: { $0.id == id }),
+                  let raw = entry["url"] as? String, let url = URL(string: raw), url.scheme == "https" else { continue }
+            lists.append(FilterList(id: id, title: String((entry["title"] as? String ?? raw).prefix(80)), url: url))
+        }
+        guard lists.count != (library.preferences.filterLists ?? []).count else { return }
+        library.preferences.filterLists = lists
+        loadFilterLists()
+        Task { await refreshFilterLists(force: false) }
+    }
+
     /// Settings actions: turn a list on or off, add one by address, remove one, refresh all.
     func filterListCommand(_ command: [String: Any]) {
         var lists = library.preferences.filterLists ?? []

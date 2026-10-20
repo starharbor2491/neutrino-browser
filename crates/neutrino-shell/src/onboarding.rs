@@ -193,7 +193,7 @@ fn step(s: &Shell, id: &str) -> Markup {
         },
         "vivaldi-blocking" => html! {
             (heading("Tracker and ad blocking", "Choose how much to block. You can change this for each site."))
-            (blocking(s, [("none", "No blocking", "Load every page as its owner intended."), ("trackers", "Block trackers", "Stop sites following you around."), ("ads", "Block trackers and ads", "Also block common ad networks. Add filter lists such as EasyList in Settings for more.")]))
+            (blocking(s, [("none", "No blocking", "Load every page as its owner intended."), ("trackers", "Block trackers", "Stop sites following you around."), ("ads", "Block trackers and ads", "Also block ads, using EasyList. Add more filter lists in Settings.")]))
         },
         "vivaldi-done" => html! {(heading("You’re all set", "Your browser is ready. Open Settings any time to change your choices."))(default_browser(s))},
         // Brave
@@ -205,7 +205,7 @@ fn step(s: &Shell, id: &str) -> Markup {
         "brave-import" => html! {(heading("Import bookmarks and settings", "Bring them over from the browser you used before."))(import_list(s))},
         "brave-shields" => html! {
             (heading("Shields", "Shields block ads and trackers on every site. Lower them for one site from the shield button in the address bar."))
-            (blocking(s, [("ads", "Standard", "Blocks trackers and ads."), ("trackers", "Trackers only", "Blocks trackers; ads still show."), ("none", "Off", "Nothing is blocked.")]))
+            (blocking(s, [("ads", "Standard", "Blocks trackers and ads with EasyList and EasyPrivacy."), ("trackers", "Trackers only", "Blocks trackers; ads still show."), ("none", "Off", "Nothing is blocked.")]))
         },
         "brave-done" => html! {(heading("You’re all set", if flag(setup, "blockTrackers") {"Your Shields are up. Lower them for a site from the address bar."} else {"Shields are off. Turn them on from the shield button in the address bar."}))},
         // Chrome

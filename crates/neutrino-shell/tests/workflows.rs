@@ -228,6 +228,22 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn brave_shields_subscribe_easylist_like_brave() {
+    let finish = |preset: &str, level: &str| {
+        let mut s = Shell::default();
+        s.setup["preset"] = json!(preset);
+        s.dispatch(json!({"op":"setup-blocking","value":level}));
+        s.dispatch(json!({"op":"setup-step","value":99}));
+        let r = s.dispatch(json!({"op":"setup-finish"}));
+        let ids: Vec<String> = commands(&r)[0]["setup"]["filterLists"].as_array().unwrap().iter().map(|l| l["id"].as_str().unwrap().to_string()).collect();
+        ids
+    };
+    assert_eq!(finish("brave", "ads"), ["easylist", "easyprivacy"]);
+    assert_eq!(finish("vivaldi", "trackers"), ["easyprivacy"]);
+    assert!(finish("gx", "none").is_empty());
+    assert!(finish("neutrino", "ads").is_empty());
+}
+#[test]
 fn feeds_subscribe_from_the_page_and_open_entries() {
     let mut s = shell();
     s.snapshot["pageFeed"] = json!("https://example.com/feed.xml");

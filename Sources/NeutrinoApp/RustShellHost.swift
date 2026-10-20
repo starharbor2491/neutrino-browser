@@ -1175,6 +1175,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
                 app.library.preferences.webPanels = (app.library.preferences.webPanels ?? []) + [WebPanel(profileID: model.session.profileID, title: title, url: url)]
             }
         }
+        app.subscribeSetupFilterLists(values["filterLists"] as? [Any] ?? [])
         let modules = (values["modules"] as? [String: Any] ?? [:]).compactMapValues { $0 as? Bool }
         app.applySetupModules(modules)
         // A theme, layout, icon set or tab system chosen here restyles the browser after its preset.

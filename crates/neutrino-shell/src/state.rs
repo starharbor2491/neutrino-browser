@@ -798,6 +798,7 @@ impl Shell {
                         let mut setup = self.setup.clone();
                         setup["modules"] = crate::onboarding::module_choices(self);
                         setup["webPanels"] = json!(crate::appearance::setup_web_panels(&self.setup).iter().map(|(title, url)| json!({"title":title,"url":url})).collect::<Vec<_>>());
+                        setup["filterLists"] = json!(crate::appearance::setup_filter_lists(&self.setup).iter().filter_map(|id| crate::features::FILTER_LISTS.iter().find(|l| l.0 == *id)).map(|(id, title, url, _)| json!({"id":id,"title":title,"url":url})).collect::<Vec<_>>());
                         commands.push(json!({"op":"finishSetup","setup":setup,"configuration":crate::appearance::setup_configuration(&self.setup)}));
                         self.setup_busy = true;
                     }

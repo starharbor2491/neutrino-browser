@@ -71,6 +71,14 @@ pub fn setup_web_panels(setup: &Value) -> Vec<(&'static str, &'static str)> {
     }
     out
 }
+/// Filter lists the chosen browser's blocking step subscribes: Brave's Shields,
+/// Vivaldi's and Opera's blockers all build on EasyList for ads and EasyPrivacy for trackers.
+pub fn setup_filter_lists(setup: &Value) -> Vec<&'static str> {
+    if !["brave", "vivaldi", "gx"].contains(&setup["preset"].as_str().unwrap_or("")) || setup["blockTrackers"] == false {
+        return vec![];
+    }
+    if setup["blockAds"] == true { vec!["easylist", "easyprivacy"] } else { vec!["easyprivacy"] }
+}
 /// Opera GX's named color themes, applied as a custom accent.
 pub const GX_THEMES: &[(&str, &str)] = &[
     ("GX Classic", "fa1e4e"),
