@@ -5811,6 +5811,11 @@ input[type="color"] {
 .split-canvas[data-axis="stacked"] > .split-divider::after {
   inset: 3px 30%;
 }
+/* A tab from another window can be dropped anywhere in this one. */
+.browser-shell.tab-drop-incoming .page-frame {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
 /* Safari's Tab Overview */
 .overview-grid {
   display: grid;

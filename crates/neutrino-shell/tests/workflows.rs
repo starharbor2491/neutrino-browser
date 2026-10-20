@@ -228,6 +228,16 @@ fn setup_sends_module_choices_that_follow_the_chosen_browser() {
     assert_eq!(choices["org.neutrino.theme-native"], true);
 }
 #[test]
+fn a_tab_dropped_from_another_window_is_adopted() {
+    let mut s = shell();
+    let id = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+    assert_eq!(commands(&s.dispatch(json!({"op":"adopt-tab","id":id})))[0], json!({"op":"adoptTab","id":id}));
+    assert!(commands(&s.dispatch(json!({"op":"adopt-tab","id":"not-a-tab"}))).is_empty());
+    s.snapshot["private"] = json!(true);
+    s.dispatch(json!({"op":"sync","snapshot":s.snapshot.clone()}));
+    assert!(commands(&s.dispatch(json!({"op":"adopt-tab","id":id}))).is_empty());
+}
+#[test]
 fn safari_tab_overview_lists_tabs_and_opens_one() {
     let mut s = shell();
     s.snapshot["configuration"]["theme"]["preset"] = json!("safari");

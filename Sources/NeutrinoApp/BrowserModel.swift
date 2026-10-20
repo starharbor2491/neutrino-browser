@@ -765,6 +765,35 @@ final class BrowserModel: ObservableObject {
         if let live { attach(live, id: id) }
         selectTab(id)
     }
+    /// A tab dropped here from another window: it joins this window's Space, and its
+    /// page moves with it. Windows showing the same Space simply hand over the page.
+    func adoptTab(_ id: UUID, from source: BrowserModel) {
+        guard !isPrivate, !isClosed, !app.finalQuitDataFrozen, source !== self, !source.isPrivate,
+              source.session.profileID == session.profileID,
+              let from = source.session.spaceID, let destination = session.spaceID,
+              let fromIndex = app.library.spaces?.firstIndex(where: { $0.id == from }),
+              let toIndex = app.library.spaces?.firstIndex(where: { $0.id == destination }),
+              let descriptor = source.session.tabs.first(where: { $0.id == id }) else { return }
+        guard from != destination else { moveLiveTabHere(id); selectTab(id); return }
+        guard (app.library.spaces?[toIndex].tabs.count ?? 200) < 200 else { app.notice = "This Space is full. Close a tab first."; return }
+        moveLiveTabHere(id)
+        var moved = source.session.tabs.first(where: { $0.id == id }) ?? descriptor
+        moved.parentID = nil; moved.folderID = nil; moved.collapsed = nil
+        // One library transaction, so normalization never sees the tab twice.
+        var library = app.library
+        library.spaces?[fromIndex].tabs.removeAll { $0.id == id }
+        for i in library.spaces![fromIndex].tabs.indices where library.spaces![fromIndex].tabs[i].parentID == id {
+            library.spaces![fromIndex].tabs[i].parentID = descriptor.parentID
+        }
+        if library.spaces![fromIndex].tabs.isEmpty { library.spaces![fromIndex].tabs = [BrowserTab(engineID: profile.engineID ?? .chromium)] }
+        library.spaces?[toIndex].tabs.append(moved)
+        app.library = library
+        for window in app.windows.values.compactMap(\.model) {
+            if window.session.spaceID == from { window.receiveSharedTabs(library.spaces![fromIndex].tabs) }
+            if window.session.spaceID == destination { window.receiveSharedTabs(library.spaces![toIndex].tabs) }
+        }
+        selectTab(id)
+    }
     func captureChromiumSessions() {
         guard !isClosed, !app.finalQuitDataFrozen, !app.deletingProfileIDs.contains(session.profileID) else { return }
         for (id, tab) in webTabs {

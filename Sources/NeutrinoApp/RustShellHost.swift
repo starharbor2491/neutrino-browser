@@ -848,6 +848,9 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             }
         case "renameSpace":
             if let name = command["name"] as? String, let index = app.library.spaces?.firstIndex(where: { $0.id == id }) { app.library.spaces?[index].name = String(name.prefix(80)) }
+        case "adoptTab":
+            guard let model, let id, let source = app.windows.values.compactMap(\.model).first(where: { $0 !== model && $0.session.tabs.contains(where: { $0.id == id }) }) else { return }
+            model.adoptTab(id, from: source)
         case "moveTabToSpace":
             if let id, let raw = command["spaceID"] as? String, let space = UUID(uuidString: raw) { model?.moveTab(id, toSpace: space) }
         case "reorderSpaces":

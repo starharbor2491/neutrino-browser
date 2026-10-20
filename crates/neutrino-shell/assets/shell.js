@@ -1488,6 +1488,11 @@
     if (tab) {
       drag = { kind: "tab", id: tab.dataset.tab };
       tab.classList.add("drag-source");
+      // Another Neutrino window can take the tab: the id travels with the drag.
+      if (e.dataTransfer) {
+        e.dataTransfer.setData(FOREIGN_TAB, tab.dataset.tab);
+        e.dataTransfer.effectAllowed = "move";
+      }
     } else if (component) {
       drag = { kind: "component", component: component.dataset.component };
       root.querySelectorAll("[data-dock]").forEach((el) => {
@@ -1547,7 +1552,17 @@
     if (frame && lastDragPoint.x > frame.left - 48 && lastDragPoint.x < frame.right && lastDragPoint.y > frame.top - 48 && lastDragPoint.y < frame.bottom)
       armSplit(true);
   });
+  // A tab dragged here from another window: the whole window accepts it.
+  const FOREIGN_TAB = "application/x-neutrino-tab";
+  const foreignTab = (e) => !drag && [...(e.dataTransfer?.types || [])].includes(FOREIGN_TAB);
+  const markIncoming = (on) => root.querySelector(".browser-shell")?.classList.toggle("tab-drop-incoming", on);
   document.addEventListener("dragover", (e) => {
+    if (foreignTab(e)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      markIncoming(true);
+      return;
+    }
     if (!drag) return;
     lastDragPoint = { x: e.clientX, y: e.clientY };
     if (canSplitDrop() && e.target.closest?.(".page-frame")) armSplit(true);
@@ -1619,6 +1634,13 @@
     return e.clientY > r.top + r.height * 0.25 && e.clientY < r.bottom - r.height * 0.25;
   }
   document.addEventListener("drop", (e) => {
+    if (foreignTab(e)) {
+      e.preventDefault();
+      markIncoming(false);
+      const id = e.dataTransfer.getData(FOREIGN_TAB);
+      if (/^[0-9A-Fa-f-]{36}$/.test(id)) send({ op: "adopt-tab", id });
+      return;
+    }
     if (!drag) return;
     const target = dropTarget(e);
     if (!target) return;
@@ -1730,6 +1752,9 @@
   });
   document.addEventListener("dragend", () => { bookmarkDrag = null; });
   // A tab dropped outside the window opens in a new window, as in Chrome and Arc.
+  document.addEventListener("dragleave", (e) => {
+    if (!e.relatedTarget) markIncoming(false);
+  });
   document.addEventListener("dragend", (e) => {
     const outside = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth || e.clientY >= innerHeight;
     if (drag && drag.kind === "tab" && e.dataTransfer && e.dataTransfer.dropEffect === "none" && outside)

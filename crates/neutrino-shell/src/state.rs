@@ -729,6 +729,13 @@ impl Shell {
                         self.menu.clear();
                     }
                 }
+                // A tab dropped here from another window joins this window's Space.
+                "adopt-tab" => {
+                    let id = text(&request, "id");
+                    if !self.private() && id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+                        commands.push(json!({"op":"adoptTab","id":id}));
+                    }
+                }
                 "move-space" => {
                     if !self.private() && self.tabs().iter().any(|t| t["id"] == request["id"]) {
                         if let Some(space) = array(&self.snapshot["spaces"]).iter().find(|s| {
