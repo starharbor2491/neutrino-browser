@@ -257,7 +257,9 @@ jobs:
           else
             gh release create "v$release_version" --draft --prerelease --target "$GITHUB_SHA" --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
           fi
-          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json --clobber
+          # The Homebrew cask for this release; committing it as Casks/neutrino.rb updates the tap.
+          python3 scripts/update-cask.py --version "$release_version" --zip "release/Neutrino-$release_version-AppleSilicon.app.zip" --output release/neutrino.rb
+          gh release upload "v$release_version" release/*.app.zip release/*.dmg release/*-package.json release/catalog.json release/SHA256SUMS release/installed-smoke.json release/blink-acceptance.* release/signing-status.json release/sparkle-status.json release/research-*.json release/neutrino.rb --clobber
           gh release edit "v$release_version" --draft=false --title "$(cat release/RELEASE_TITLE)" --notes-file release/RELEASE.md
       - name: Publish signed Sparkle feed after release assets are public
         env:
