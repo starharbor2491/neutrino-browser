@@ -503,7 +503,23 @@ final class EngineViewContainer: NSView {
     var isPreviewing = false {
         didSet { setAccessibilityHidden(isPreviewing) }
     }
+    /// Where the interface draws over the page (a sidebar expanded above it), in this
+    /// view's coordinates. That part is masked out, and clicks there reach the interface.
+    var uncovered: NSRect = .zero {
+        didSet { if uncovered != oldValue { updateMask() } }
+    }
+    private func updateMask() {
+        guard let layer else { return }
+        let hole = uncovered.intersection(bounds)
+        guard !hole.isEmpty else { layer.mask = nil; return }
+        let mask = CAShapeLayer()
+        let path = CGMutablePath()
+        path.addRect(bounds); path.addRect(hole)
+        mask.path = path; mask.fillRule = .evenOdd; mask.frame = bounds
+        layer.mask = mask
+    }
     override func hitTest(_ point: NSPoint) -> NSView? {
+        if !uncovered.isEmpty, let superview, uncovered.contains(convert(point, from: superview)) { return nil }
         let hit = super.hitTest(point)
         return isPreviewing && hit != nil ? self : hit
     }
@@ -524,6 +540,7 @@ final class EngineViewContainer: NSView {
     override func layout() {
         super.layout()
         if let page, page.superview === self { page.frame = bounds }
+        updateMask()
     }
     func unmount() {
         if let page, page.superview === self { page.removeFromSuperview() }

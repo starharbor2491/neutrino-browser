@@ -832,14 +832,20 @@
             menu.top < p.y + p.height &&
             menu.bottom > p.y,
         );
+      // A sidebar drawn over the page (the icon-only sidebar expanded, or the hidden
+      // sidebar peeking in): the page leaves that part uncovered and stays visible.
+      const floating = root.querySelector(
+        ".compact-rail:not(.editing-preview) > .workspace-rail:is(:hover, :has(:focus-visible)), .browser-shell.rail-peek:not(.editing-preview) > .workspace-rail",
+      )?.getBoundingClientRect();
       native()
         .postMessage({
           kind: "geometry",
           generation,
           overlay:
-            currentOverlay || drag?.kind === "component" || splitArmed || !!overlapsMenu ||
-            // The icon-only sidebar expands over the page while hovered.
-            !!root.querySelector(".compact-rail:not(.editing-preview) > .workspace-rail:hover"),
+            currentOverlay || drag?.kind === "component" || splitArmed || !!overlapsMenu,
+          uncovered: floating && floating.width > 0
+            ? { x: floating.x, y: floating.y, width: floating.width, height: floating.height }
+            : null,
           editing: currentEditing,
           pages,
           menuRect: menu
@@ -856,7 +862,7 @@
     });
   }
   new ResizeObserver(scheduleGeometry).observe(root);
-  for (const type of ["mouseover", "mouseout"])
+  for (const type of ["mouseover", "mouseout", "focusin", "focusout"])
     document.addEventListener(type, (e) => {
       if (e.target.closest?.(".compact-rail > .workspace-rail")) scheduleGeometry();
     });

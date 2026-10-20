@@ -666,6 +666,12 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
         }
         guard !app.finalQuitDataFrozen, !showingOverlay, let model, !model.isClosed, body["overlay"] as? Bool == false,
               let pages = body["pages"] as? [[String: Any]], pages.count <= 3 else { container.hidePages(); return }
+        // A sidebar the interface draws over the pages, which leave that part uncovered.
+        var uncovered = NSRect.zero
+        if let r = body["uncovered"] as? [String: Double], let x = r["x"], let y = r["y"], let width = r["width"], let height = r["height"],
+           [x, y, width, height].allSatisfy(\.isFinite), width > 0, height > 0 {
+            uncovered = NSRect(x: x, y: y, width: width, height: height).intersection(container.bounds)
+        }
         var visible = Set<UUID>()
         let allowed = model.session.split.map { Set([$0.first, $0.second]) } ?? Set([model.session.selectedTabID])
         let webPanels = (app.library.preferences.webPanels ?? []).filter { $0.profileID == model.session.profileID }
@@ -682,6 +688,7 @@ final class RustShellCoordinator: NSObject, WKScriptMessageHandlerWithReply, WKN
             let view = container.mounted[id] ?? EngineViewContainer(page: tab.nativeView)
             if view.superview !== container { container.addSubview(view) }
             view.mount(tab.nativeView); view.frame = rect; view.isHidden = false
+            view.uncovered = uncovered.isEmpty ? .zero : view.convert(uncovered, from: container)
             view.isPreviewing = body["editing"] as? Bool == true
             view.identifier = NSUserInterfaceItemIdentifier("neutrino.page")
             view.wantsLayer = true; view.layer?.cornerRadius = min(34,max(0,(page["radius"] as? Double) ?? model.configuration.theme.cornerRadius)); view.layer?.cornerCurve = .continuous; view.layer?.masksToBounds = true
