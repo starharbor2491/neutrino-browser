@@ -330,8 +330,9 @@ final class BrowserFeatures {
         image.draw(in: NSRect(origin: .zero, size: NSSize(width: width, height: image.size.height * scale)).offsetBy(dx: 0, dy: small.size.height - image.size.height * scale))
         small.unlockFocus()
         thumbnails[id] = small
-        if model.configuration.layout.tabThumbnails == true, let tiff = small.tiffRepresentation,
-           let jpeg = NSBitmapImageRep(data: tiff)?.representation(using: .jpeg, properties: [.compressionFactor: 0.6]), jpeg.count <= 40_000 {
+        // Pictures in tab rows travel with every interface refresh, so they are small:
+        // 240 px wide, about the width a sidebar row shows, and at most 16 KB each.
+        if model.configuration.layout.tabThumbnails == true, let jpeg = Self.jpeg(small, maxWidth: 240, quality: 0.5), jpeg.count <= 16_000 {
             thumbnailData[id] = "data:image/jpeg;base64," + jpeg.base64EncodedString(); refresh()
         }
         let open = Set(model.session.tabs.map(\.id))
@@ -1098,7 +1099,7 @@ final class BrowserFeatures {
         }
         return out
     }
-    static func jpeg(_ image: NSImage, maxWidth: CGFloat) -> Data? {
+    static func jpeg(_ image: NSImage, maxWidth: CGFloat, quality: Double = 0.82) -> Data? {
         guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil), source.width > 0 else { return nil }
         let scale = min(1, maxWidth / CGFloat(source.width))
         let width = max(1, Int(CGFloat(source.width) * scale)), height = max(1, Int(CGFloat(source.height) * scale))
@@ -1107,7 +1108,7 @@ final class BrowserFeatures {
         context.interpolationQuality = .high
         context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let scaled = context.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: 0.82])
+        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: quality])
     }
     private static func describe(_ types: Set<String>) -> String {
         var parts: [String] = []

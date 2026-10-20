@@ -169,7 +169,7 @@ pub(crate) fn tab_row(t: &Value, s: &Shell, preview: bool) -> Markup {
     let sleeping = crate::views::sleeping(s, text(t, "id"));
     html! {div class=(format!("tab-row{}{}",if selected{" active"}else{""},if sleeping{" sleeping"}else{""})) data-tab=(text(t,"id")) data-group=(group) data-folder=(text(t,"folderID")) draggable=((!preview).to_string()) {
         @if children {button class="branch" data-op="toggleBranch" data-id=(text(t,"id")) aria-label=(format!("{} {}",if flag(t,"collapsed"){"Expand"}else{"Collapse"},text(t,"title"))) {(icon(if flag(t,"collapsed"){"forward"}else{"down"}))}}
-        @let thumb = s.snapshot["tabThumbnails"][text(t,"id")].as_str().filter(|v| flag(&s.config()["layout"], "tabThumbnails") && v.starts_with("data:image/jpeg;base64,") && v.len() <= 60_000);
+        @let thumb = s.snapshot["tabThumbnails"][text(t,"id")].as_str().filter(|v| flag(&s.config()["layout"], "tabThumbnails") && v.starts_with("data:image/jpeg;base64,") && v.len() <= 24_000);
         button class="tab-select" data-op="selectTab" data-id=(text(t,"id")) aria-current=[selected.then_some("page")] aria-label=(crate::views::tab_title(s,t)) title=[(!crate::features::on(s, "tab-previews")).then(|| crate::views::hover_card(s,t))] {@if let Some(src) = thumb {img class="tab-thumb" src=(src) alt="";}(site(t)) span{(crate::views::tab_title(s,t))}}
         (crate::views::tab_audio(s, t))
         button class="tab-close" data-op="closeTab" data-id=(text(t,"id")) title="Close tab (⌘W)" aria-label=(format!("Close {}",crate::views::tab_title(s,t))) {(icon("close"))}
