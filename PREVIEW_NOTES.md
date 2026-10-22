@@ -1,7 +1,1 @@
-- Choose Arc, Opera GX, Vivaldi, Brave, Chrome or Safari during setup. Setup, the start page and New tab then follow that browser; the default Neutrino layout stays minimal.
-- Every feature beyond core browsing is a module: pick yours during setup, and turn any of them off later.
-- Split view tiles up to four pages. Vivaldi tab stacks, Safari's Tab Overview, tab thumbnails, and dropping a tab into another window.
-- Brave Shields with EasyList and EasyPrivacy, fingerprinting protection, De-AMP and tracking-parameter removal in both engines.
-- Opera GX Control limits, themes, sounds and background music; Vivaldi panels, Feeds, Speed Dial groups and remappable mouse gestures.
-- A page assistant that streams answers and keeps follow-ups, and password import from Chrome-family browsers and Firefox.
-- Install with Homebrew: `brew tap starharbor2491/neutrino https://github.com/starharbor2491/neutrino-browser`, then `brew install --cask neutrino`.
+- Updates the Blink engine to Chromium 156.0.8078.17.
