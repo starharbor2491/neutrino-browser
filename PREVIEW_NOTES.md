@@ -1,1 +1,1 @@
-- Updates the Blink engine to Chromium 156.0.8078.17.
+- Updates the Blink engine to Chromium 156.0.8078.48.
