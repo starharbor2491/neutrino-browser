@@ -1,14 +1,14 @@
 {
   "format": 1,
-  "version": "156.0.26+g8ea0c73+chromium-156.0.8078.88",
+  "version": "156.0.27+ga10dae3+chromium-156.0.8078.88",
   "archives": {
     "arm64": {
       "platform": "macosarm64",
-      "sha256": "fb2b22354267e932c375cdb746355741669acf374fd7bb8e60e176b266d95d42"
+      "sha256": "b7defe200787caa2d8ed36d72453a8e15345a4216a455ad8347ac9c081a4d0eb"
     },
     "x86_64": {
       "platform": "macosx64",
-      "sha256": "efdfc9258d7b235e9dd3b35789e3f86b8f26d49abf28881ad875a5cae916952e"
+      "sha256": "3044dea7a260e4f67875535a7a592ddf642c0d5e33809ccc828c604166340681"
     }
   }
 }
