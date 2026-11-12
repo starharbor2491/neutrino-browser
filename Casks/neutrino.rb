@@ -1,6 +1,6 @@
 cask "neutrino" do
-  version "1.0.5-preview.7"
-  sha256 "7082f7b0d22ab1a38d82524418bd690d66da98a2e26ed068985ba9d0fe549f4f"
+  version "1.0.5-preview.8"
+  sha256 "c223d176bca45a340896c5ead6edf6d56bff80a635f3372ed4f982b94eaa3dd8"
 
   url "https://github.com/starharbor2491/neutrino-browser/releases/download/v#{version}/Neutrino-#{version}-AppleSilicon.app.zip"
   name "Neutrino"
